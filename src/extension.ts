@@ -21,6 +21,12 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() { }
 
 function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+	const styleUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'index.css')
+	);
+	const scriptUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'index.js')
+	);
 
 	return `
 <!DOCTYPE html>
@@ -29,9 +35,11 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): s
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Flow</title>
+    <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-    <div id="root">aaa</div>
+    <div id="root"></div>
+    <script src="${scriptUri}"></script>
 </body>
 </html>
 `;
