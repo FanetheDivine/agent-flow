@@ -13,21 +13,22 @@
 type Output = {
   output_name: string // 分支名称（在当前 agent 内唯一）
   output_desc: string // 分支描述（写入提示词，指导 AI 选择）
-  next_agent?: string // 目标 agent 的 agent_name；省略则表示终点
+  next_agent?: string // 下一个进入的 agent，省略则表示终点，可以是当前 agent
 }
 
 /** Agent = 具有多轮对话能力的独立任务执行单元 */
 type Agent = {
-  agent_name: string // 唯一标识
+  model?: string // Agent 使用的模型
+  agent_name: string // Agent 名称，唯一标识
   agent_prompt: string // 提示词，描述 agent 行为
-  not_entry?: boolean // 是否可作为 Flow 的入口 Agent
-  outputs: Output[] // 输出分支（同时定义该节点到其他节点的边）
+  is_entry?: boolean // 是否可作为 Flow 的入口 Agent
+  outputs?: Output[] // 输出分支，可以连接任意数量的 agent
 }
 
 /** Flow = Agent 作为节点构成的有向图 */
 type Flow = {
-  name: string
-  agents: Agent[] // agents[i].outputs[].next_agent 构成所有边
+  name: string // Flow 名称
+  agents?: Agent[] // 当前 Flow 内的 agent，其 outputs 定义了边
 }
 
 /** 单条消息记录 */
@@ -37,44 +38,48 @@ type Message = {
   timestamp: string
 }
 
-/** 单步执行记录（一个 Agent 的完整执行过程） */
+/** 单步执行记录，一个 Agent 的执行过程 */
 type Step = {
-  agentName: string
-  messages: Message[]
-  outputName?: string // AI 选择的分支名
-  outputContent: string // AI 的输出文本
+  agentName: string // Agent 名称
+  messages: Message[] // 消息列表
+  output?: {
+    // agent 完成后，AI 选择的输出分支名及输出内容
+    output_name: string // 输出分支名
+    content: string // 输出内容
+  }
 }
 
 /** 运行状态 */
 type RunState = {
-  id: string
-  flow: Flow
-  currentAgent: string // 当前活跃的 agent（同时仅一个）
-  status: 'running' | 'completed' | 'error'
-  steps: Step[]
-  shareValues: Record<string, string> // Flow 全局共享上下文，agent 间通过 MCP tool 读写
+  id: string // 运行 ID
+  currentAgent?: string // 当前活跃的 agent，最多一个
+  status: 'ready' | 'running' | 'completed' | 'error' // 运行状态
+  steps?: Step[] // 执行步骤列表
+  shareValues?: Record<string, string> // Flow 全局共享上下文，agent 间通过 MCP tool 读写
 }
 ```
 
 **设计要点**：
 
-- `Agent.outputs` 既是业务语义（输出分支），也是图的边定义——无需单独的边结构
+- `Agent.outputs` 可选，既是业务语义（输出分支），也是图的边定义——无需单独的边结构
 - `Agent.is_entry` 标记该 Agent 是否可作为入口：UI 据此过滤可选起点，`startRun` 据此校验
+- `Agent.model` 可选，指定该 Agent 使用的模型
 - `Step` 包含完整对话记录 `messages[]`，体现 Agent 的多轮对话本质
-- `RunState.currentAgent` 单值，强制"同一时间仅一个活跃 Agent"
-- `RunState.shareValues` 为字符串键值对，生命周期与单次 Run 绑定，不跨 Run 持久化
+- `RunState.currentAgent` 可选单值，强制"同一时间最多一个活跃 Agent"
+- `RunState.shareValues` 可选字符串键值对，生命周期与单次 Run 绑定，不跨 Run 持久化
+- `RunState.status` 包含 `ready` 初始状态
 - 无缓存/持久化——RunState 仅存在于运行期内存
 
 ### 2. Flow 校验
 
 校验规则如下
 
-| 规则                                           | 级别  |
-| ---------------------------------------------- | ----- |
-| `agent_name` 在 flow 内唯一                    | error |
-| `next_agent` 引用的 agent 存在                 | error |
-| `output_name` 在同一 agent 内唯一              | error |
-| Flow 中至少有一个非 `not_entry: true` 的 agent | error |
+| 规则                                        | 级别  |
+| ------------------------------------------- | ----- |
+| `agent_name` 在 flow 内唯一                 | error |
+| `next_agent` 引用的 agent 存在              | error |
+| `output_name` 在同一 agent 内唯一           | error |
+| Flow 中至少有一个 `is_entry: true` 的 agent | error |
 
 ### 3. FlowRunner
 
@@ -94,7 +99,7 @@ class FlowRunner {
   on(event: 'agentToolResult', cb: (result: unknown) => void): this
   on(
     event: 'agentComplete',
-    cb: (agentName: string, outputName: string, content: string) => void,
+    cb: (agentName: string, output: { output_name: string; content: string }) => void,
   ): this
   on(event: 'flowComplete', cb: (finalOutput: string) => void): this
   on(event: 'error', cb: (err: Error) => void): this
@@ -162,8 +167,10 @@ import {
 import { z } from 'zod'
 
 type ExecutorResult = {
-  outputName: string // AI 选择的分支名
-  outputContent: string // AI 的输出文本
+  output: {
+    output_name: string // AI 选择的分支名
+    content: string // AI 的输出内容
+  }
 }
 
 type ExecutorEvents = {
@@ -204,7 +211,7 @@ class ClaudeExecutor {
       async ({ output_name, content }) => {
         if (!this.completed) {
           this.completed = true
-          events.onComplete({ outputName: output_name, outputContent: content })
+          events.onComplete({ output: { output_name, content } })
         }
         return {
           content: [{ type: 'text' as const, text: `已确认完成，分支：${output_name}` }],
@@ -340,7 +347,7 @@ class ClaudeExecutor {
           // SDK 正常结束但 AI 未调用 AgentComplete（兜底）
           if (!this.completed) {
             this.completed = true
-            events.onComplete({ outputName: '', outputContent: msg.result })
+            events.onComplete({ output: { output_name: '', content: msg.result } })
           }
         } else {
           events.onError(new Error(msg.errors?.join('; ') ?? 'Unknown error'))
