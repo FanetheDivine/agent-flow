@@ -12,12 +12,30 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-flow-sidebar",
+          "title": "Agent Flow",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "agent-flow.helloWorld",
-        "title": "Hello World"
+        "command": "agent-flow.openPanel",
+        "title": "Open Agent Flow",
+        "icon": "resources/icon.svg"
       }
-    ]
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agent-flow.openPanel",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
