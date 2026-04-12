@@ -1,3 +1,6 @@
+@reference 'tailwindcss';
+
 .a {
-  color: red
+  color: red;
+  @apply text-2xl;
 }

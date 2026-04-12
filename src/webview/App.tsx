@@ -1,27 +1,30 @@
-import { FC, useState } from "react";
-import { Test } from "./components/Test";
+import { FC, useState } from 'react'
+import { Button } from 'antd'
+import { Test } from '@/webview/components/Test'
 
 export const App: FC = () => {
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState(0)
 
   return (
-    <div style={{ padding: 16, fontFamily: 'var(--vscode-font-family)', color: 'var(--vscode-foreground)' }}>
-      <h2 style={{ marginTop: 0 }}>Agent Flow</h2>
-      <p>Count: <strong>{count}</strong></p>
-      <button
-        onClick={() => setCount(c => c + 1)}
-        style={{
-          background: 'var(--vscode-button-background)',
-          color: 'var(--vscode-button-foreground)',
-          border: 'none',
-          padding: '4px 12px',
-          cursor: 'pointer',
-          borderRadius: 2,
-        }}
+    <div
+      className='p-4'
+      style={{
+        fontFamily: 'var(--vscode-font-family)',
+        color: 'var(--vscode-foreground)',
+      }}
+    >
+      <h2 className='m-0'>Agent Flow</h2>
+      <p>
+        Count: <strong>{count}</strong>
+      </p>
+      <Button
+        onClick={() => setCount((c) => c + 1)}
+        type='primary'
+        className='bg-white text-red-500'
       >
         +1
-      </button>
+      </Button>
       <Test />
     </div>
-  );
+  )
 }

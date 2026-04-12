@@ -11,49 +11,49 @@
 ```typescript
 /** Agent 的输出分支，同时定义有向图中的一条边 */
 type Output = {
-  output_name: string; // 分支名称（在当前 agent 内唯一）
-  output_desc: string; // 分支描述（写入提示词，指导 AI 选择）
-  next_agent?: string; // 目标 agent 的 agent_name；省略则表示终点
-};
+  output_name: string // 分支名称（在当前 agent 内唯一）
+  output_desc: string // 分支描述（写入提示词，指导 AI 选择）
+  next_agent?: string // 目标 agent 的 agent_name；省略则表示终点
+}
 
 /** Agent = 具有多轮对话能力的独立任务执行单元 */
 type Agent = {
-  agent_name: string; // 唯一标识
-  agent_prompt: string; // 提示词，描述 agent 行为
-  not_entry?: boolean; // 是否可作为 Flow 的入口 Agent
-  outputs: Output[]; // 输出分支（同时定义该节点到其他节点的边）
-};
+  agent_name: string // 唯一标识
+  agent_prompt: string // 提示词，描述 agent 行为
+  not_entry?: boolean // 是否可作为 Flow 的入口 Agent
+  outputs: Output[] // 输出分支（同时定义该节点到其他节点的边）
+}
 
 /** Flow = Agent 作为节点构成的有向图 */
 type Flow = {
-  name: string;
-  agents: Agent[]; // agents[i].outputs[].next_agent 构成所有边
-};
+  name: string
+  agents: Agent[] // agents[i].outputs[].next_agent 构成所有边
+}
 
 /** 单条消息记录 */
 type Message = {
-  role: "user" | "agent";
-  content: string;
-  timestamp: string;
-};
+  role: 'user' | 'agent'
+  content: string
+  timestamp: string
+}
 
 /** 单步执行记录（一个 Agent 的完整执行过程） */
 type Step = {
-  agentName: string;
-  messages: Message[];
-  outputName?: string; // AI 选择的分支名
-  outputContent: string; // AI 的输出文本
-};
+  agentName: string
+  messages: Message[]
+  outputName?: string // AI 选择的分支名
+  outputContent: string // AI 的输出文本
+}
 
 /** 运行状态 */
 type RunState = {
-  id: string;
-  flow: Flow;
-  currentAgent: string; // 当前活跃的 agent（同时仅一个）
-  status: "running" | "completed" | "error";
-  steps: Step[];
-  shareValues: Record<string, string>; // Flow 全局共享上下文，agent 间通过 MCP tool 读写
-};
+  id: string
+  flow: Flow
+  currentAgent: string // 当前活跃的 agent（同时仅一个）
+  status: 'running' | 'completed' | 'error'
+  steps: Step[]
+  shareValues: Record<string, string> // Flow 全局共享上下文，agent 间通过 MCP tool 读写
+}
 ```
 
 **设计要点**：
@@ -85,27 +85,27 @@ class FlowRunner {
   /**
    * 传入 Flow 对象创建实例。
    */
-  constructor(flow: Flow);
+  constructor(flow: Flow)
 
   // 订阅Flow事件
-  on(event: "agentStart", cb: (agent: Agent, input: string) => void): this;
-  on(event: "agentOutput", cb: (chunk: string) => void): this;
-  on(event: "agentToolUse", cb: (tool: string, input: unknown) => void): this;
-  on(event: "agentToolResult", cb: (result: unknown) => void): this;
+  on(event: 'agentStart', cb: (agent: Agent, input: string) => void): this
+  on(event: 'agentOutput', cb: (chunk: string) => void): this
+  on(event: 'agentToolUse', cb: (tool: string, input: unknown) => void): this
+  on(event: 'agentToolResult', cb: (result: unknown) => void): this
   on(
-    event: "agentComplete",
+    event: 'agentComplete',
     cb: (agentName: string, outputName: string, content: string) => void,
-  ): this;
-  on(event: "flowComplete", cb: (finalOutput: string) => void): this;
-  on(event: "error", cb: (err: Error) => void): this;
+  ): this
+  on(event: 'flowComplete', cb: (finalOutput: string) => void): this
+  on(event: 'error', cb: (err: Error) => void): this
 
   // 向Flow发出指令
-  emit(event: "start", payload: { agentName: string; input: string }): void;
-  emit(event: "userMessage", payload: { message: string }): void;
-  emit(event: "cancel"): void;
+  emit(event: 'start', payload: { agentName: string; input: string }): void
+  emit(event: 'userMessage', payload: { message: string }): void
+  emit(event: 'cancel'): void
 
   // 同步状态查询
-  getState(): RunState | null; // 未 start 前返回 null
+  getState(): RunState | null // 未 start 前返回 null
 }
 ```
 
@@ -127,12 +127,12 @@ class FlowRunner {
 
 #### 4.1 MCP Tool Schema
 
-| 工具名 | 描述 | 入参 | 返回 |
-|---|---|---|---|
-| `AgentComplete` | 标记当前 Agent 完成并选择输出分支 | `output_name: string`（枚举）, `content: string` | `void`（确认文本） |
-| `setShareValues` | 批量写入键值对到共享上下文 | `values: Record<string, string>` | `void`（确认文本） |
-| `getShareValues` | 按键列表读取共享上下文 | `keys: string[]` | `Record<string, string>`（JSON） |
-| `getAllShareValues` | 读取共享上下文全部键值对 | _(无)_ | `Record<string, string>`（JSON） |
+| 工具名              | 描述                              | 入参                                             | 返回                             |
+| ------------------- | --------------------------------- | ------------------------------------------------ | -------------------------------- |
+| `AgentComplete`     | 标记当前 Agent 完成并选择输出分支 | `output_name: string`（枚举）, `content: string` | `void`（确认文本）               |
+| `setShareValues`    | 批量写入键值对到共享上下文        | `values: Record<string, string>`                 | `void`（确认文本）               |
+| `getShareValues`    | 按键列表读取共享上下文            | `keys: string[]`                                 | `Record<string, string>`（JSON） |
+| `getAllShareValues` | 读取共享上下文全部键值对          | _(无)_                                           | `Record<string, string>`（JSON） |
 
 ```typescript
 // setShareValues
@@ -158,26 +158,26 @@ import {
   createSdkMcpServer,
   type SDKMessage,
   type Query,
-} from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
+} from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 
 type ExecutorResult = {
-  outputName: string; // AI 选择的分支名
-  outputContent: string; // AI 的输出文本
-};
+  outputName: string // AI 选择的分支名
+  outputContent: string // AI 的输出文本
+}
 
 type ExecutorEvents = {
-  onOutput: (chunk: string) => void; // Claude 文本输出 → 转发 UI
-  onToolUse: (tool: string, input: any) => void; // 工具调用事件 → 转发 UI
-  onToolResult: (result: any) => void; // 工具结果 → 转发 UI
-  onComplete: (result: ExecutorResult) => void; // agent 完成
-  onError: (err: Error) => void;
-};
+  onOutput: (chunk: string) => void // Claude 文本输出 → 转发 UI
+  onToolUse: (tool: string, input: any) => void // 工具调用事件 → 转发 UI
+  onToolResult: (result: any) => void // 工具结果 → 转发 UI
+  onComplete: (result: ExecutorResult) => void // agent 完成
+  onError: (err: Error) => void
+}
 
 class ClaudeExecutor {
-  private queryInstance: Query | null = null;
-  private abortController: AbortController | null = null;
-  private completed = false;
+  private queryInstance: Query | null = null
+  private abortController: AbortController | null = null
+  private completed = false
 
   /** 启动 Agent SDK query，注入 AgentComplete + ShareValues 三个工具 */
   async start(
@@ -186,108 +186,97 @@ class ClaudeExecutor {
     shareValues: Record<string, string>,
     events: ExecutorEvents,
   ): Promise<void> {
-    this.completed = false;
-    this.abortController = new AbortController();
+    this.completed = false
+    this.abortController = new AbortController()
 
     // ── AgentComplete ──────────────────────────────────────────────────────
     // 根据当前 agent 的 outputs 动态生成 output_name 枚举
-    const outputNames = outputs.map((o) => o.output_name);
-    const outputDescs = outputs
-      .map((o) => `  - "${o.output_name}": ${o.output_desc}`)
-      .join("\n");
+    const outputNames = outputs.map((o) => o.output_name)
+    const outputDescs = outputs.map((o) => `  - "${o.output_name}": ${o.output_desc}`).join('\n')
 
     const agentCompleteTool = tool(
-      "AgentComplete",
+      'AgentComplete',
       `当前任务已完成时调用此工具，选择输出分支并提交最终内容。\n可选分支：\n${outputDescs}`,
       {
-        output_name: z
-          .enum(outputNames as [string, ...string[]])
-          .describe("选择的输出分支名"),
-        content: z
-          .string()
-          .describe("输出内容，将传递给下一个 Agent 或作为最终结果"),
+        output_name: z.enum(outputNames as [string, ...string[]]).describe('选择的输出分支名'),
+        content: z.string().describe('输出内容，将传递给下一个 Agent 或作为最终结果'),
       },
       async ({ output_name, content }) => {
         if (!this.completed) {
-          this.completed = true;
-          events.onComplete({ outputName: output_name, outputContent: content });
+          this.completed = true
+          events.onComplete({ outputName: output_name, outputContent: content })
         }
         return {
-          content: [{ type: "text" as const, text: `已确认完成，分支：${output_name}` }],
-        };
+          content: [{ type: 'text' as const, text: `已确认完成，分支：${output_name}` }],
+        }
       },
-    );
+    )
 
     // ── setShareValues ─────────────────────────────────────────────────────
     // 批量写入，避免多次单键调用的开销
     const setShareValuesTool = tool(
-      "setShareValues",
-      "批量写入键值对到 Flow 全局共享上下文（shareValues），供后续 Agent 读取",
+      'setShareValues',
+      '批量写入键值对到 Flow 全局共享上下文（shareValues），供后续 Agent 读取',
       {
         values: z
           .record(z.string(), z.string())
-          .describe("要写入的键值对，例如：{ \"result\": \"foo\", \"status\": \"done\" }"),
+          .describe('要写入的键值对，例如：{ "result": "foo", "status": "done" }'),
       },
       async ({ values }) => {
-        Object.assign(shareValues, values);
-        const keys = Object.keys(values).join(", ");
+        Object.assign(shareValues, values)
+        const keys = Object.keys(values).join(', ')
         return {
-          content: [{ type: "text" as const, text: `已写入 ${Object.keys(values).length} 个键：${keys}` }],
-        };
+          content: [
+            { type: 'text' as const, text: `已写入 ${Object.keys(values).length} 个键：${keys}` },
+          ],
+        }
       },
-    );
+    )
 
     // ── getShareValues ─────────────────────────────────────────────────────
     // 按需读取，避免无谓地暴露全量数据
     const getShareValuesTool = tool(
-      "getShareValues",
-      "按键列表读取 Flow 全局共享上下文中的值，缺失的键返回 null",
+      'getShareValues',
+      '按键列表读取 Flow 全局共享上下文中的值，缺失的键返回 null',
       {
-        keys: z
-          .array(z.string())
-          .describe("要读取的键名数组，例如：[\"result\", \"status\"]"),
+        keys: z.array(z.string()).describe('要读取的键名数组，例如：["result", "status"]'),
       },
       async ({ keys }) => {
-        const result: Record<string, string | null> = {};
+        const result: Record<string, string | null> = {}
         for (const key of keys) {
-          result[key] = shareValues[key] ?? null;
+          result[key] = shareValues[key] ?? null
         }
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
-        };
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        }
       },
-    );
+    )
 
     // ── getAllShareValues ──────────────────────────────────────────────────
     // 全量读取，适用于需要完整上下文的场景
     const getAllShareValuesTool = tool(
-      "getAllShareValues",
-      "读取 Flow 全局共享上下文的全部键值对",
+      'getAllShareValues',
+      '读取 Flow 全局共享上下文的全部键值对',
       {},
       async () => {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(shareValues) }],
-        };
+          content: [{ type: 'text' as const, text: JSON.stringify(shareValues) }],
+        }
       },
-    );
+    )
 
     // ── 创建内联 MCP 服务器 ────────────────────────────────────────────────
     const mcpServer = createSdkMcpServer({
-      name: "AgentControllerMcp",
-      version: "1.0.0",
-      tools: [
-        agentCompleteTool,
-        setShareValuesTool,
-        getShareValuesTool,
-        getAllShareValuesTool,
-      ],
-    });
+      name: 'AgentControllerMcp',
+      version: '1.0.0',
+      tools: [agentCompleteTool, setShareValuesTool, getShareValuesTool, getAllShareValuesTool],
+    })
 
     this.queryInstance = query({
       prompt,
       options: {
         abortController: this.abortController,
-        permissionMode: "bypassPermissions",
+        permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         mcpServers: { AgentControllerMcp: mcpServer },
         // 可按需配置：
@@ -297,66 +286,66 @@ class ClaudeExecutor {
         // allowedTools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"],
         // env: { ANTHROPIC_API_KEY: "...", ANTHROPIC_BASE_URL: "..." },
       },
-    });
+    })
 
     try {
       for await (const message of this.queryInstance) {
-        this.handleMessage(message, events);
+        this.handleMessage(message, events)
       }
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        events.onError(err as Error);
+      if ((err as Error).name !== 'AbortError') {
+        events.onError(err as Error)
       }
     }
   }
 
   /** 从 UI 转发用户消息到 SDK（支持多轮对话） */
   async sendUserMessage(message: string): Promise<void> {
-    if (!this.queryInstance) return;
+    if (!this.queryInstance) return
     await this.queryInstance.streamInput(
       (async function* () {
-        yield { type: "user" as const, message };
+        yield { type: 'user' as const, message }
       })(),
-    );
+    )
   }
 
   /** 终止执行 */
   kill(): void {
-    this.abortController?.abort();
-    this.queryInstance?.close();
-    this.queryInstance = null;
+    this.abortController?.abort()
+    this.queryInstance?.close()
+    this.queryInstance = null
   }
 
   /** 解析 SDK 消息并触发对应事件 */
   private handleMessage(msg: SDKMessage, events: ExecutorEvents): void {
     switch (msg.type) {
-      case "assistant": {
-        const content = msg.message?.content;
+      case 'assistant': {
+        const content = msg.message?.content
         if (Array.isArray(content)) {
           for (const block of content) {
-            if (block.type === "text") events.onOutput(block.text);
-            if (block.type === "tool_use") events.onToolUse(block.name, block.input);
+            if (block.type === 'text') events.onOutput(block.text)
+            if (block.type === 'tool_use') events.onToolUse(block.name, block.input)
           }
         }
-        break;
+        break
       }
-      case "user": {
+      case 'user': {
         if (msg.tool_use_result !== undefined) {
-          events.onToolResult(msg.tool_use_result);
+          events.onToolResult(msg.tool_use_result)
         }
-        break;
+        break
       }
-      case "result": {
-        if (msg.subtype === "success") {
+      case 'result': {
+        if (msg.subtype === 'success') {
           // SDK 正常结束但 AI 未调用 AgentComplete（兜底）
           if (!this.completed) {
-            this.completed = true;
-            events.onComplete({ outputName: "", outputContent: msg.result });
+            this.completed = true
+            events.onComplete({ outputName: '', outputContent: msg.result })
           }
         } else {
-          events.onError(new Error(msg.errors?.join("; ") ?? "Unknown error"));
+          events.onError(new Error(msg.errors?.join('; ') ?? 'Unknown error'))
         }
-        break;
+        break
       }
     }
   }
