@@ -55,6 +55,7 @@
   "dependencies": {
     "@ant-design/cssinjs": "^2.1.2",
     "@ant-design/icons": "^6.1.1",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.104",
     "@eslint/js": "^10.0.1",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/lodash-es": "^4.17.12",
