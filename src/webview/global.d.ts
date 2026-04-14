@@ -12,3 +12,8 @@ interface VsCodeApi {
 }
 
 declare function acquireVsCodeApi(): VsCodeApi
+
+type Style = {
+  className?: string
+  style?: React.CSSProperties
+}

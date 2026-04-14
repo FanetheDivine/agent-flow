@@ -50,8 +50,7 @@
     "check-types": "tsc --noEmit",
     "format": "prettier --write .",
     "lint": "eslint src",
-    "test": "vscode-test",
-    "try-sdk": "node src/example/try-sdk.ts"
+    "test": "vscode-test"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^2.1.2",
@@ -67,6 +66,7 @@
     "@types/vscode": "^1.115.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "@xyflow/react": "^12.10.2",
     "ahooks": "^3.9.7",
     "antd": "^6.3.5",
     "clsx": "^2.1.1",

@@ -36,3 +36,26 @@
     @apply overflow-hidden;
   }
 }
+
+/* ReactFlow dark theme overrides */
+.react-flow__controls button {
+  background: #1e1e2e !important;
+  border-color: #45475a !important;
+  fill: #cdd6f4 !important;
+}
+
+.react-flow__controls button:hover {
+  background: #313244 !important;
+}
+
+.react-flow__controls button svg {
+  fill: #cdd6f4 !important;
+}
+
+.react-flow__edge-textbg {
+  fill: #1e1e2e !important;
+}
+
+.react-flow__attribution {
+  display: none !important;
+}

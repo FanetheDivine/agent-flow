@@ -1,28 +1,10 @@
-import { FC, useEffect, useState } from 'react'
-import { Button } from 'antd'
-import { postMessageToExtension, subscribeExtensionMessage } from './utils/ExtensionMessage'
+import { FC, useState } from 'react'
+import type { Flow } from '@/common'
+import { AgentFlow } from './components/AgentFlow'
+import { presetFlow } from './components/AgentFlow/presetFlow'
 
 export const App: FC = () => {
-  const [str, setStr] = useState('')
-  useEffect(() => {
-    const cleanup = subscribeExtensionMessage((v) => setStr((s) => s + '\n' + JSON.stringify(v)))
-    return cleanup
-  }, [])
-  return (
-    <>
-      {str}
-      <Button
-        onClick={() => {
-          postMessageToExtension({
-            type: 'loadFlow',
-            data: {
-              name: 'a',
-            },
-          })
-        }}
-      >
-        aaa
-      </Button>
-    </>
-  )
+  const [flow, setFlow] = useState<Flow>(presetFlow)
+
+  return <AgentFlow flow={flow} onFlowChange={setFlow} mode='run' />
 }
