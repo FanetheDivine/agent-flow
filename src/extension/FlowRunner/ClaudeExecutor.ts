@@ -1,6 +1,6 @@
 import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { Agent, AIMessageType } from '@/common'
-import { buildAgentMcpServer, buildAgentPrompt } from '@/common/agent'
+import { buildAgentMcpServer, buildAgentPrompt } from '@/common'
 
 export type ExecutorResult = {
   outputName?: string
@@ -96,6 +96,7 @@ export class ClaudeExecutor {
       options.resume = this.sessionId
     }
 
+    // eslint-disable-next-line no-async-promise-executor
     return new Promise<void>(async (resolve) => {
       this.queryInstance = query({
         prompt: this.userInputStream.iterable,
@@ -127,7 +128,6 @@ export class ClaudeExecutor {
 function createMessageChannel<T>() {
   const queue: T[] = []
   let resolve: (() => void) | null = null
-  let done = false
 
   const push = (value: T) => {
     queue.push(value)
@@ -139,7 +139,7 @@ function createMessageChannel<T>() {
     [Symbol.asyncIterator]() {
       return {
         async next() {
-          while (queue.length === 0 && !done) {
+          while (queue.length === 0) {
             await new Promise<void>((r) => (resolve = r))
           }
           if (queue.length > 0) {

@@ -4,6 +4,7 @@ import type { Agent } from './index'
 
 // ── Prompt ─────────────────────────────────────────────────────────────────
 
+/** Agent的系统提示词 */
 export const FlowPrompt: string[] = [
   '你是一个工作流中的 Agent，通过**任务描述**和多轮对话完成一项任务。',
   '当前工作流的所有 Agent 共享一份全局数据（**shareValues**），你可以使用 AgentControllerMcp 提供的工具来读写共享数据：',

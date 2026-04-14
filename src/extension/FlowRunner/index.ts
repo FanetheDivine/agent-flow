@@ -8,14 +8,14 @@ import {
 } from '@/common'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 
-type SignalHandler<K extends keyof FlowSignalEvents> = (...args: FlowSignalEvents[K]) => void
+type SignalHandler<K extends keyof FlowSignalEvents> = (data: FlowSignalEvents[K]) => void
 
 export class FlowRunner {
   readonly flow: Flow
 
   private runState: RunState = { steps: [], shareValues: {} }
   private currentExecutor: ClaudeExecutor | null = null
-  private currentId: string | null = null
+  private currentRunId: string | null = null
   private currentSessionId: string | null = null
   private currentAgentName: string | null = null
   private signalListeners = new Map<keyof FlowSignalEvents, Set<SignalHandler<any>>>()
@@ -40,16 +40,16 @@ export class FlowRunner {
   }
 
   /** 向 Flow 发送 command 指令 */
-  emit<K extends keyof FlowCommandEvents>(event: K, ...args: FlowCommandEvents[K]): void {
+  emit<K extends keyof FlowCommandEvents>(event: K, data: FlowCommandEvents[K]): void {
     match(event as keyof FlowCommandEvents)
       .with('flow.command.flowStart', () => {
-        this.handleFlowStart(...(args as FlowCommandEvents['flow.command.flowStart']))
+        this.handleFlowStart(data as FlowCommandEvents['flow.command.flowStart'])
       })
       .with('flow.command.userMessage', () => {
-        this.handleUserMessage(...(args as FlowCommandEvents['flow.command.userMessage']))
+        this.handleUserMessage(data as FlowCommandEvents['flow.command.userMessage'])
       })
       .with('flow.command.interrupt', () => {
-        this.handleInterrupt(...(args as FlowCommandEvents['flow.command.interrupt']))
+        this.handleInterrupt(data as FlowCommandEvents['flow.command.interrupt'])
       })
       .exhaustive()
   }
@@ -62,12 +62,12 @@ export class FlowRunner {
 
   // ── signal 发射 ─────────────────────────────────────────────────────────
 
-  private fire<K extends keyof FlowSignalEvents>(event: K, ...args: FlowSignalEvents[K]): void {
+  private fire<K extends keyof FlowSignalEvents>(event: K, data: FlowSignalEvents[K]): void {
     const set = this.signalListeners.get(event)
     if (!set) return
     for (const handler of set) {
       try {
-        handler(...args)
+        handler(data)
       } catch (err) {
         console.error(`[FlowRunner] signal handler error (${event}):`, err)
       }
@@ -76,49 +76,62 @@ export class FlowRunner {
 
   // ── command 处理 ────────────────────────────────────────────────────────
 
-  private handleFlowStart(...[key, agentName]: FlowCommandEvents['flow.command.flowStart']): void {
+  private handleFlowStart({
+    runKey,
+    agentName,
+  }: FlowCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
 
     // 校验 agent 存在且为 entry
     const agent = this.findAgent(agentName)
     if (!agent) {
-      this.fire('flow.signal.error', `Agent "${agentName}" not found in flow`)
+      this.fire('flow.signal.error', { msg: `Agent "${agentName}" not found in flow` })
       return
     }
 
     // 重置运行状态
     this.runState = { steps: [], shareValues: {} }
-    this.currentId = crypto.randomUUID()
+    this.currentRunId = crypto.randomUUID()
 
-    // 启动 agent（session_id 由 executor 从 SDK 获取后回调）
-    const id = this.currentId!
+    // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
+    const runId = this.currentRunId!
     this.runAgent(agent, (sessionId) => {
-      this.fire('flow.signal.flowStart', id, key, sessionId, agent.agent_name)
+      this.fire('flow.signal.flowStart', {
+        runId,
+        runKey,
+        sessionId,
+        agentName: agent.agent_name,
+      })
     })
   }
 
-  private handleUserMessage(
-    ...[id, sessionId, message]: FlowCommandEvents['flow.command.userMessage']
-  ): void {
-    if (!this.checkSession(id, sessionId)) return
+  private handleUserMessage({
+    runId,
+    sessionId,
+    message,
+  }: FlowCommandEvents['flow.command.userMessage']): void {
+    if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 
     // 直接转发完整 UserMessageType 给 executor
     this.currentExecutor.sendUserMessage(message)
 
     // 回显
-    this.fire('flow.signal.userMessage', id, sessionId, message)
+    this.fire('flow.signal.userMessage', { runId, sessionId, message })
   }
 
-  private async handleInterrupt(...[id, sessionId]: FlowCommandEvents['flow.command.interrupt']) {
-    if (!this.checkSession(id, sessionId)) return
+  private async handleInterrupt({ runId, sessionId }: FlowCommandEvents['flow.command.interrupt']) {
+    if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 
     // 调用 executor 的 interrupt，内部处理中断+后续 resume 逻辑
     await this.currentExecutor.interrupt()
     this.updateAgentStatus('ready')
-    this.fire('flow.signal.agentInterruptted', this.currentId!, this.currentSessionId!)
+    this.fire('flow.signal.agentInterrupted', {
+      runId: this.currentRunId!,
+      sessionId: this.currentSessionId!,
+    })
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
@@ -127,7 +140,7 @@ export class FlowRunner {
     this.currentAgentName = agent.agent_name
     this.updateAgentStatus('preparing')
 
-    const id = this.currentId!
+    const runId = this.currentRunId!
 
     // 初始化当前 step
     this.runState.steps.push({
@@ -142,20 +155,20 @@ export class FlowRunner {
       onMessage: (message) => {
         const sessionId = this.currentSessionId
         if (!sessionId) return
-        this.fire('flow.signal.aiMessage', id, sessionId, message)
+        this.fire('flow.signal.aiMessage', { runId, sessionId, message })
       },
       onComplete: (result) => {
         this.onAgentComplete(agent, result)
       },
       onError: (err) => {
-        this.fire('flow.signal.agentError', id, agent.agent_name, err)
+        this.fire('flow.signal.agentError', { runId, agentName: agent.agent_name, err })
         this.updateAgentStatus('completed')
       },
     })
   }
 
   private onAgentComplete(agent: Agent, result: ExecutorResult): void {
-    const id = this.currentId!
+    const runId = this.currentRunId!
     const sessionId = this.currentSessionId!
 
     // 记录 step output
@@ -174,7 +187,7 @@ export class FlowRunner {
     if (nextAgentName) {
       const nextAgent = this.findAgent(nextAgentName)
       if (!nextAgent) {
-        this.fire('flow.signal.error', `Next agent "${nextAgentName}" not found`)
+        this.fire('flow.signal.error', { msg: `Next agent "${nextAgentName}" not found` })
         this.updateAgentStatus('completed')
         return
       }
@@ -182,14 +195,16 @@ export class FlowRunner {
       // 切换到下一个 agent
       this.runAgent(nextAgent, (newSessionId) => {
         this.currentSessionId = newSessionId
-        this.fire('flow.signal.agentComplete', id, sessionId, result.content, {
-          name: result.outputName!,
-          session_id: newSessionId,
+        this.fire('flow.signal.agentComplete', {
+          runId,
+          sessionId,
+          content: result.content,
+          output: { name: result.outputName!, newSessionId },
         })
       })
     } else {
       // Flow 结束
-      this.fire('flow.signal.agentComplete', id, sessionId, result.content, undefined)
+      this.fire('flow.signal.agentComplete', { runId, sessionId, content: result.content })
       this.updateAgentStatus('completed')
     }
   }
@@ -200,8 +215,8 @@ export class FlowRunner {
     return (this.flow.agents ?? []).find((a) => a.agent_name === name)
   }
 
-  private checkSession(id: string, sessionId: string): boolean {
-    if (id !== this.currentId || sessionId !== this.currentSessionId) {
+  private checkSession(runId: string, sessionId: string): boolean {
+    if (runId !== this.currentRunId || sessionId !== this.currentSessionId) {
       return false
     }
     return true
