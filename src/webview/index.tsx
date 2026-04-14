@@ -1,6 +1,6 @@
 import { FC, PropsWithChildren } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App as AntdApp, ConfigProvider } from 'antd'
+import { App as AntdApp, ConfigProvider, theme } from 'antd'
 import zh_CN from 'antd/es/locale/zh_CN'
 import { StyleProvider } from '@ant-design/cssinjs'
 import 'dayjs/locale/zh-cn'
@@ -12,7 +12,7 @@ import './utils/ExtensionMessage'
 const AntdProvider: FC<PropsWithChildren> = (props) => {
   return (
     <StyleProvider layer>
-      <ConfigProvider locale={zh_CN}>
+      <ConfigProvider locale={zh_CN} theme={{ algorithm: theme.darkAlgorithm }}>
         <AntdApp className='app'> {props.children}</AntdApp>
       </ConfigProvider>
     </StyleProvider>
