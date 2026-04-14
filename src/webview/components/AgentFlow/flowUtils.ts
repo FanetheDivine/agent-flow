@@ -134,10 +134,15 @@ export function reactFlowToFlow(name: string, nodes: AgentNode[], edges: Edge[])
   for (const edge of edges) {
     const sourceAgent = agentMap.get(edge.source)
     if (!sourceAgent) continue
+    const outputName = edge.sourceHandle?.startsWith('output-')
+      ? edge.sourceHandle.slice('output-'.length)
+      : 'default'
+    const sourceNode = nodes.find((n) => n.id === edge.source)
+    const originalOutput = sourceNode?.data.agent.outputs?.find((o) => o.output_name === outputName)
     sourceAgent.outputs = sourceAgent.outputs ?? []
     sourceAgent.outputs.push({
-      output_name: typeof edge.label === 'string' ? edge.label : 'default',
-      output_desc: '',
+      output_name: outputName,
+      output_desc: originalOutput?.output_desc ?? '',
       next_agent: edge.target,
     })
   }
