@@ -83,6 +83,9 @@ importers:
       immer:
         specifier: ^11.1.4
         version: 11.1.4
+      lodash-es:
+        specifier: ^4.18.1
+        version: 4.18.1
       npm-run-all:
         specifier: ^4.1.5
         version: 4.1.5

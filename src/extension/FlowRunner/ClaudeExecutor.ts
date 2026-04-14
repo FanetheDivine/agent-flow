@@ -1,6 +1,6 @@
 import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { Agent, AIMessageType } from '@/common'
-import { buildAgentMcpServer, buildAgentPrompt } from '@/common'
+import { buildAgentMcpServer, buildAgentPrompt } from '@/common/extension'
 
 export type ExecutorResult = {
   outputName?: string

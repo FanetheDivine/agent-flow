@@ -1,22 +1,8 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import type { Agent } from './index'
+import { FlowPrompt, type Agent } from '.'
 
-// ── Prompt ─────────────────────────────────────────────────────────────────
-
-/** Agent的系统提示词 */
-export const FlowPrompt: string[] = [
-  '你是一个工作流中的 Agent，通过**任务描述**和多轮对话完成一项任务。',
-  '当前工作流的所有 Agent 共享一份全局数据（**shareValues**），你可以使用 AgentControllerMcp 提供的工具来读写共享数据：',
-  ' - getShareValues：按键读取之前 Agent 设置的数据',
-  ' - getAllShareValues：读取全部共享数据',
-  ' - setShareValues：写入键值对到共享数据，供后续 Agent 读取',
-  '当你认为任务**已完成**时，先查看 AgentControllerMcp 提供的 AgentComplete 工具的相关信息——它定义了 0 个或多个输出分支。',
-  '通过调用 AgentComplete，你可以提交任务结果并选择一个输出分支（如果有的话）。',
-  '**重要**：在你实际调用 AgentComplete 之前，**必须**先使用 AskUserQuestion 工具，让用户确认任务结果和输出分支。',
-  '如果用户没有确认，**禁止**调用 AgentComplete。',
-  '\n**任务描述**：',
-]
+// 仅extension可用
 
 /** 将 Agent 的 prompt 片段拼接为完整提示词 */
 export function buildAgentPrompt(agent: Agent): string {
