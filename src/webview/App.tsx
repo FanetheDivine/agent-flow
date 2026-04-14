@@ -1,30 +1,28 @@
-import { FC, useState } from 'react'
+import { FC, useEffect, useState } from 'react'
 import { Button } from 'antd'
-import { Test } from '@/webview/components/Test'
+import { postMessageToExtension, subscribeExtensionMessage } from './utils/ExtensionMessage'
 
 export const App: FC = () => {
-  const [count, setCount] = useState(0)
-
+  const [str, setStr] = useState('')
+  useEffect(() => {
+    const cleanup = subscribeExtensionMessage((v) => setStr((s) => s + '\n' + JSON.stringify(v)))
+    return cleanup
+  }, [])
   return (
-    <div
-      className='p-4'
-      style={{
-        fontFamily: 'var(--vscode-font-family)',
-        color: 'var(--vscode-foreground)',
-      }}
-    >
-      <h2 className='m-0'>Agent Flow</h2>
-      <p>
-        Count: <strong>{count}</strong>
-      </p>
+    <>
+      {str}
       <Button
-        onClick={() => setCount((c) => c + 1)}
-        type='primary'
-        className='bg-white text-red-500'
+        onClick={() => {
+          postMessageToExtension({
+            type: 'loadFlow',
+            data: {
+              name: 'a',
+            },
+          })
+        }}
       >
-        +1
+        aaa
       </Button>
-      <Test />
-    </div>
+    </>
   )
 }

@@ -6,6 +6,7 @@ import { StyleProvider } from '@ant-design/cssinjs'
 import 'dayjs/locale/zh-cn'
 import { App } from './App'
 import './global.css'
+import './utils/ExtensionMessage'
 
 /** antd 首屏样式 样式兼容 本地化 主题等 */
 const AntdProvider: FC<PropsWithChildren> = (props) => {

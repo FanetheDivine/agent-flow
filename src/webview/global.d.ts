@@ -4,3 +4,11 @@ declare module '*.module.css' {
 }
 
 declare module '*.css'
+
+interface VsCodeApi {
+  getState(): unknown
+  setState(state: unknown): void
+  postMessage(message: unknown): void
+}
+
+declare function acquireVsCodeApi(): VsCodeApi

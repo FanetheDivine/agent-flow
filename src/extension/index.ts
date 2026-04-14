@@ -1,8 +1,7 @@
 import * as vscode from 'vscode'
-import { sleep } from '@/utils'
+import type { ExtensionFromWebviewMessage, ExtensionToWebviewMessage } from '@/common'
 
 export function activate(context: vscode.ExtensionContext) {
-  sleep(0)
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     const panel = vscode.window.createWebviewPanel(
       'agentFlow',
@@ -15,6 +14,11 @@ export function activate(context: vscode.ExtensionContext) {
       },
     )
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri)
+    panel.webview.onDidReceiveMessage((e: ExtensionFromWebviewMessage) => {
+      const message = e
+      console.log(message)
+      panel.webview.postMessage({ a: 'aa' })
+    })
   })
 
   context.subscriptions.push(openPanel)
