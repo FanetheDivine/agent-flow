@@ -106,7 +106,7 @@ type FlowSignalPayload = {
   /** agent错误 */
   agentError: { runId: string; agentName: string; err: Error }
   /** flow运行错误 */
-  error: { msg: string }
+  error: { runId: string; msg: string }
 }
 
 /** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
