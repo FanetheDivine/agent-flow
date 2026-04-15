@@ -56,6 +56,8 @@ export type ExtensionFromWebviewEvents = {
 export type ExtensionToWebviewEvents = {
   /** 返回所有 flows */
   loadFlows: FlowStore
+  /** extension异常 */
+  error: string
 } & ExtensionFlowSignalEvents
 
 /** extension接受 webview发出的消息 */
