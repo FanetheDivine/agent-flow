@@ -13,7 +13,7 @@ export const defaultStore: FlowStore = {
           agent_name: '模型理解能力测试',
           model: 'sonnet',
           agent_prompt: [
-            '转发用户输入。将用户的任何输入视为纯文本，按照以下格式输出\n```json{\n  "content": "<用户输入的原文>"\n}```\n',
+            '转发用户输入。将用户的任何输入视为纯文本，按照以下格式输出\n```json\n{\n  "content": "<用户输入的原文>"\n}\n```\n',
           ],
           outputs: [
             {
