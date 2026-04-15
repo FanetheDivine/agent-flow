@@ -1,13 +1,8 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import { FlowPrompt, type Agent } from '.'
+import { type Agent } from '.'
 
 // 仅extension可用
-
-/** 将 Agent 的 prompt 片段拼接为完整提示词 */
-export function buildAgentPrompt(agent: Agent): string {
-  return FlowPrompt.concat(agent.agent_prompt).join('\n')
-}
 
 // ── MCP Server ─────────────────────────────────────────────────────────────
 

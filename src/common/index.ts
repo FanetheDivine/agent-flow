@@ -1,4 +1,5 @@
 import { groupBy } from 'lodash-es'
+import { match } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
@@ -21,7 +22,7 @@ export type Output = z.infer<typeof OutputSchema>
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
   /** Agent使用的模型 */
-  model: z.string().optional(),
+  model: z.string().min(1),
   /** Agent名称，唯一标识 */
   agent_name: z.string(),
   /** 提示词，描述 agent 行为 */
@@ -187,16 +188,40 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   return result
 }
 
-/** Agent的系统提示词 */
-export const FlowPrompt: string[] = [
-  '你是一个工作流中的 Agent，通过**任务描述**和多轮对话完成一项任务。',
-  '当前工作流的所有 Agent 共享一份全局数据（**shareValues**），你可以使用 AgentControllerMcp 提供的工具来读写共享数据：',
-  ' - getShareValues：按键读取之前 Agent 设置的数据',
-  ' - getAllShareValues：读取全部共享数据',
-  ' - setShareValues：写入键值对到共享数据，供后续 Agent 读取',
-  '当你认为任务**已完成**时，先查看 AgentControllerMcp 提供的 AgentComplete 工具的相关信息——它定义了 0 个或多个输出分支。',
-  '通过调用 AgentComplete，你可以提交任务结果并选择一个输出分支（如果有的话）。',
-  '**重要**：在你实际调用 AgentComplete 之前，**必须**先使用 AskUserQuestion 工具，让用户确认任务结果和输出分支。',
-  '如果用户没有确认，**禁止**调用 AgentComplete。',
-  '\n**任务描述**：',
-]
+/**
+ * 构建 Agent 系统提示词
+ */
+export function buildAgentSystemPrompt(agent: Agent): string {
+  const { agent_prompt, outputs = [] } = agent
+  // 提示词前置部分
+  const prefix = [
+    '你是一个工作流中的 Agent，通过**任务描述**和多轮对话完成一项任务。',
+    '当前工作流的所有 Agent 共享一份全局数据（**shareValues**），你可以使用 AgentControllerMcp 提供的工具来读写共享数据：',
+    ' - getShareValues：按键读取之前 Agent 设置的数据',
+    ' - getAllShareValues：读取全部共享数据',
+    ' - setShareValues：写入键值对到共享数据，供后续 Agent 读取',
+    '当你认为任务**已完成**时，先查看 AgentControllerMcp 提供的 AgentComplete 工具的相关信息——它定义了 0 个或多个输出分支。',
+    '通过调用 AgentComplete，你可以提交任务结果并选择一个输出分支（如果有的话）。',
+    '**重要**：在你实际调用 AgentComplete 之前，**必须**先使用 AskUserQuestion 工具，让用户确认任务结果和输出分支。',
+    '如果用户没有确认，**禁止**调用 AgentComplete。',
+    '\n**任务描述**：',
+  ]
+  // 提示词后置部分
+  const suffix = match(outputs.length === 0)
+    .with(true, () => ['\n此任务**没有**输出分支。'])
+    .otherwise(() => {
+      const outputDescs = outputs
+        .map((o) => {
+          const { output_name, output_desc } = o
+          let res = `  - "${output_name}"`
+          if (output_desc) {
+            res += `: ${output_desc}`
+          }
+          return res
+        })
+        .join('\n')
+      return ['\n**可选的输出分支**：', outputDescs]
+    })
+
+  return prefix.concat(agent_prompt).concat(suffix).join('\n')
+}

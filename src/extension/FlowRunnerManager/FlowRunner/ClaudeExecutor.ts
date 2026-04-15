@@ -1,6 +1,6 @@
 import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { Agent, AIMessageType } from '@/common'
-import { buildAgentMcpServer, buildAgentPrompt } from '@/common/extension'
+import { Agent, AIMessageType, buildAgentSystemPrompt } from '@/common'
+import { buildAgentMcpServer } from '@/common/extension'
 
 export type ExecutorResult = {
   outputName?: string
@@ -48,7 +48,7 @@ export class ClaudeExecutor {
     this.agent = agent
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
-    this.prompt = buildAgentPrompt(agent)
+    this.prompt = buildAgentSystemPrompt(agent)
     this.mcpServer = buildAgentMcpServer({ agent, shareValues, onComplete: events.onComplete })
     this.createQuery()
   }
