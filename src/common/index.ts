@@ -191,7 +191,7 @@ export function validateFlow(flow: Flow): FlowValidationResult {
 /**
  * 构建 Agent 系统提示词
  */
-export function buildAgentSystemPrompt(agent: Agent): string {
+export function buildAgentSystemPrompt(agent: Pick<Agent, 'agent_prompt' | 'outputs'>): string {
   const { agent_prompt, outputs = [] } = agent
   // 提示词前置部分
   const prefix = [
