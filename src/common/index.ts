@@ -10,7 +10,7 @@ export const OutputSchema = z.object({
   /** 分支名称（在当前 agent 内唯一） */
   output_name: z.string(),
   /** 分支描述（写入提示词，指导 AI 选择） */
-  output_desc: z.string(),
+  output_desc: z.string().optional(),
   /** 下一个进入的agent，省略则表示终点，可以是当前agent */
   next_agent: z.string().optional(),
 })
@@ -37,6 +37,8 @@ export type Agent = z.infer<typeof AgentSchema>
 
 /** Agent 作为节点构成的有向图 */
 export const FlowSchema = z.object({
+  /** Flow 唯一标识 */
+  id: z.string(),
   /** Flow 名称 */
   name: z.string(),
   /** 当前Flow内的agent，其outputs定义了边 */
@@ -45,6 +47,12 @@ export const FlowSchema = z.object({
 
 /** @see {@link FlowSchema} */
 export type Flow = z.infer<typeof FlowSchema>
+
+/** 缓存至本地的flows */
+export const FlowStoreSchema = z.object({ flows: z.array(FlowSchema) })
+
+/** @see {@link FlowStoreSchema} */
+export type FlowStore = z.infer<typeof FlowStoreSchema>
 
 /** 单条消息记录 */
 export const MessageSchema = z.object({

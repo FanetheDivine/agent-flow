@@ -29,7 +29,16 @@ export type AgentMcpServerOptions = {
 export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcpServerOptions) {
   const outputs = agent.outputs ?? []
   const outputNames = outputs.map((o) => o.output_name)
-  const outputDescs = outputs.map((o) => `  - "${o.output_name}": ${o.output_desc}`).join('\n')
+  const outputDescs = outputs
+    .map((o) => {
+      const { output_name, output_desc } = o
+      let res = `  - "${output_name}"`
+      if (output_desc) {
+        res += `: ${output_desc}`
+      }
+      return res
+    })
+    .join('\n')
 
   const hasOutputs = outputNames.length > 0
 

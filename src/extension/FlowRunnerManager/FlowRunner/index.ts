@@ -1,14 +1,16 @@
 import { match } from 'ts-pattern'
 import {
   type Agent,
-  type FlowCommandEvents,
+  type FlowRunnerCommandEvents,
   type Flow,
   type RunState,
-  type FlowSignalEvents,
+  type FlowRunnerSignalEvents,
 } from '@/common'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 
-type SignalHandler<K extends keyof FlowSignalEvents> = (data: FlowSignalEvents[K]) => void
+type SignalHandler<K extends keyof FlowRunnerSignalEvents> = (
+  data: FlowRunnerSignalEvents[K],
+) => void
 
 export class FlowRunner {
   readonly flow: Flow
@@ -18,14 +20,14 @@ export class FlowRunner {
   private currentRunId: string | null = null
   private currentSessionId: string | null = null
   private currentAgentName: string | null = null
-  private signalListeners = new Map<keyof FlowSignalEvents, Set<SignalHandler<any>>>()
+  private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
 
   constructor(flow: Flow) {
     this.flow = flow
   }
 
   /** 监听 Flow 发出的 signal 事件 */
-  on<K extends keyof FlowSignalEvents>(event: K, handler: SignalHandler<K>): void {
+  on<K extends keyof FlowRunnerSignalEvents>(event: K, handler: SignalHandler<K>): void {
     let set = this.signalListeners.get(event)
     if (!set) {
       set = new Set()
@@ -35,21 +37,21 @@ export class FlowRunner {
   }
 
   /** 移除 signal 事件监听器 */
-  off<K extends keyof FlowSignalEvents>(event: K, handler: SignalHandler<K>): void {
+  off<K extends keyof FlowRunnerSignalEvents>(event: K, handler: SignalHandler<K>): void {
     this.signalListeners.get(event)?.delete(handler)
   }
 
   /** 向 Flow 发送 command 指令 */
-  emit<K extends keyof FlowCommandEvents>(event: K, data: FlowCommandEvents[K]): void {
-    match(event as keyof FlowCommandEvents)
+  emit<K extends keyof FlowRunnerCommandEvents>(event: K, data: FlowRunnerCommandEvents[K]): void {
+    match(event as keyof FlowRunnerCommandEvents)
       .with('flow.command.flowStart', () => {
-        this.handleFlowStart(data as FlowCommandEvents['flow.command.flowStart'])
+        this.handleFlowStart(data as FlowRunnerCommandEvents['flow.command.flowStart'])
       })
       .with('flow.command.userMessage', () => {
-        this.handleUserMessage(data as FlowCommandEvents['flow.command.userMessage'])
+        this.handleUserMessage(data as FlowRunnerCommandEvents['flow.command.userMessage'])
       })
       .with('flow.command.interrupt', () => {
-        this.handleInterrupt(data as FlowCommandEvents['flow.command.interrupt'])
+        this.handleInterrupt(data as FlowRunnerCommandEvents['flow.command.interrupt'])
       })
       .exhaustive()
   }
@@ -62,7 +64,10 @@ export class FlowRunner {
 
   // ── signal 发射 ─────────────────────────────────────────────────────────
 
-  private fire<K extends keyof FlowSignalEvents>(event: K, data: FlowSignalEvents[K]): void {
+  private fire<K extends keyof FlowRunnerSignalEvents>(
+    event: K,
+    data: FlowRunnerSignalEvents[K],
+  ): void {
     const set = this.signalListeners.get(event)
     if (!set) return
     for (const handler of set) {
@@ -79,7 +84,7 @@ export class FlowRunner {
   private handleFlowStart({
     runKey,
     agentName,
-  }: FlowCommandEvents['flow.command.flowStart']): void {
+  }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
 
@@ -110,7 +115,7 @@ export class FlowRunner {
     runId,
     sessionId,
     message,
-  }: FlowCommandEvents['flow.command.userMessage']): void {
+  }: FlowRunnerCommandEvents['flow.command.userMessage']): void {
     if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 
@@ -121,7 +126,10 @@ export class FlowRunner {
     this.fire('flow.signal.userMessage', { runId, sessionId, message })
   }
 
-  private async handleInterrupt({ runId, sessionId }: FlowCommandEvents['flow.command.interrupt']) {
+  private async handleInterrupt({
+    runId,
+    sessionId,
+  }: FlowRunnerCommandEvents['flow.command.interrupt']) {
     if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 

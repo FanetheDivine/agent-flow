@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { Flow } from '.'
+import type { Flow, FlowStore } from '.'
 
 /**
  * AI消息类型 — 会话中一切事件的统一类型（判别联合），
@@ -17,9 +17,14 @@ export type AIMessageType = SDKMessage
  */
 export type UserMessageType = SDKUserMessage
 
-/** 为类型的key加前缀 */
+/** 为类型的 key 加前缀 */
 export type TypeWithPrefix<T extends Record<string, any>, P extends string> = {
   [K in keyof T as `${P}${K & string}`]: T[K]
+}
+
+/** 为类型的每个值追加 flowId 字段 */
+type WithFlowId<T extends Record<string, any>> = {
+  [K in keyof T]: T[K] & { flowId: string }
 }
 
 /**
@@ -41,12 +46,17 @@ export type EventMessageType<T extends Record<string, any>> = {
 
 /** extension接受 webview发出的事件 */
 export type ExtensionFromWebviewEvents = {
-  /** 加载一个flow */
-  loadFlow: Flow
-} & FlowCommandEvents
+  /** webview 启动时请求所有 flows */
+  requestFlows: undefined
+  /** 全量保存 flows */
+  saveFlows: Flow[]
+} & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的事件 */
-export type ExtensionToWebviewEvents = {} & FlowSignalEvents
+export type ExtensionToWebviewEvents = {
+  /** 返回所有 flows */
+  loadFlows: FlowStore
+} & ExtensionFlowSignalEvents
 
 /** extension接受 webview发出的消息 */
 export type ExtensionFromWebviewMessage = EventMessageType<ExtensionFromWebviewEvents>
@@ -76,41 +86,53 @@ export type ExtensionToWebviewMessage = EventMessageType<ExtensionToWebviewEvent
  * - agent 选择 output 后，agentComplete 携带新 sessionId 供后续交互使用
  */
 
-/** Flow 发出的信号 */
-export type FlowSignalEvents = TypeWithPrefix<
-  {
-    /** Flow 启动成功，携带 key 供 webview 校验归属 */
-    flowStart: { runId: string; runKey: string; sessionId: string; agentName: string }
-    /** AI 输出（流式），必须在 runId + sessionId 对齐下发生 */
-    aiMessage: { runId: string; sessionId: string; message: AIMessageType }
-    /** 回显用户消息，确保 webview 与 flow 数据一致 */
-    userMessage: { runId: string; sessionId: string; message: UserMessageType }
-    /** Agent 执行完成，选择了输出分支；output.newSessionId 为下一轮交互的新 session */
-    agentComplete: {
-      runId: string
-      sessionId: string
-      content: string
-      output?: { name: string; newSessionId: string }
-    }
-    /** Agent被中断了 */
-    agentInterrupted: { runId: string; sessionId: string }
-    /** agent错误 */
-    agentError: { runId: string; agentName: string; err: Error }
-    /** flow运行错误 */
-    error: { msg: string }
-  },
+/** Flow 信号基础 payload（不含 flowId） */
+type FlowSignalPayload = {
+  /** Flow 启动成功，携带 key 供 webview 校验归属 */
+  flowStart: { runId: string; runKey: string; sessionId: string; agentName: string }
+  /** AI 输出（流式），必须在 runId + sessionId 对齐下发生 */
+  aiMessage: { runId: string; sessionId: string; message: AIMessageType }
+  /** 回显用户消息，确保 webview 与 flow 数据一致 */
+  userMessage: { runId: string; sessionId: string; message: UserMessageType }
+  /** Agent 执行完成，选择了输出分支；output.newSessionId 为下一轮交互的新 session */
+  agentComplete: {
+    runId: string
+    sessionId: string
+    content: string
+    output?: { name: string; newSessionId: string }
+  }
+  /** Agent被中断了 */
+  agentInterrupted: { runId: string; sessionId: string }
+  /** agent错误 */
+  agentError: { runId: string; agentName: string; err: Error }
+  /** flow运行错误 */
+  error: { msg: string }
+}
+
+/** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
+export type FlowRunnerSignalEvents = TypeWithPrefix<FlowSignalPayload, 'flow.signal.'>
+
+/** Extension 发出的Flow信号（含 flowId，用于 webview 通信） */
+export type ExtensionFlowSignalEvents = TypeWithPrefix<
+  WithFlowId<FlowSignalPayload>,
   'flow.signal.'
 >
 
-/** Flow 接收的指令 */
-export type FlowCommandEvents = TypeWithPrefix<
-  {
-    /** webview 发起启动，key 传入 flow 内部用于校验响应归属 */
-    flowStart: { runKey: string; agentName: string }
-    /** 向当前 Agent 发送用户消息，必须在 runId + sessionId 对齐下发生 */
-    userMessage: { runId: string; sessionId: string; message: UserMessageType }
-    /** 中断当前 Agent，使其等待用户输入 */
-    interrupt: { runId: string; sessionId: string }
-  },
+/** Flow 指令基础 payload（不含 flowId） */
+type FlowCommandPayload = {
+  /** webview 发起启动，key 传入 flow 内部用于校验响应归属 */
+  flowStart: { runKey: string; agentName: string }
+  /** 向当前 Agent 发送用户消息，必须在 runId + sessionId 对齐下发生 */
+  userMessage: { runId: string; sessionId: string; message: UserMessageType }
+  /** 中断当前 Agent，使其等待用户输入 */
+  interrupt: { runId: string; sessionId: string }
+}
+
+/** FlowRunner 内部指令（不含 flowId） */
+export type FlowRunnerCommandEvents = TypeWithPrefix<FlowCommandPayload, 'flow.command.'>
+
+/** Extension 接收的Flow指令（含 flowId，用于 webview 通信） */
+export type ExtensionFlowCommandEvents = TypeWithPrefix<
+  WithFlowId<FlowCommandPayload>,
   'flow.command.'
 >
