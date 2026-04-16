@@ -30,7 +30,7 @@ type FlowStoreType = FlowState & {
 }
 export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
-    produce(get(), updateFn)
+    set(produce(updateFn))
   }
   return {
     loading: true,
@@ -50,9 +50,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             const { data } = msg
             draft.loading = false
             draft.flows = data.flows
-            if (!draft.activeFlowId && data.flows.length > 0) {
-              draft.activeFlowId = data.flows[0].id
-            }
+            draft.activeFlowId = data.flows[0]?.id
             return
           }
           const runId = msg.data.runId
