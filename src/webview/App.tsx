@@ -7,10 +7,9 @@ import { Agent, AgentSchema, FlowSchema } from '@/common'
 import { AgentFlow } from './components/AgentFlow'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
-import { cn } from './utils'
 
 export const App: FC = () => {
-  const { loading, flows, init, activeFlowId } = useFlowStore()
+  const { loading, flows, init } = useFlowStore()
   useEffect(() => init(), [init])
   const containerRef = useRef<HTMLDivElement>(null)
   usePasteFlowData(containerRef)
