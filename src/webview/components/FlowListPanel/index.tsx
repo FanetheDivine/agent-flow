@@ -92,10 +92,7 @@ export const FlowListPanel: FC = () => {
                 key={flow.id}
                 flow={flow}
                 isActive={flow.id === activeFlowId}
-                isRunning={
-                  flowStates[flow.id]?.status === 'chatting' ||
-                  flowStates[flow.id]?.status === 'waiting-user'
-                }
+                status={flowStates[flow.id]?.status}
                 onClick={() => setActiveFlowId(flow.id)}
                 onDelete={() => onDelete(flow.id)}
                 onRename={(name) => onRename(flow.id, name)}

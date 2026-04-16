@@ -1,20 +1,13 @@
 import { type Node, type Edge, MarkerType } from '@xyflow/react'
-import type { Agent, Flow, Output } from '@/common'
+import type { Agent, Flow } from '@/common'
+import { useFlowStore } from '@/webview/store/flow'
 
 // ── Node / Edge 数据类型 ────────────────────────────────────────────────────
 
-/** Agent 节点携带的额外数据 */
+/** Agent 节点携带的额外数据（其他数据通过 FlowStore 获取） */
 export type AgentNodeData = {
-  agent: Agent
-  label: string
-  isEntry: boolean
-  outputs: Output[]
-  allAgentNames?: string[]
-  onSaveAgent?: (originalName: string, agent: Agent) => void
-  onOpenChat?: (agentName: string) => void
-  onRun?: (agentName: string) => void
-  readOnly?: boolean
-  runningAgentName?: string | null
+  flowId: string
+  agentName: string
 }
 
 /** Agent 节点类型 */
@@ -23,7 +16,7 @@ export type AgentNode = Node<AgentNodeData, 'agent'>
 // ── Flow → ReactFlow 转换 ──────────────────────────────────────────────────
 
 /** 将 Flow 中的 Agent 列表布局为 ReactFlow 节点 */
-function agentsToNodes(agents: Agent[]): AgentNode[] {
+function agentsToNodes(flowId: string, agents: Agent[]): AgentNode[] {
   // 简易分层布局：entry 节点在顶层，之后按 BFS 层级递增 y
   const entryAgents = agents.filter((a) => a.is_entry)
   const entryNames = new Set(entryAgents.map((a) => a.agent_name))
@@ -82,10 +75,8 @@ function agentsToNodes(agents: Agent[]): AgentNode[] {
         type: 'agent',
         position: { x: idx * X_GAP - totalWidth / 2 + 400, y: level * Y_GAP + 60 },
         data: {
-          agent,
-          label: agent.agent_name,
-          isEntry: !!agent.is_entry,
-          outputs: agent.outputs ?? [],
+          flowId,
+          agentName: agent.agent_name,
         },
       })
     })
@@ -119,7 +110,7 @@ function agentsToEdges(agents: Agent[]): Edge[] {
 export function flowToReactFlow(flow: Flow): { nodes: AgentNode[]; edges: Edge[] } {
   const agents = flow.agents ?? []
   return {
-    nodes: agentsToNodes(agents),
+    nodes: agentsToNodes(flow.id, agents),
     edges: agentsToEdges(agents),
   }
 }
@@ -127,33 +118,46 @@ export function flowToReactFlow(flow: Flow): { nodes: AgentNode[]; edges: Edge[]
 // ── ReactFlow → Flow 转换 ──────────────────────────────────────────────────
 
 /** 从 ReactFlow 的节点和边还原 Flow */
-export function reactFlowToFlow(id: string, name: string, nodes: AgentNode[], edges: Edge[]): Flow {
+export function reactFlowToFlow(
+  id: string,
+  name: string,
+  agents: Agent[],
+  nodes: AgentNode[],
+  edges: Edge[],
+): Flow {
   const agentMap = new Map<string, Agent>()
 
-  // 先把节点还原为 Agent（不含 outputs）
+  // 先把节点还原为 Agent，保留原始 outputs（清空 next_agent 以便从边重建）
   for (const node of nodes) {
+    const originalAgent = agents.find((a) => a.agent_name === node.id)
     agentMap.set(node.id, {
-      ...node.data.agent,
+      ...(originalAgent ?? { agent_name: node.id, model: '', agent_prompt: [] }),
       agent_name: node.id,
-      outputs: [],
+      outputs: originalAgent?.outputs?.map((o) => ({ ...o, next_agent: undefined })) ?? [],
     })
   }
 
-  // 从边还原 outputs
+  // 从边还原 outputs 的 next_agent
   for (const edge of edges) {
     const sourceAgent = agentMap.get(edge.source)
     if (!sourceAgent) continue
     const outputName = edge.sourceHandle?.startsWith('output-')
       ? edge.sourceHandle.slice('output-'.length)
       : 'default'
-    const sourceNode = nodes.find((n) => n.id === edge.source)
-    const originalOutput = sourceNode?.data.agent.outputs?.find((o) => o.output_name === outputName)
-    sourceAgent.outputs = sourceAgent.outputs ?? []
-    sourceAgent.outputs.push({
-      output_name: outputName,
-      output_desc: originalOutput?.output_desc ?? '',
-      next_agent: edge.target,
-    })
+    const existingOutput = sourceAgent.outputs?.find((o) => o.output_name === outputName)
+    if (existingOutput) {
+      existingOutput.next_agent = edge.target
+    } else {
+      // edge 引用了原始 agent 中不存在的 output，追加
+      const originalAgent = agents.find((a) => a.agent_name === edge.source)
+      const originalOutput = originalAgent?.outputs?.find((o) => o.output_name === outputName)
+      sourceAgent.outputs = sourceAgent.outputs ?? []
+      sourceAgent.outputs.push({
+        output_name: outputName,
+        output_desc: originalOutput?.output_desc ?? '',
+        next_agent: edge.target,
+      })
+    }
   }
 
   return {
@@ -161,4 +165,42 @@ export function reactFlowToFlow(id: string, name: string, nodes: AgentNode[], ed
     name,
     agents: [...agentMap.values()],
   }
+}
+
+export function pasteAgents(
+  agents: Agent[],
+  activeFlowId: string | undefined,
+  saveFlows: ReturnType<typeof useFlowStore.getState>['saveFlows'],
+): Agent[] | undefined {
+  if (!activeFlowId) return
+  let remapped: Agent[] = []
+  saveFlows((flows) => {
+    const flow = flows.find((f) => f.id === activeFlowId)
+    if (!flow) return
+    const existingNames = new Set((flow.agents ?? []).map((a) => a.agent_name))
+
+    // agent可能有新名字 但是关联关系不变
+    const nameMap = new Map<string, string>()
+    for (const agent of agents) {
+      const base = agent.agent_name
+      let newName = base
+      let i = 2
+      while (existingNames.has(newName)) newName = `${base}-${i++}`
+      nameMap.set(base, newName)
+      existingNames.add(newName)
+    }
+
+    // Remap names and next_agent references
+    remapped = agents.map((agent) => ({
+      ...agent,
+      agent_name: nameMap.get(agent.agent_name)!,
+      outputs: agent.outputs?.map((output) => ({
+        ...output,
+        next_agent: output.next_agent !== undefined ? nameMap.get(output.next_agent) : undefined,
+      })),
+    }))
+
+    flow.agents = [...(flow.agents ?? []), ...remapped]
+  })
+  return remapped
 }

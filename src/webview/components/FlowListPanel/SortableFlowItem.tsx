@@ -1,22 +1,34 @@
-import { useMemo, type FC } from 'react'
-import { App, Button, Typography } from 'antd'
+import { type FC } from 'react'
+import { App, Button, Tooltip, Typography } from 'antd'
 import { HolderOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Flow } from '@/common'
 import { cn } from '@/webview/utils'
+import type { FlowRunState } from '@/webview/store/flow'
+
+const STATUS_CONFIG: Record<
+  Exclude<FlowRunState['status'], 'ready'>,
+  { color: string; label: string; animate: boolean }
+> = {
+  preparing: { color: 'bg-[#f9e2af]', label: '启动中', animate: true },
+  chatting: { color: 'bg-[#a6e3a1]', label: 'AI 生成中', animate: true },
+  'waiting-user': { color: 'bg-[#89b4fa]', label: '等待用户输入', animate: true },
+  completed: { color: 'bg-[#a6e3a1]/60', label: '已完成', animate: false },
+  error: { color: 'bg-[#f38ba8]', label: '出错', animate: false },
+}
 
 export type SortableFlowItemProps = {
   flow: Flow
   isActive: boolean
-  isRunning: boolean
+  status?: FlowRunState['status']
   onClick: () => void
   onDelete: () => void
   onRename: (name: string) => void
 }
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
-  const { flow, isActive, isRunning, onClick, onDelete, onRename } = props
+  const { flow, isActive, status, onClick, onDelete, onRename } = props
   const { message } = App.useApp()
   const { id, name } = flow
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -27,6 +39,9 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
     transition,
     opacity: isDragging ? 0.5 : 1,
   }
+
+  const statusConfig = status && status !== 'ready' ? STATUS_CONFIG[status] : undefined
+
   return (
     <div
       ref={setNodeRef}
@@ -45,7 +60,17 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
         <HolderOutlined />
       </span>
 
-      {isRunning && <span className='h-2 w-2 shrink-0 rounded-full bg-[#a6e3a1]' />}
+      {statusConfig && (
+        <Tooltip title={statusConfig.label} mouseEnterDelay={0.3}>
+          <span
+            className={cn(
+              'h-2 w-2 shrink-0 rounded-full',
+              statusConfig.color,
+              statusConfig.animate && 'animate-pulse',
+            )}
+          />
+        </Tooltip>
+      )}
 
       <Typography.Text
         editable={{

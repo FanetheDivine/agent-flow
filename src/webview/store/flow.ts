@@ -1,12 +1,13 @@
 import { produce } from 'immer'
-import { match, P } from 'ts-pattern'
+import { match } from 'ts-pattern'
 import { create } from 'zustand'
 import type { Flow, ExtensionToWebviewMessage } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
 export type FlowRunState = {
   runKey: string
-  status: 'preparing' | 'chatting' | 'waiting-user' | 'completed' | 'error'
+  /** ready: 未启动 | preparing: 启动中 | chatting: AI生成中 | waiting-user: 等待用户输入 | completed: 完成 | error: 出错 */
+  status: 'ready' | 'preparing' | 'chatting' | 'waiting-user' | 'completed' | 'error'
   messages: ExtensionToWebviewMessage[]
   runId?: string
   currentSessionId?: string
@@ -19,6 +20,7 @@ export type FlowState = {
   activeFlowId?: string
   /** flow的state flow->messages */
   flowStates: Record<string, FlowRunState>
+  globalError?: string
 }
 
 type FlowStoreType = FlowState & {
@@ -44,6 +46,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         immerSet((draft) => {
           if (msg.type === 'error') {
             console.error(msg)
+            draft.globalError = (msg.data as { message?: string })?.message ?? String(msg.data)
             return
           }
           if (msg.type === 'loadFlows') {

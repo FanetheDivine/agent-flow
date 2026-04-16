@@ -1,8 +1,10 @@
-import { memo, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import type { FC } from 'react'
-import { Tag, Tooltip, Typography } from 'antd'
+import { App, Tag, Tooltip, Typography } from 'antd'
 import { PlayCircleOutlined, RobotOutlined, EditOutlined, MessageOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { Agent } from '@/common'
+import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
@@ -16,20 +18,37 @@ const handleStyle = {
 
 const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const { data } = props
-  const {
-    label,
-    isEntry,
-    outputs,
-    agent,
-    readOnly,
-    runningAgentName,
-    allAgentNames,
-    onSaveAgent,
-    onOpenChat,
-    onRun,
-  } = data
-  const isRunning = runningAgentName === agent.agent_name
+  const { flowId, agentName } = data
+
+  const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
+  const agent: Agent | undefined = flow?.agents?.find((a) => a.agent_name === agentName)
+  const flowState = useFlowStore((s) => s.flowStates[flowId])
+  const saveFlows = useFlowStore((s) => s.saveFlows)
+  const runFlow = useFlowStore((s) => s.runFlow)
+
+  const destructiveReadOnly = flowState?.status === 'chatting' || flowState?.status === 'preparing'
+
+  const runningAgentName = flowState?.currentAgentName ?? null
+  const isRunning = runningAgentName === agentName
+  const isEntry = !!agent?.is_entry
+  const outputs = agent?.outputs ?? []
+  const allAgentNames = (flow?.agents ?? []).map((a) => a.agent_name)
+
+  const handleSaveAgent = useCallback(
+    (originalName: string, updated: Agent) => {
+      saveFlows((flows) => {
+        const f = flows.find((f) => f.id === flowId)
+        if (!f) return
+        f.agents = (f.agents ?? []).map((a) => (a.agent_name === originalName ? updated : a))
+      })
+    },
+    [flowId, saveFlows],
+  )
+
+  const handleRun = useCallback(() => runFlow(flowId, agentName), [flowId, agentName, runFlow])
+
   const [editOpen, setEditOpen] = useState(false)
+  const { message, modal } = App.useApp()
 
   return (
     <>
@@ -62,20 +81,25 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
             onMouseDown={(e) => e.stopPropagation()}
           >
             <Typography.Text ellipsis className='mb-0! text-[13px]! font-semibold text-[#cdd6f4]!'>
-              {label}
+              {agentName}
             </Typography.Text>
           </div>
           {isEntry && (
             <Tag
               color='green'
               className={cn(
-                'm-0 border-0 px-1 py-0 text-[10px] leading-4',
-                !readOnly && onRun && 'cursor-pointer hover:opacity-80',
+                'm-0 cursor-pointer border-0 px-1 py-0 text-[10px] leading-4 hover:opacity-80',
               )}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!readOnly && onRun) {
-                  onRun(agent.agent_name)
+              onClick={() => {
+                if (destructiveReadOnly) {
+                  modal.confirm({
+                    title: '是否启动新 Flow？',
+                    content:
+                      '当前 Flow 将会强制结束，所有数据被清空。推荐使用复制 Flow 功能以保留当前记录。',
+                    onOk: handleRun,
+                  })
+                } else {
+                  handleRun()
                 }
               }}
             >
@@ -83,33 +107,46 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
             </Tag>
           )}
 
-          {!readOnly && onOpenChat && (
+          <Typography.Text
+            copyable={{
+              onCopy: async () => {
+                await navigator.clipboard.writeText(JSON.stringify(agent, null, 2))
+                message.success('复制成功')
+              },
+              tooltips: false,
+            }}
+          />
+          {
             <span
               className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
               onClick={(e) => {
                 e.stopPropagation()
-                onOpenChat(agent.agent_name)
+                // TODO: onOpenChat
               }}
             >
               <MessageOutlined />
             </span>
-          )}
+          }
 
-          {!readOnly && onSaveAgent && (
+          {
             <span
               className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
               onClick={(e) => {
                 e.stopPropagation()
+                if (destructiveReadOnly) {
+                  message.warning('当前状态不允许编辑 agent')
+                  return
+                }
                 setEditOpen(true)
               }}
             >
               <EditOutlined />
             </span>
-          )}
+          }
         </div>
 
         {/* Agent 信息 */}
-        {agent.model && (
+        {agent?.model && (
           <div className='px-3 pt-1'>
             <Tag color='blue' style={{ fontSize: 10 }}>
               {agent.model}
@@ -154,10 +191,10 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
       <AgentEditModal
         open={editOpen}
-        agent={agent}
-        allAgentNames={allAgentNames ?? []}
+        agent={agent ?? null}
+        allAgentNames={allAgentNames}
         onSave={(updated) => {
-          onSaveAgent?.(agent.agent_name, updated)
+          handleSaveAgent(agentName, updated)
           setEditOpen(false)
         }}
         onCancel={() => setEditOpen(false)}

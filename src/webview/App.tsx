@@ -1,5 +1,5 @@
 import { RefObject, useEffect, useRef, type FC } from 'react'
-import { Button, Spin, Tooltip } from 'antd'
+import { Button, notification, Spin, Tooltip } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useEventListener } from 'ahooks'
 import { z } from 'zod'
@@ -10,9 +10,19 @@ import { useFlowStore } from './store/flow'
 
 export const App: FC = () => {
   const { loading, flows, init } = useFlowStore()
+  const globalError = useFlowStore((s) => s.globalError)
   useEffect(() => init(), [init])
-  const containerRef = useRef<HTMLDivElement>(null)
-  usePasteFlowData(containerRef)
+
+  useEffect(() => {
+    if (!globalError) return
+    notification.error({
+      key: 'globalError',
+      duration: 0,
+      message: '拓展出现未知错误 请保存数据后重新打开页面',
+      description: globalError,
+    })
+  }, [globalError])
+  usePasteFlow()
 
   if (loading) {
     return (
@@ -23,7 +33,7 @@ export const App: FC = () => {
   }
 
   return (
-    <div className='flex h-full w-full' tabIndex={-1} ref={containerRef}>
+    <div className='flex h-full w-full' tabIndex={-1}>
       <FlowListPanel />
       <div className='relative flex-1'>
         <FlowToolbar />
@@ -74,46 +84,42 @@ const FlowToolbar: FC = () => {
   )
 }
 
-const usePasteFlowData = (containerRef: RefObject<HTMLDivElement | null>) => {
-  useEventListener(
-    'paste',
-    (e) => {
-      const text = e.clipboardData?.getData('text')
-      if (!text) return
-      const parsed: unknown = JSON.parse(text)
+const usePasteFlow = () => {
+  useEventListener('paste', (e) => {
+    const text = e.clipboardData?.getData('text')
+    if (!text) return
+    const parsed: unknown = JSON.parse(text)
 
-      const { activeFlowId, saveFlows } = useFlowStore.getState()
-      const singleFlow = FlowSchema.safeParse(parsed)
-      if (singleFlow.success) {
-        saveFlows((flows) => {
-          flows.push({ ...singleFlow.data, id: crypto.randomUUID() })
-        })
-        return
-      }
+    const { activeFlowId, saveFlows } = useFlowStore.getState()
+    const singleFlow = FlowSchema.safeParse(parsed)
+    if (singleFlow.success) {
+      saveFlows((flows) => {
+        flows.push({ ...singleFlow.data, id: crypto.randomUUID() })
+      })
+      return
+    }
 
-      const flowArray = z.array(FlowSchema).safeParse(parsed)
-      if (flowArray.success) {
-        saveFlows((flows) => {
-          for (const flow of flowArray.data) {
-            flows.push({ ...flow, id: crypto.randomUUID() })
-          }
-        })
-        return
-      }
+    const flowArray = z.array(FlowSchema).safeParse(parsed)
+    if (flowArray.success) {
+      saveFlows((flows) => {
+        for (const flow of flowArray.data) {
+          flows.push({ ...flow, id: crypto.randomUUID() })
+        }
+      })
+      return
+    }
 
-      const singleAgent = AgentSchema.safeParse(parsed)
-      if (singleAgent.success) {
-        pasteAgents([singleAgent.data], activeFlowId, saveFlows)
-        return
-      }
+    const singleAgent = AgentSchema.safeParse(parsed)
+    if (singleAgent.success) {
+      pasteAgents([singleAgent.data], activeFlowId, saveFlows)
+      return
+    }
 
-      const agentArray = z.array(AgentSchema).safeParse(parsed)
-      if (agentArray.success) {
-        pasteAgents(agentArray.data, activeFlowId, saveFlows)
-      }
-    },
-    { target: containerRef },
-  )
+    const agentArray = z.array(AgentSchema).safeParse(parsed)
+    if (agentArray.success) {
+      pasteAgents(agentArray.data, activeFlowId, saveFlows)
+    }
+  })
 }
 
 function pasteAgents(
