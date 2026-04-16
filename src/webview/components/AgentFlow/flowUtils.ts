@@ -9,6 +9,12 @@ export type AgentNodeData = {
   label: string
   isEntry: boolean
   outputs: Output[]
+  allAgentNames?: string[]
+  onSaveAgent?: (originalName: string, agent: Agent) => void
+  onOpenChat?: (agentName: string) => void
+  onRun?: (agentName: string) => void
+  readOnly?: boolean
+  runningAgentName?: string | null
 }
 
 /** Agent 节点类型 */
@@ -45,7 +51,10 @@ function agentsToNodes(agents: Agent[]): AgentNode[] {
     const agent = agents.find((a) => a.agent_name === name)
     if (!agent?.outputs) continue
     for (const output of agent.outputs) {
-      if (output.next_agent && (!levelMap.has(output.next_agent) || levelMap.get(output.next_agent)! > level + 1)) {
+      if (
+        output.next_agent &&
+        (!levelMap.has(output.next_agent) || levelMap.get(output.next_agent)! > level + 1)
+      ) {
         queue.push({ name: output.next_agent, level: level + 1 })
       }
     }
@@ -118,7 +127,7 @@ export function flowToReactFlow(flow: Flow): { nodes: AgentNode[]; edges: Edge[]
 // ── ReactFlow → Flow 转换 ──────────────────────────────────────────────────
 
 /** 从 ReactFlow 的节点和边还原 Flow */
-export function reactFlowToFlow(name: string, nodes: AgentNode[], edges: Edge[]): Flow {
+export function reactFlowToFlow(id: string, name: string, nodes: AgentNode[], edges: Edge[]): Flow {
   const agentMap = new Map<string, Agent>()
 
   // 先把节点还原为 Agent（不含 outputs）
@@ -148,6 +157,7 @@ export function reactFlowToFlow(name: string, nodes: AgentNode[], edges: Edge[])
   }
 
   return {
+    id,
     name,
     agents: [...agentMap.values()],
   }

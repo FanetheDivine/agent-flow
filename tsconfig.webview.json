@@ -12,6 +12,7 @@
     "strict": true,
     "moduleResolution": "bundler",
     "composite": true,
+    "skipLibCheck": true,
     "paths": {
       "@/*": [
         "./src/*"
@@ -21,6 +22,7 @@
   "include": [
     "src/webview/**/*.ts",
     "src/webview/**/*.tsx",
-    "src/common/**/*.ts"
+    "src/common/**/*.ts",
+    "src/extension/FlowStoreController/defaultStore.ts"
   ]
 }
