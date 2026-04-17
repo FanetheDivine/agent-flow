@@ -35,7 +35,7 @@ const extensionCtx = await esbuild.context({
   sourcesContent: false,
   platform: 'node',
   outfile: 'dist/extension.js',
-  external: ['vscode'],
+  external: ['vscode', '@anthropic-ai/claude-agent-sdk'],
   logLevel: 'silent',
   alias: {
     '@': path.resolve(__dirname, 'src'),
