@@ -1,4 +1,5 @@
 import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import * as vscode from 'vscode'
 import { Agent, AIMessageType, buildAgentSystemPrompt } from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
 
@@ -91,18 +92,24 @@ export class ClaudeExecutor {
       mcpServers: { AgentControllerMcp: this.mcpServer },
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
+      cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
     }
     if (this.sessionId) {
       options.resume = this.sessionId
     }
-
     // eslint-disable-next-line no-async-promise-executor
     return new Promise<void>(async (resolve) => {
       this.queryInstance = query({
         prompt: this.userInputStream.iterable,
         options,
       })
+      this.userInputStream.push({
+        type: 'user',
+        message: { content: '你可以使用哪些tool', role: 'user' },
+        parent_tool_use_id: null,
+      })
       for await (const msg of this.queryInstance) {
+        console.log(msg)
         if (this.disposed) break
         if (!this.sessionId) {
           if (!msg.session_id) {
