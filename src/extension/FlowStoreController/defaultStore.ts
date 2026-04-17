@@ -10,6 +10,7 @@ export const defaultStore: FlowStore = {
       name: '常见的Agent 可直接复制',
       agents: [
         {
+          id: '0',
           agent_name: '模型理解能力测试',
           model: 'sonnet',
           agent_prompt: [
@@ -23,6 +24,7 @@ export const defaultStore: FlowStore = {
           is_entry: true,
         },
         {
+          id: '1',
           agent_name: '飞书通知',
           model: 'haiku',
           agent_prompt: [

@@ -21,6 +21,8 @@ export type Output = z.infer<typeof OutputSchema>
 
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
+  /** Agent 唯一 ID */
+  id: z.string(),
   /** Agent使用的模型 */
   model: z.string().min(1),
   /** Agent名称，唯一标识 */
@@ -114,9 +116,11 @@ export type RunState = z.infer<typeof RunStateSchema>
 
 /** Flow 语义校验结果 */
 export type FlowValidationResult = {
+  /** 重复的 agent id 列表 */
+  duplicateAgentIds?: string[]
   /** 重复的 agent_name 列表 */
   duplicateAgentNames?: string[]
-  /** 引用了不存在 agent 的 output，按源 agent_name 分组，值为非法引用的 next_agent 名称数组 */
+  /** 引用了不存在 agent 的 output，按源 agent_name 分组，值为非法引用的 next_agent id 数组 */
   invalidNextAgent?: Record<string, string[]>
   /** 同一 agent 内重复的 output_name，按 agent_name 分组，值为重复的 output_name 数组 */
   duplicateOutputNames?: Record<string, string[]>
@@ -128,9 +132,10 @@ export type FlowValidationResult = {
  * 校验 Flow 合法性
  *
  * 语义校验规则：
+ * - id 在 flow 内唯一
  * - agent_name 在 flow 内唯一
  * - output_name 在同一 agent 内唯一
- * - next_agent 引用的 agent 存在
+ * - next_agent 引用的 agent id 存在
  * - Flow 中至少有一个 is_entry: true 的 agent
  *
  * @param flow - 待校验的 Flow 对象
@@ -138,8 +143,19 @@ export type FlowValidationResult = {
 export function validateFlow(flow: Flow): FlowValidationResult {
   const result: FlowValidationResult = {}
   const { agents = [] } = flow
-  const agentNames = agents.map((a) => a.agent_name)
+
+  // 校验 id 在 flow 内唯一
+  const agentIds = agents.map((a) => a.id)
+  const idsGrouped = groupBy(agentIds)
+  const duplicateAgentIds = Object.entries(idsGrouped)
+    .filter(([, ids]) => ids.length > 1)
+    .map(([id]) => id)
+  if (duplicateAgentIds.length > 0) {
+    result.duplicateAgentIds = duplicateAgentIds
+  }
+
   // 校验 agent_name 在 flow 内唯一
+  const agentNames = agents.map((a) => a.agent_name)
   const agentsGroupedByName = groupBy(agentNames)
   const duplicateAgentNames = Object.entries(agentsGroupedByName)
     .filter(([, names]) => names.length > 1)
@@ -150,9 +166,10 @@ export function validateFlow(flow: Flow): FlowValidationResult {
     return result
   }
 
-  // 校验"output_name 在同一 agent 内唯一"/"next_agent 引用的 agent 存在"
+  // 校验"output_name 在同一 agent 内唯一"/"next_agent 引用的 agent id 存在"
   const duplicateOutputNames: Record<string, string[]> = {}
   const invalidNextAgent: Record<string, string[]> = {}
+  const validAgentIds = new Set(agentIds)
 
   for (const agent of agents) {
     const { agent_name, outputs = [] } = agent
@@ -167,7 +184,7 @@ export function validateFlow(flow: Flow): FlowValidationResult {
     const badNextAgents = outputs
       .map((o) => o.next_agent)
       .filter((na): na is string => na !== undefined)
-      .filter((na) => !agentNames.includes(na))
+      .filter((na) => !validAgentIds.has(na))
     if (badNextAgents.length > 0) {
       invalidNextAgent[agent_name] = badNextAgents
     }

@@ -83,15 +83,15 @@ export class FlowRunner {
 
   private handleFlowStart({
     runKey,
-    agentName,
+    agentId,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
 
     // 校验 agent 存在且为 entry
-    const agent = this.findAgent(agentName)
+    const agent = this.findAgentById(agentId)
     if (!agent) {
-      this.fire('flow.signal.error', { msg: `Agent "${agentName}" not found in flow` })
+      this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })
       return
     }
 
@@ -106,7 +106,7 @@ export class FlowRunner {
         runId,
         runKey,
         sessionId,
-        agentName: agent.agent_name,
+        agentId: agent.id,
       })
     })
   }
@@ -169,7 +169,7 @@ export class FlowRunner {
         this.onAgentComplete(agent, result)
       },
       onError: (err) => {
-        this.fire('flow.signal.agentError', { runId, agentName: agent.agent_name, err })
+        this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
         this.updateAgentStatus('completed')
       },
     })
@@ -190,12 +190,12 @@ export class FlowRunner {
 
     // 查找下一个 agent
     const selectedOutput = (agent.outputs ?? []).find((o) => o.output_name === result.outputName)
-    const nextAgentName = selectedOutput?.next_agent
+    const nextAgentId = selectedOutput?.next_agent
 
-    if (nextAgentName) {
-      const nextAgent = this.findAgent(nextAgentName)
+    if (nextAgentId) {
+      const nextAgent = this.findAgentById(nextAgentId)
       if (!nextAgent) {
-        this.fire('flow.signal.error', { msg: `Next agent "${nextAgentName}" not found` })
+        this.fire('flow.signal.error', { msg: `Next agent "${nextAgentId}" not found` })
         this.updateAgentStatus('completed')
         return
       }
@@ -219,8 +219,8 @@ export class FlowRunner {
 
   // ── 工具方法 ────────────────────────────────────────────────────────────
 
-  private findAgent(name: string): Agent | undefined {
-    return (this.flow.agents ?? []).find((a) => a.agent_name === name)
+  private findAgentById(id: string): Agent | undefined {
+    return (this.flow.agents ?? []).find((a) => a.id === id)
   }
 
   private checkSession(runId: string, sessionId: string): boolean {

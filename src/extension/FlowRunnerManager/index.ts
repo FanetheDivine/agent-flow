@@ -20,13 +20,13 @@ export class FlowRunnerManager {
   handleCommand(type: string, data: any): void {
     match(type)
       .with('flow.command.flowStart', () => {
-        const { flowId, runKey, agentName, flow } =
+        const { flowId, runKey, agentId, flow } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow)
         this.registerSignals(flowId, runner)
         this.runners.set(flowId, runner)
-        runner.emit('flow.command.flowStart', { runKey, agentName })
+        runner.emit('flow.command.flowStart', { runKey, agentId })
       })
       .with('flow.command.userMessage', () => {
         const { flowId, ...rest } = data as ExtensionFlowCommandEvents['flow.command.userMessage']
