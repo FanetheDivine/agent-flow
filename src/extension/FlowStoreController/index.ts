@@ -58,5 +58,4 @@ export class FlowStoreController {
     }
     await fs.rename(tmpPath, this.filePath)
   }
-
 }
