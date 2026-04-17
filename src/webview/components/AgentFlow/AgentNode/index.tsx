@@ -1,13 +1,14 @@
 import { memo, useCallback, useState } from 'react'
 import type { FC } from 'react'
 import { App, Tag, Tooltip, Typography } from 'antd'
-import { PlayCircleOutlined, RobotOutlined, EditOutlined, MessageOutlined } from '@ant-design/icons'
+import { PlayCircleOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
+import { ChatMessageIcon } from './ChatMessageIcon'
 
 const handleStyle = {
   height: 16,
@@ -18,34 +19,34 @@ const handleStyle = {
 
 const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const { data } = props
-  const { flowId, agentName } = data
+  const { flowId, agentId, agentName } = data
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
-  const agent: Agent | undefined = flow?.agents?.find((a) => a.agent_name === agentName)
+  const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
   const flowState = useFlowStore((s) => s.flowStates[flowId])
   const saveFlows = useFlowStore((s) => s.saveFlows)
   const runFlow = useFlowStore((s) => s.runFlow)
 
   const destructiveReadOnly = flowState?.status === 'chatting' || flowState?.status === 'preparing'
 
-  const runningAgentName = flowState?.currentAgentName ?? null
-  const isRunning = runningAgentName === agentName
+  const runningAgentId = flowState?.currentAgentId ?? null
+  const isRunning = runningAgentId === agentId
   const isEntry = !!agent?.is_entry
   const outputs = agent?.outputs ?? []
-  const allAgentNames = (flow?.agents ?? []).map((a) => a.agent_name)
+  const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
 
   const handleSaveAgent = useCallback(
-    (originalName: string, updated: Agent) => {
+    (originalId: string, updated: Agent) => {
       saveFlows((flows) => {
         const f = flows.find((f) => f.id === flowId)
         if (!f) return
-        f.agents = (f.agents ?? []).map((a) => (a.agent_name === originalName ? updated : a))
+        f.agents = (f.agents ?? []).map((a) => (a.id === originalId ? updated : a))
       })
     },
     [flowId, saveFlows],
   )
 
-  const handleRun = useCallback(() => runFlow(flowId, agentName), [flowId, agentName, runFlow])
+  const handleRun = useCallback(() => runFlow(flowId, agentId), [flowId, agentId, runFlow])
 
   const [editOpen, setEditOpen] = useState(false)
   const { message, modal } = App.useApp()
@@ -116,17 +117,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               tooltips: false,
             }}
           />
-          {
-            <span
-              className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
-              onClick={(e) => {
-                e.stopPropagation()
-                // TODO: onOpenChat
-              }}
-            >
-              <MessageOutlined />
-            </span>
-          }
+          <ChatMessageIcon flowId={flowId} agentId={agentId} agentName={agentName} />
 
           {
             <span
@@ -192,9 +183,9 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
       <AgentEditModal
         open={editOpen}
         agent={agent ?? null}
-        allAgentNames={allAgentNames}
+        allAgents={allAgents}
         onSave={(updated) => {
-          handleSaveAgent(agentName, updated)
+          handleSaveAgent(agentId, updated)
           setEditOpen(false)
         }}
         onCancel={() => setEditOpen(false)}

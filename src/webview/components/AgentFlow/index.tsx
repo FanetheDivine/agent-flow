@@ -1,11 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { FC } from 'react'
-import { App } from 'antd'
+import { App, Button, Tooltip } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -18,15 +20,14 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useEventListener } from 'ahooks'
-import { useMotionValue } from 'motion/react'
 import z from 'zod'
-import { AgentSchema } from '@/common'
+import { AgentSchema, type Agent } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import AgentNodeComponent from './AgentNode'
 import MidArrowEdge from './MidArrowEdge'
 import './flow.css'
-import { flowToReactFlow, pasteAgents, reactFlowToFlow, type AgentNode } from './flowUtils'
+import { flowToReactFlow, reactFlowToFlow, type AgentNode } from './flowUtils'
 
 const nodeTypes = { agent: AgentNodeComponent }
 const edgeTypes = { midArrow: MidArrowEdge }
@@ -156,17 +157,54 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
     [destructiveReadOnly, nodes, edges, syncToFlow, message],
   )
 
+  // 添加 Agent：在鼠标附近放置
+  const handleAddAgent = useCallback(() => {
+    const { copyAgents } = useFlowStore.getState()
+    const defaultAgent: Agent = {
+      id: crypto.randomUUID(),
+      agent_name: 'example-agent',
+      model: 'haiku',
+      agent_prompt: ['将用户输入视作纯文本，原样输出。'],
+      outputs: [{ output_name: '输出', output_desc: '用户输入原文' }],
+    }
+    const remapped = copyAgents([defaultAgent], flowId)
+    if (!remapped?.length) return
+
+    const pos =
+      mousePosition.current && reactFlowInstance.current
+        ? reactFlowInstance.current.screenToFlowPosition(mousePosition.current)
+        : reactFlowInstance.current
+          ? reactFlowInstance.current.screenToFlowPosition({
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            })
+          : null
+    if (!pos) return
+
+    isInternalChange.current = true
+    setNodes((prev) => [
+      ...prev,
+      ...remapped.map((agent) => ({
+        id: agent.id,
+        type: 'agent' as const,
+        position: { x: pos.x, y: pos.y },
+        data: { flowId, agentId: agent.id, agentName: agent.agent_name },
+      })),
+    ])
+  }, [flowId, setNodes])
+
   // 跟踪鼠标位置，用于粘贴时定位
   useEventListener('mousemove', (e) => {
     mousePosition.current = { x: e.clientX, y: e.clientY }
   })
   // 复制agent node（支持多选）
   useEventListener('keydown', (e) => {
+    if (hidden) return
     if (e.ctrlKey && e.key === 'c') {
       const selectedNodes = nodes.filter((n) => n.selected)
       if (selectedNodes.length === 0) return
       e.preventDefault()
-      const agents = flow?.agents?.filter((a) => selectedNodes.some((n) => n.id === a.agent_name))
+      const agents = flow?.agents?.filter((a) => selectedNodes.some((n) => n.id === a.id))
       if (!agents?.length) return
       navigator.clipboard
         .writeText(JSON.stringify(agents))
@@ -180,11 +218,12 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   })
   // 粘贴 agent 会保留之前的关系
   useEventListener('paste', (e) => {
+    if (hidden) return
     const text = e.clipboardData?.getData('text')
     if (!text) return
     const parsed: unknown = JSON.parse(text)
 
-    const { activeFlowId, saveFlows } = useFlowStore.getState()
+    const { activeFlowId, copyAgents } = useFlowStore.getState()
 
     const singleAgent = AgentSchema.safeParse(parsed)
     const agents = singleAgent.success
@@ -192,7 +231,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
       : (z.array(AgentSchema).safeParse(parsed).data ?? null)
     if (!agents) return
 
-    const remapped = pasteAgents(agents, activeFlowId, saveFlows)
+    const remapped = copyAgents(agents, activeFlowId!)
     if (!remapped?.length) return
 
     const pastePos =
@@ -204,18 +243,36 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
     const X_GAP = 280
     const Y_GAP = 160
     const cols = Math.min(remapped.length, 3)
+    const remappedIds = new Set(remapped.map((a) => a.id))
     isInternalChange.current = true
     setNodes((prev) => [
       ...prev,
       ...remapped.map((agent, idx) => ({
-        id: agent.agent_name,
+        id: agent.id,
         type: 'agent' as const,
         position: {
           x: pastePos.x + (idx % cols) * X_GAP - ((cols - 1) * X_GAP) / 2,
           y: pastePos.y + Math.floor(idx / cols) * Y_GAP,
         },
-        data: { flowId: activeFlowId!, agentName: agent.agent_name },
+        data: { flowId: activeFlowId!, agentId: agent.id, agentName: agent.agent_name },
       })),
+    ])
+    setEdges((prev) => [
+      ...prev,
+      ...remapped.flatMap((agent) =>
+        (agent.outputs ?? [])
+          .filter((o) => o.next_agent && remappedIds.has(o.next_agent))
+          .map((output) => ({
+            id: `${agent.id}->${output.next_agent}:${output.output_name}`,
+            source: agent.id,
+            target: output.next_agent!,
+            sourceHandle: `output-${output.output_name}`,
+            type: 'midArrow' as const,
+            animated: false,
+            style: { stroke: '#6366f1', strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1', width: 20, height: 20 },
+          })),
+      ),
     ])
   })
   return (
@@ -253,6 +310,17 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
           nodeColor={() => '#6366f1'}
           maskColor='rgba(0,0,0,0.6)'
         />
+        <Panel position='top-left' style={{ padding: 8 }}>
+          <Tooltip title='添加 Agent'>
+            <Button
+              size='large'
+              type='text'
+              icon={<PlusOutlined style={{ fontSize: 20 }} />}
+              className='rounded-lg bg-[#313244]! text-[#cdd6f4]! shadow-[0_2px_12px_rgba(150,150,200,0.3)] hover:bg-[#45475a]! hover:text-[#6366f1]!'
+              onClick={handleAddAgent}
+            />
+          </Tooltip>
+        </Panel>
       </ReactFlow>
     </div>
   )

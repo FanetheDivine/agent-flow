@@ -10,13 +10,13 @@ import { buildAgentSystemPrompt } from '@/common'
 export type AgentEditModalProps = {
   open: boolean
   agent: Agent | null
-  allAgentNames: string[]
+  allAgents: { id: string; agent_name: string }[]
   onSave: (agent: Agent) => void
   onCancel: () => void
 }
 
 export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
-  const { open, agent, allAgentNames, onSave, onCancel } = props
+  const { open, agent, allAgents, onSave, onCancel } = props
   const [form] = Form.useForm()
 
   useEffect(() => {
@@ -36,8 +36,8 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
   }, [open, agent, form])
 
   const handleOk = () => {
-    form.validateFields().then((val: Agent) => {
-      onSave(val)
+    form.validateFields().then((val: Omit<Agent, 'id'>) => {
+      onSave({ ...val, id: agent?.id ?? crypto.randomUUID() })
     })
   }
 
@@ -61,8 +61,8 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
             () => ({
               validator(_: any, value: string) {
                 const currentName = agent?.agent_name
-                const others = allAgentNames.filter((n) => n !== currentName)
-                if (others.includes(value)) {
+                const others = allAgents.filter((a) => a.agent_name !== currentName)
+                if (others.some((a) => a.agent_name === value)) {
                   return Promise.reject(new Error('名称已存在'))
                 }
                 return Promise.resolve()
@@ -171,10 +171,8 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                         placeholder='下一个 Agent'
                         size='small'
                         allowClear
-                        options={[
-                          // 包含自身，支持循环
-                          ...allAgentNames.map((n) => ({ label: n, value: n })),
-                        ]}
+                        // 包含自身，支持循环
+                        options={allAgents.map((a) => ({ label: a.agent_name, value: a.id }))}
                       />
                     </Form.Item>
                     <MinusCircleOutlined
