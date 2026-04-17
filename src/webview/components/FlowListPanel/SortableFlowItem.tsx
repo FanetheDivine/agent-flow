@@ -4,8 +4,8 @@ import { HolderOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Flow } from '@/common'
-import { cn } from '@/webview/utils'
 import type { FlowRunState } from '@/webview/store/flow'
+import { cn } from '@/webview/utils'
 
 const STATUS_CONFIG: Record<
   Exclude<FlowRunState['status'], 'ready'>,

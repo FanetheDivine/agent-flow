@@ -2,10 +2,9 @@ import * as fs from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 import { type FlowStore as FlowStoreData, FlowStoreSchema, validateFlow } from '@/common'
+import { defaultStore } from './defaultStore'
 
 const FLOWS_FILENAME = '.agent-flows.json'
-
-const EMPTY_STORE: FlowStoreData = { flows: [] }
 
 function getFlowsPath(): string {
   return path.join(os.homedir(), FLOWS_FILENAME)
@@ -22,7 +21,7 @@ export class FlowStoreController {
       const parsed = FlowStoreSchema.safeParse(json)
 
       if (!parsed.success) {
-        return { ...EMPTY_STORE }
+        return { ...defaultStore }
       }
 
       // 对每个 flow 做语义校验
@@ -37,12 +36,12 @@ export class FlowStoreController {
       })
 
       if (hasSemanticError) {
-        return { ...EMPTY_STORE }
+        return { ...defaultStore }
       }
 
       return parsed.data
     } catch {
-      return { ...EMPTY_STORE }
+      return { ...defaultStore }
     }
   }
 

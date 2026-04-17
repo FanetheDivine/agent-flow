@@ -21,9 +21,7 @@ export const MessageList: FC<Props> = ({ sessions }) => {
       {sessions.map((session, idx) => (
         <div key={session.sessionId}>
           {idx > 0 && (
-            <Divider className='my-2 text-[10px]! text-[#6c7086]!'>
-              第 {idx + 1} 次执行
-            </Divider>
+            <Divider className='my-2 text-[10px]! text-[#6c7086]!'>第 {idx + 1} 次执行</Divider>
           )}
           <div className='flex flex-col gap-2'>
             {session.messages.map((msg, i) => (

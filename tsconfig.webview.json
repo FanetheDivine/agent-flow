@@ -2,10 +2,7 @@
   "compilerOptions": {
     "module": "ES2022",
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM"
-    ],
+    "lib": ["ES2022", "DOM"],
     "jsx": "react-jsx",
     "sourceMap": true,
     "rootDir": "src",
@@ -14,15 +11,8 @@
     "composite": true,
     "skipLibCheck": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     }
   },
-  "include": [
-    "src/webview/**/*.ts",
-    "src/webview/**/*.tsx",
-    "src/common/**/*.ts",
-    "src/extension/FlowStoreController/defaultStore.ts"
-  ]
+  "include": ["src/webview/**/*.ts", "src/webview/**/*.tsx", "src/common/**/*.ts"]
 }
