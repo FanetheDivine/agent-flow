@@ -8,12 +8,9 @@ export * from './event'
 
 /** Agent 的输出分支，同时定义有向图中的一条边 */
 export const OutputSchema = z.object({
-  /** 分支名称（在当前 agent 内唯一） */
-  output_name: z.string(),
-  /** 分支描述（写入提示词，指导 AI 选择） */
-  output_desc: z.string().optional(),
-  /** 下一个进入的agent，省略则表示终点，可以是当前agent */
-  next_agent: z.string().optional(),
+  output_name: z.string().describe('分支名称（在当前 agent 内唯一）'),
+  output_desc: z.string().optional().describe('分支描述（写入提示词，指导 AI 选择正确的输出分支）'),
+  next_agent: z.string().optional().describe('下一个进入的 agent 的 id，省略则表示工作流终点'),
 })
 
 /** @see {@link OutputSchema} */
@@ -21,18 +18,12 @@ export type Output = z.infer<typeof OutputSchema>
 
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
-  /** Agent 唯一 ID */
-  id: z.string(),
-  /** Agent使用的模型 */
-  model: z.string().min(1),
-  /** Agent名称，flow 内唯一的显示名 */
-  agent_name: z.string(),
-  /** 提示词，描述 agent 行为 */
-  agent_prompt: z.array(z.string()),
-  /** 是否可作为 Flow 的入口 Agent */
-  is_entry: z.boolean().optional(),
-  /** 输出分支，可以连接任意数量的agent */
-  outputs: z.array(OutputSchema).optional(),
+  id: z.string().describe('Agent 唯一 ID'),
+  model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）'),
+  agent_name: z.string().describe('Agent 名称，flow 内唯一'),
+  agent_prompt: z.array(z.string()).describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
+  is_entry: z.boolean().optional().describe('是否可作为 Flow 的入口 Agent'),
+  outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
 })
 
 /** @see {@link AgentSchema} */
@@ -40,12 +31,9 @@ export type Agent = z.infer<typeof AgentSchema>
 
 /** Agent 作为节点构成的有向图 */
 export const FlowSchema = z.object({
-  /** Flow 唯一标识 */
-  id: z.string(),
-  /** Flow 名称 */
-  name: z.string(),
-  /** 当前Flow内的agent，其outputs定义了边 */
-  agents: z.array(AgentSchema).optional(),
+  id: z.string().describe('Flow 唯一标识'),
+  name: z.string().describe('Flow 名称'),
+  agents: z.array(AgentSchema).optional().describe('当前 Flow 内的 agent，其 outputs 定义了连接边'),
 })
 
 /** @see {@link FlowSchema} */
@@ -92,7 +80,7 @@ export const RunStateSchema = z.object({
   /** 当前活跃的 agent，最多一个 */
   currentAgent: z
     .object({
-      name: z.string(),
+      id: z.string(),
       /**
        * 运行状态\
        * preparing - agent 正在准备\
@@ -217,6 +205,7 @@ export function buildAgentSystemPrompt(agent: Pick<Agent, 'agent_prompt' | 'outp
     ' - getShareValues：按键读取之前 Agent 设置的数据',
     ' - getAllShareValues：读取全部共享数据',
     ' - setShareValues：写入键值对到共享数据，供后续 Agent 读取',
+    '**重要**：在这个过程中，如果有信息不明确，**禁止**推测，**必须**向用户提问确认。',
     '当你认为任务**已完成**时，先查看 AgentControllerMcp 提供的 AgentComplete 工具的相关信息——它定义了 0 个或多个输出分支。',
     '通过调用 AgentComplete，你可以提交任务结果并选择一个输出分支（如果有的话）。',
     '**重要**：在你实际调用 AgentComplete 之前，**必须**先使用 AskUserQuestion 工具，让用户确认任务结果和输出分支。',

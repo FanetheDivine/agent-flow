@@ -12,6 +12,11 @@ type SignalHandler<K extends keyof FlowRunnerSignalEvents> = (
   data: FlowRunnerSignalEvents[K],
 ) => void
 
+type WildcardSignalHandler = (
+  event: keyof FlowRunnerSignalEvents,
+  data: FlowRunnerSignalEvents[keyof FlowRunnerSignalEvents],
+) => void
+
 export class FlowRunner {
   readonly flow: Flow
 
@@ -19,11 +24,22 @@ export class FlowRunner {
   private currentExecutor: ClaudeExecutor | null = null
   private currentRunId: string | null = null
   private currentSessionId: string | null = null
-  private currentAgentName: string | null = null
+  private currentAgentId: string | null = null
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
+  private wildcardListeners = new Set<WildcardSignalHandler>()
 
   constructor(flow: Flow) {
     this.flow = flow
+  }
+
+  /** 监听所有 signal 事件（通配） */
+  listenAllSignals(handler: WildcardSignalHandler): void {
+    this.wildcardListeners.add(handler)
+  }
+
+  /** 移除通配 signal 事件监听器 */
+  removeAllSignalsListener(handler: WildcardSignalHandler): void {
+    this.wildcardListeners.delete(handler)
   }
 
   /** 监听 Flow 发出的 signal 事件 */
@@ -60,6 +76,7 @@ export class FlowRunner {
   dispose(): void {
     this.killCurrentExecutor()
     this.signalListeners.clear()
+    this.wildcardListeners.clear()
   }
 
   // ── signal 发射 ─────────────────────────────────────────────────────────
@@ -69,12 +86,20 @@ export class FlowRunner {
     data: FlowRunnerSignalEvents[K],
   ): void {
     const set = this.signalListeners.get(event)
-    if (!set) return
-    for (const handler of set) {
+    if (set) {
+      for (const handler of set) {
+        try {
+          handler(data)
+        } catch (err) {
+          console.error(`[FlowRunner] signal handler error (${event}):`, err)
+        }
+      }
+    }
+    for (const handler of this.wildcardListeners) {
       try {
-        handler(data)
+        handler(event, data)
       } catch (err) {
-        console.error(`[FlowRunner] signal handler error (${event}):`, err)
+        console.error(`[FlowRunner] wildcard signal handler error (${event}):`, err)
       }
     }
   }
@@ -85,6 +110,7 @@ export class FlowRunner {
     runKey,
     agentId,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
+    debugger
     // 中断当前运行
     this.killCurrentExecutor()
 
@@ -145,7 +171,7 @@ export class FlowRunner {
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private runAgent(agent: Agent, onSessionId: (sessionId: string) => void): void {
-    this.currentAgentName = agent.agent_name
+    this.currentAgentId = agent.id
     this.updateAgentStatus('preparing')
 
     const runId = this.currentRunId!
@@ -238,8 +264,8 @@ export class FlowRunner {
   }
 
   private updateAgentStatus(status: NonNullable<RunState['currentAgent']>['status']): void {
-    if (this.currentAgentName) {
-      this.runState.currentAgent = { name: this.currentAgentName, status }
+    if (this.currentAgentId) {
+      this.runState.currentAgent = { id: this.currentAgentId, status }
     }
   }
 }

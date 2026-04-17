@@ -1,10 +1,5 @@
 import { match } from 'ts-pattern'
-import type {
-  Flow,
-  ExtensionFlowCommandEvents,
-  FlowRunnerSignalEvents,
-  ExtensionToWebviewMessage,
-} from '@/common'
+import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from '@/common'
 import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
@@ -24,7 +19,9 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow)
-        this.registerSignals(flowId, runner)
+        runner.listenAllSignals((type, data) => {
+          this.postMessage({ type, data: { ...data, flowId } } as ExtensionToWebviewMessage)
+        })
         this.runners.set(flowId, runner)
         runner.emit('flow.command.flowStart', { runKey, agentId })
       })
@@ -51,24 +48,6 @@ export class FlowRunnerManager {
     if (existing) {
       existing.dispose()
       this.runners.delete(flowId)
-    }
-  }
-
-  private registerSignals(flowId: string, runner: FlowRunner): void {
-    const signalTypes: (keyof FlowRunnerSignalEvents)[] = [
-      'flow.signal.flowStart',
-      'flow.signal.aiMessage',
-      'flow.signal.userMessage',
-      'flow.signal.agentComplete',
-      'flow.signal.agentInterrupted',
-      'flow.signal.agentError',
-      'flow.signal.error',
-    ]
-
-    for (const type of signalTypes) {
-      runner.on(type, (data: any) => {
-        this.postMessage({ type, data: { ...data, flowId } } as ExtensionToWebviewMessage)
-      })
     }
   }
 }

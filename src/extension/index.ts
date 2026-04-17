@@ -30,6 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
     const flowStore = new FlowStoreController()
 
     const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
+      console.log('[Extension → Webview]', msg.type, msg.data)
       panel.webview.postMessage(msg)
     }
 
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
     let currentFlows: FlowStoreData = { flows: [] }
 
     panel.webview.onDidReceiveMessage(async (e: ExtensionFromWebviewMessage) => {
+      console.log('[Webview → Extension]', e.type, e.data)
       match(e)
         .with({ type: 'requestFlows' }, async () => {
           currentFlows = await flowStore.loadFlows()
