@@ -110,7 +110,6 @@ export class FlowRunner {
     runKey,
     agentId,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
-    debugger
     // 中断当前运行
     this.killCurrentExecutor()
 
