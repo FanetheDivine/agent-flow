@@ -25,7 +25,7 @@ export const AgentSchema = z.object({
   id: z.string(),
   /** Agent使用的模型 */
   model: z.string().min(1),
-  /** Agent名称，唯一标识 */
+  /** Agent名称，flow 内唯一的显示名 */
   agent_name: z.string(),
   /** 提示词，描述 agent 行为 */
   agent_prompt: z.array(z.string()),
