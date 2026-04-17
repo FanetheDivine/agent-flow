@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { toJSONSchema } from 'zod/v4/core'
-import { type Flow, FlowSchema, AgentSchema, OutputSchema } from '@/common'
+import { type Flow, FlowSchema, AgentSchema, OutputSchema, FlowStore } from '@/common'
 
 const flowSchemaJson = JSON.stringify(
   toJSONSchema(
@@ -17,7 +17,7 @@ const flowSchemaJson = JSON.stringify(
 /**
  * 内置 Flow，不可编辑/删除，始终出现在列表头部
  */
-export const PresetFlows: Flow[] = [
+const PresetFlows: Flow[] = [
   {
     id: '0',
     name: '工作流生成器',
@@ -147,3 +147,7 @@ export const PresetFlows: Flow[] = [
     ],
   },
 ]
+
+export const defaultStore: FlowStore = {
+  flows: PresetFlows,
+}
