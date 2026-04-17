@@ -2,9 +2,10 @@ import * as fs from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 import { type FlowStore as FlowStoreData, FlowStoreSchema, validateFlow } from '@/common'
-import { defaultStore } from './defaultStore'
 
 const FLOWS_FILENAME = '.agent-flows.json'
+
+const EMPTY_STORE: FlowStoreData = { flows: [] }
 
 function getFlowsPath(): string {
   return path.join(os.homedir(), FLOWS_FILENAME)
@@ -20,9 +21,8 @@ export class FlowStoreController {
       const json = JSON.parse(raw)
       const parsed = FlowStoreSchema.safeParse(json)
 
-      if (!parsed.success || parsed.data.flows.length === 0) {
-        await this.writeDefaults()
-        return structuredClone(defaultStore)
+      if (!parsed.success) {
+        return { ...EMPTY_STORE }
       }
 
       // 对每个 flow 做语义校验
@@ -37,15 +37,12 @@ export class FlowStoreController {
       })
 
       if (hasSemanticError) {
-        await this.writeDefaults()
-        return structuredClone(defaultStore)
+        return { ...EMPTY_STORE }
       }
 
       return parsed.data
     } catch {
-      // 文件不存在、非法 JSON 等
-      await this.writeDefaults()
-      return structuredClone(defaultStore)
+      return { ...EMPTY_STORE }
     }
   }
 
@@ -62,7 +59,4 @@ export class FlowStoreController {
     await fs.rename(tmpPath, this.filePath)
   }
 
-  private async writeDefaults(): Promise<void> {
-    await this.saveFlows(defaultStore)
-  }
 }
