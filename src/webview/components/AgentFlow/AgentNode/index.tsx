@@ -118,22 +118,19 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
             }}
           />
           <ChatMessageIcon flowId={flowId} agentId={agentId} agentName={agentName} />
-
-          {
-            <span
-              className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
-              onClick={(e) => {
-                e.stopPropagation()
-                if (destructiveReadOnly) {
-                  message.warning('当前状态不允许编辑 agent')
-                  return
-                }
-                setEditOpen(true)
-              }}
-            >
-              <EditOutlined />
-            </span>
-          }
+          <span
+            className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
+            onClick={(e) => {
+              e.stopPropagation()
+              if (destructiveReadOnly) {
+                message.warning('当前状态不允许编辑 agent')
+                return
+              }
+              setEditOpen(true)
+            }}
+          >
+            <EditOutlined />
+          </span>
         </div>
 
         {/* Agent 信息 */}

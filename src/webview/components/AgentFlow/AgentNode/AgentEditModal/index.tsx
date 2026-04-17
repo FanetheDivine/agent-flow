@@ -121,17 +121,17 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                     >
                       <Input.TextArea rows={6} placeholder='请输入提示词' />
                     </Form.Item>
-                    {fields.length > 1 && (
+                    {/* {fields.length > 1 && (
                       <MinusCircleOutlined
                         className='mt-1.5 cursor-pointer text-[#f38ba8]'
                         onClick={() => remove(name)}
                       />
-                    )}
+                    )} */}
                   </div>
                 ))}
-                <Button type='dashed' onClick={() => add('')} block icon={<PlusOutlined />}>
+                {/* <Button type='dashed' onClick={() => add('')} block icon={<PlusOutlined />}>
                   添加提示词
-                </Button>
+                </Button> */}
               </>
             )}
           </Form.List>

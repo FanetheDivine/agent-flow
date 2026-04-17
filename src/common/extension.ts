@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import { type Agent } from '.'
+import { type Agent, FlowSchema, validateFlow } from '.'
 
 // 仅extension可用
 
@@ -20,6 +20,7 @@ export type AgentMcpServerOptions = {
  * - `setShareValues` — 批量写入 Flow 共享上下文
  * - `getShareValues` — 按键读取共享上下文
  * - `getAllShareValues` — 读取全部共享上下文
+ * - `validateFlow` — 校验工作流定义是否合法
  */
 export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcpServerOptions) {
   const outputs = agent.outputs ?? []
@@ -110,9 +111,50 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
     },
   )
 
+  const validateFlowTool = tool(
+    'validateFlow',
+    '校验工作流定义是否合法。在生成或修改工作流后调用此工具，确保定义符合规则。',
+    {
+      flow: z.string().describe('工作流定义的 JSON 字符串，需符合 Flow 类型'),
+    },
+    async ({ flow }) => {
+      let parsed
+      try {
+        parsed = FlowSchema.parse(JSON.parse(flow))
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `JSON 解析或格式校验失败：${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+        }
+      }
+      const result = validateFlow(parsed)
+      const hasErrors = Object.keys(result).length > 0
+      return {
+        content: [
+          {
+            type: 'text',
+            text: hasErrors
+              ? `校验未通过：\n${JSON.stringify(result, null, 2)}`
+              : '校验通过，工作流定义合法。',
+          },
+        ],
+      }
+    },
+  )
+
   return createSdkMcpServer({
     name: 'AgentControllerMcp',
     version: '1.0.0',
-    tools: [agentCompleteTool, setShareValuesTool, getShareValuesTool, getAllShareValuesTool],
+    tools: [
+      agentCompleteTool,
+      setShareValuesTool,
+      getShareValuesTool,
+      getAllShareValuesTool,
+      validateFlowTool,
+    ],
   })
 }

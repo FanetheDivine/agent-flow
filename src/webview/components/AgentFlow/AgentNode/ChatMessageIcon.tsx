@@ -21,9 +21,10 @@ export const ChatMessageIcon: FC<Props> = ({ flowId, agentId, agentName }) => {
   const hasSessions = (flowState?.sessions.filter((s) => s.agentId === agentId).length ?? 0) > 0
 
   // 有新消息到达当前 agent 时自动弹出
-  const messageCount = flowState?.sessions
-    .filter((s) => s.agentId === agentId)
-    .reduce((n, s) => n + s.messages.length, 0) ?? 0
+  const messageCount =
+    flowState?.sessions
+      .filter((s) => s.agentId === agentId)
+      .reduce((n, s) => n + s.messages.length, 0) ?? 0
 
   useEffect(() => {
     if (isCurrentAgent && messageCount > 0) {

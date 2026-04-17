@@ -278,6 +278,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   return (
     <div className={cn('h-full w-full', { hidden })} tabIndex={-1}>
       <ReactFlow
+        id={flowId}
         onInit={(instance) => {
           reactFlowInstance.current = instance
         }}
