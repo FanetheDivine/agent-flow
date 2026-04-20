@@ -1,6 +1,6 @@
 import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import * as vscode from 'vscode'
-import { Agent, AIMessageType, buildAgentSystemPrompt } from '@/common'
+import { Agent, AIMessageType, buildAgentSystemPrompt, UserMessageType } from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
 
 export type ExecutorResult = {
@@ -45,22 +45,24 @@ export class ClaudeExecutor {
    * @param shareValues - Flow 全局共享上下文（引用传递，MCP 工具直接读写）
    * @param previousOutput - 上一个 Agent 的输出，用于注入 prompt 上下文
    */
-  constructor(agent: Agent, shareValues: Record<string, string>, events: ExecutorEvents) {
+  constructor(
+    initMessage: UserMessageType,
+    agent: Agent,
+    shareValues: Record<string, string>,
+    events: ExecutorEvents,
+  ) {
     this.agent = agent
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     this.prompt = buildAgentSystemPrompt(agent)
     this.mcpServer = buildAgentMcpServer({ agent, shareValues, onComplete: events.onComplete })
-    this.createQuery()
+    this.createQuery(initMessage)
   }
 
   /** 转发用户消息 */
   async sendUserMessage(message: SDKUserMessage) {
     if (this.disposed || this.completed) return
-    if (!this.queryInstance) {
-      await this.createQuery()
-    }
-    this.userInputStream.push(message)
+    this.createQuery(message)
   }
 
   /**
@@ -84,7 +86,7 @@ export class ClaudeExecutor {
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
-  private async createQuery() {
+  private async createQuery(message: UserMessageType) {
     const options: Options = {
       maxTurns: 100,
       model: this.agent.model,
@@ -97,32 +99,24 @@ export class ClaudeExecutor {
     if (this.sessionId) {
       options.resume = this.sessionId
     }
-    // eslint-disable-next-line no-async-promise-executor
-    return new Promise<void>(async (resolve) => {
-      this.queryInstance = query({
-        prompt: this.userInputStream.iterable,
-        options,
-      })
-      this.userInputStream.push({
-        type: 'user',
-        message: { content: '你可以使用哪些tool', role: 'user' },
-        parent_tool_use_id: null,
-      })
-      for await (const msg of this.queryInstance) {
-        console.log(msg)
-        if (this.disposed) break
-        if (!this.sessionId) {
-          if (!msg.session_id) {
-            this.events.onError(new Error(JSON.stringify(msg)))
-            break
-          }
-          this.sessionId = msg.session_id
-          this.events.onSessionId(msg.session_id)
-        }
-        resolve()
-        this.events?.onMessage(msg)
-      }
+    this.queryInstance = query({
+      prompt: this.userInputStream.iterable,
+      options,
     })
+    this.userInputStream.push(message)
+    for await (const msg of this.queryInstance) {
+      if (this.disposed) break
+      if (!this.sessionId) {
+        if (!msg.session_id) {
+          this.events.onError(new Error(JSON.stringify(msg)))
+          break
+        }
+        this.sessionId = msg.session_id
+        this.events.onSessionId(msg.session_id)
+        this.events.onMessage(message)
+      }
+      this.events?.onMessage(msg)
+    }
   }
 
   private abortCurrentQuery(): void {

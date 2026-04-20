@@ -123,7 +123,7 @@ export type ExtensionFlowSignalEvents = TypeWithPrefix<
 /** Flow 指令基础 payload（不含 flowId） */
 type FlowCommandPayload = {
   /** webview 发起启动，key 传入 flow 内部用于校验响应归属 */
-  flowStart: { runKey: string; agentId: string }
+  flowStart: { runKey: string; agentId: string; initMessage: UserMessageType }
   /** 向当前 Agent 发送用户消息，必须在 runId + sessionId 对齐下发生 */
   userMessage: { runId: string; sessionId: string; message: UserMessageType }
   /** 中断当前 Agent，使其等待用户输入 */

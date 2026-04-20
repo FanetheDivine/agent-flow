@@ -5,6 +5,7 @@ import {
   type Flow,
   type RunState,
   type FlowRunnerSignalEvents,
+  UserMessageType,
 } from '@/common'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 
@@ -109,6 +110,7 @@ export class FlowRunner {
   private handleFlowStart({
     runKey,
     agentId,
+    initMessage,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
@@ -126,7 +128,7 @@ export class FlowRunner {
 
     // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
     const runId = this.currentRunId!
-    this.runAgent(agent, (sessionId) => {
+    this.runAgent(initMessage, agent, (sessionId) => {
       this.fire('flow.signal.flowStart', {
         runId,
         runKey,
@@ -169,7 +171,11 @@ export class FlowRunner {
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
-  private runAgent(agent: Agent, onSessionId: (sessionId: string) => void): void {
+  private runAgent(
+    initMessage: UserMessageType,
+    agent: Agent,
+    onSessionId: (sessionId: string) => void,
+  ): void {
     this.currentAgentId = agent.id
     this.updateAgentStatus('preparing')
 
@@ -183,7 +189,7 @@ export class FlowRunner {
 
     this.updateAgentStatus('generating')
 
-    this.currentExecutor = new ClaudeExecutor(agent, this.runState.shareValues, {
+    this.currentExecutor = new ClaudeExecutor(initMessage, agent, this.runState.shareValues, {
       onSessionId,
       onMessage: (message) => {
         const sessionId = this.currentSessionId
@@ -201,20 +207,21 @@ export class FlowRunner {
   }
 
   private onAgentComplete(agent: Agent, result: ExecutorResult): void {
+    const { outputName, content } = result
     const runId = this.currentRunId!
     const sessionId = this.currentSessionId!
 
     // 记录 step output
     const currentStep = this.runState.steps[this.runState.steps.length - 1]
-    if (currentStep && result.outputName) {
+    if (currentStep && outputName) {
       currentStep.output = {
-        output_name: result.outputName,
-        content: result.content,
+        output_name: outputName,
+        content,
       }
     }
 
     // 查找下一个 agent
-    const selectedOutput = (agent.outputs ?? []).find((o) => o.output_name === result.outputName)
+    const selectedOutput = (agent.outputs ?? []).find((o) => o.output_name === outputName)
     const nextAgentId = selectedOutput?.next_agent
 
     if (nextAgentId) {
@@ -226,15 +233,26 @@ export class FlowRunner {
       }
 
       // 切换到下一个 agent
-      this.runAgent(nextAgent, (newSessionId) => {
-        this.currentSessionId = newSessionId
-        this.fire('flow.signal.agentComplete', {
-          runId,
-          sessionId,
-          content: result.content,
-          output: { name: result.outputName!, newSessionId },
-        })
-      })
+      this.runAgent(
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content,
+          },
+          parent_tool_use_id: null,
+        },
+        nextAgent,
+        (newSessionId) => {
+          this.currentSessionId = newSessionId
+          this.fire('flow.signal.agentComplete', {
+            runId,
+            sessionId,
+            content: result.content,
+            output: { name: result.outputName!, newSessionId },
+          })
+        },
+      )
     } else {
       // Flow 结束
       this.fire('flow.signal.agentComplete', { runId, sessionId, content: result.content })
