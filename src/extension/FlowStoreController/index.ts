@@ -27,12 +27,7 @@ export class FlowStoreController {
       // 对每个 flow 做语义校验
       const hasSemanticError = parsed.data.flows.some((flow) => {
         const result = validateFlow(flow)
-        return (
-          result.duplicateAgentNames ||
-          result.invalidNextAgent ||
-          result.duplicateOutputNames ||
-          result.noEntry
-        )
+        return result.duplicateAgentNames || result.invalidNextAgent || result.duplicateOutputNames
       })
 
       if (hasSemanticError) {

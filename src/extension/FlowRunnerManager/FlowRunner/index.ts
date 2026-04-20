@@ -115,7 +115,7 @@ export class FlowRunner {
     // 中断当前运行
     this.killCurrentExecutor()
 
-    // 校验 agent 存在且为 entry
+    // 校验 agent 存在
     const agent = this.findAgentById(agentId)
     if (!agent) {
       this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })

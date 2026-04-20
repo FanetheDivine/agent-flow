@@ -1,7 +1,7 @@
 import { produce } from 'immer'
 import { match } from 'ts-pattern'
 import { create } from 'zustand'
-import type { Agent, Flow, ExtensionToWebviewMessage } from '@/common'
+import type { Agent, Flow, ExtensionToWebviewMessage, UserMessageType } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
 export type AgentSession = {
@@ -37,7 +37,7 @@ type FlowStoreType = FlowState & {
   /** 初始化：请求 flows 并订阅 extension 消息，返回 cleanup 函数 */
   init: () => () => void
   setActiveFlowId: (id: string) => void
-  runFlow: (flowId: string, agentId: string) => void
+  runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   saveFlows: (updateFn: (val: Flow[]) => void) => void
   sendUserMessage: (flowId: string, text: string) => void
   interruptAgent: (flowId: string) => void
@@ -166,12 +166,10 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
       return subscribeExtensionMessage(onMessage)
     },
-    runFlow: (flowId, agentId) => {
+    runFlow: (flowId, agentId, initMessage) => {
       const { flows } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
-      const entryAgent = flow.agents?.find((a) => a.id === agentId && a.is_entry)
-      if (!entryAgent) return
       const runKey = crypto.randomUUID()
       immerSet((draft) => {
         draft.flowStates[flowId] = {
@@ -182,7 +180,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
       postMessageToExtension({
         type: 'flow.command.flowStart',
-        data: { flowId, runKey, agentId },
+        data: { flowId, runKey, agentId, initMessage },
       })
     },
     setActiveFlowId: (id) => {

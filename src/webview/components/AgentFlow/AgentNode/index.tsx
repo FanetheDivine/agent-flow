@@ -3,7 +3,7 @@ import type { FC } from 'react'
 import { App, Tag, Tooltip, Typography } from 'antd'
 import { PlayCircleOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import type { Agent } from '@/common'
+import type { Agent, UserMessageType } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
@@ -31,7 +31,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const runningAgentId = flowState?.currentAgentId ?? null
   const isRunning = runningAgentId === agentId
-  const isEntry = !!agent?.is_entry
   const outputs = agent?.outputs ?? []
   const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
 
@@ -46,7 +45,10 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
     [flowId, saveFlows],
   )
 
-  const handleRun = useCallback(() => runFlow(flowId, agentId), [flowId, agentId, runFlow])
+  const handleRun = useCallback(
+    (initMessage: UserMessageType) => runFlow(flowId, agentId, initMessage),
+    [flowId, agentId, runFlow],
+  )
 
   const [editOpen, setEditOpen] = useState(false)
   const { message, modal } = App.useApp()
@@ -85,28 +87,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               {agentName}
             </Typography.Text>
           </div>
-          {isEntry && (
-            <Tag
-              color='green'
-              className={cn(
-                'm-0 cursor-pointer border-0 px-1 py-0 text-[10px] leading-4 hover:opacity-80',
-              )}
-              onClick={() => {
-                if (destructiveReadOnly) {
-                  modal.confirm({
-                    title: '是否启动新 Flow？',
-                    content:
-                      '当前 Flow 将会强制结束，所有数据被清空。推荐使用复制 Flow 功能以保留当前记录。',
-                    onOk: handleRun,
-                  })
-                } else {
-                  handleRun()
-                }
-              }}
-            >
-              <PlayCircleOutlined />
-            </Tag>
-          )}
 
           <Typography.Text
             copyable={{

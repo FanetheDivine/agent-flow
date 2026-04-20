@@ -17,13 +17,11 @@ export type AgentNode = Node<AgentNodeData, 'agent'>
 
 /** 将 Flow 中的 Agent 列表布局为 ReactFlow 节点 */
 function agentsToNodes(flowId: string, agents: Agent[]): AgentNode[] {
-  // 简易分层布局：entry 节点在顶层，之后按 BFS 层级递增 y
-  const entryAgents = agents.filter((a) => a.is_entry)
-  const entryIds = new Set(entryAgents.map((a) => a.id))
+  const ids = new Set(agents.map((a) => a.id))
 
   // BFS 分层
   const levelMap = new Map<string, number>()
-  const queue: Array<{ id: string; level: number }> = entryAgents.map((a) => ({
+  const queue: Array<{ id: string; level: number }> = agents.map((a) => ({
     id: a.id,
     level: 0,
   }))
@@ -31,7 +29,7 @@ function agentsToNodes(flowId: string, agents: Agent[]): AgentNode[] {
   // 未被连接的节点放到最后一层
   const maxLevel = agents.length
   for (const a of agents) {
-    if (!entryIds.has(a.id)) {
+    if (!ids.has(a.id)) {
       levelMap.set(a.id, maxLevel)
     }
   }

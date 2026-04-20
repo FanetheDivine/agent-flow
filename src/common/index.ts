@@ -22,7 +22,6 @@ export const AgentSchema = z.object({
   model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）'),
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),
   agent_prompt: z.array(z.string()).describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
-  is_entry: z.boolean().optional().describe('是否可作为 Flow 的入口 Agent'),
   outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
 })
 
@@ -112,8 +111,6 @@ export type FlowValidationResult = {
   invalidNextAgent?: Record<string, string[]>
   /** 同一 agent 内重复的 output_name，按 agent_name 分组，值为重复的 output_name 数组 */
   duplicateOutputNames?: Record<string, string[]>
-  /** 是否缺少入口 agent（没有任何 is_entry 为 true 的 agent） */
-  noEntry?: boolean
 }
 
 /**
@@ -124,7 +121,6 @@ export type FlowValidationResult = {
  * - agent_name 在 flow 内唯一
  * - output_name 在同一 agent 内唯一
  * - next_agent 引用的 agent id 存在
- * - Flow 中至少有一个 is_entry: true 的 agent
  *
  * @param flow - 待校验的 Flow 对象
  */
@@ -183,11 +179,6 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   }
   if (Object.keys(invalidNextAgent).length > 0) {
     result.invalidNextAgent = invalidNextAgent
-  }
-
-  // Flow 中至少有一个 is_entry: true 的 agent
-  if (!agents.some((a) => a.is_entry)) {
-    result.noEntry = true
   }
 
   return result

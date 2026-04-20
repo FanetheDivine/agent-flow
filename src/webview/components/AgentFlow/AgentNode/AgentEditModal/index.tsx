@@ -24,7 +24,6 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       form.setFieldsValue({
         agent_name: agent.agent_name,
         model: agent.model,
-        is_entry: agent.is_entry ?? false,
         agent_prompt: agent.agent_prompt,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
@@ -87,10 +86,6 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               { label: 'opus', value: 'opus' },
             ]}
           />
-        </Form.Item>
-
-        <Form.Item name='is_entry' label='入口 Agent' valuePropName='checked'>
-          <Switch />
         </Form.Item>
 
         <Form.Item
