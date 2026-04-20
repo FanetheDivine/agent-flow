@@ -61,7 +61,7 @@ export function activate(context: vscode.ExtensionContext) {
             runnerManager.handleCommand(type, data)
           }
         })
-        .otherwise(() => {})
+        .exhaustive()
     })
 
     panel.onDidDispose(() => {
