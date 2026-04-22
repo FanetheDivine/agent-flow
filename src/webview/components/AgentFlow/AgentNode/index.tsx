@@ -154,11 +154,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
           <Popover
             open={chatOpen && flowId === activeFlowId}
-            onOpenChange={(val) => {
-              debugger
-              ;(flowId, activeFlowId, chatOpen)
-              setChatOpen(val)
-            }}
+            onOpenChange={setChatOpen}
             content={
               <ChatPanel flowId={flowId} agentId={agentId} agentName={agentName} onSend={onSend} />
             }
