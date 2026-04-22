@@ -2,23 +2,21 @@ import { useState, useCallback } from 'react'
 import type { FC } from 'react'
 import { Input, Button } from 'antd'
 import { SendOutlined } from '@ant-design/icons'
-import { useFlowStore } from '@/webview/store/flow'
 
 type Props = {
-  flowId: string
-  disabled: boolean
+  onSend: (text: string) => void
+  placeholder?: string
 }
 
-export const ChatInput: FC<Props> = ({ flowId, disabled }) => {
+export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...' }) => {
   const [text, setText] = useState('')
-  const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed) return
-    sendUserMessage(flowId, trimmed)
+    onSend(trimmed)
     setText('')
-  }, [text, flowId, sendUserMessage])
+  }, [text, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -33,8 +31,7 @@ export const ChatInput: FC<Props> = ({ flowId, disabled }) => {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? '等待中...' : '输入消息...'}
-        disabled={disabled}
+        placeholder={placeholder}
         autoSize={{ minRows: 1, maxRows: 4 }}
         className='flex-1 text-xs'
       />
@@ -42,7 +39,7 @@ export const ChatInput: FC<Props> = ({ flowId, disabled }) => {
         type='primary'
         size='small'
         icon={<SendOutlined />}
-        disabled={disabled || !text.trim()}
+        disabled={!text.trim()}
         onClick={handleSend}
       />
     </div>

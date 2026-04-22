@@ -9,9 +9,10 @@ type Props = {
   flowId: string
   agentId: string
   agentName: string
+  onSend: (text: string) => void
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName }) => {
+export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => {
   const flowState = useFlowStore((s) => s.flowStates[flowId])
   const interruptAgent = useFlowStore((s) => s.interruptAgent)
 
@@ -79,7 +80,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName }) => {
       )}
 
       {/* Input */}
-      <ChatInput flowId={flowId} disabled={!canInput} />
+      <ChatInput onSend={onSend} placeholder={canInput ? '输入消息...' : '输入消息以运行...'} />
     </div>
   )
 }

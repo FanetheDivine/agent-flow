@@ -20,7 +20,7 @@ export class FlowStoreController {
       const json = JSON.parse(raw)
       const parsed = FlowStoreSchema.safeParse(json)
 
-      if (!parsed.success) {
+      if (!parsed.success || parsed.data.flows.length === 0) {
         return { ...defaultStore }
       }
 

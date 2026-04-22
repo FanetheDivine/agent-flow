@@ -1,14 +1,14 @@
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import type { FC } from 'react'
-import { App, Tag, Tooltip, Typography } from 'antd'
-import { PlayCircleOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons'
+import { App, Badge, Popover, Tag, Tooltip, Typography } from 'antd'
+import { EditOutlined, MessageOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent, UserMessageType } from '@/common'
-import { useFlowStore } from '@/webview/store/flow'
+import { useFlowStore, type AgentSession } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
-import { ChatMessageIcon } from './ChatMessageIcon'
+import { ChatPanel } from './ChatPanel'
 
 const handleStyle = {
   height: 16,
@@ -24,16 +24,42 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
   const flowState = useFlowStore((s) => s.flowStates[flowId])
+  const activeFlowId = useFlowStore((s) => s.activeFlowId)
+  const setActiveFlowId = useFlowStore((s) => s.setActiveFlowId)
   const saveFlows = useFlowStore((s) => s.saveFlows)
   const runFlow = useFlowStore((s) => s.runFlow)
+  const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
+
+  const { message, modal } = App.useApp()
 
   const destructiveReadOnly = flowState?.status === 'chatting' || flowState?.status === 'preparing'
 
-  const runningAgentId = flowState?.currentAgentId ?? null
-  const isRunning = runningAgentId === agentId
+  const isCurrentAgent = flowState?.currentAgentId === agentId
   const outputs = agent?.outputs ?? []
   const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
 
+  // ── Chat popover state ──
+  const [chatOpen, setChatOpen] = useState(false)
+
+  useEffect(() => {
+    const countFor = (sessions: AgentSession[]) =>
+      sessions.filter((s) => s.agentId === agentId).reduce((n, s) => n + s.messages.length, 0)
+
+    return useFlowStore.subscribe((state, prev) => {
+      const currState = state.flowStates[flowId]
+      const prevState = prev.flowStates[flowId]
+      const isCurrent = currState?.currentAgentId === agentId
+      const hasSession = (currState?.sessions.filter((s) => s.agentId === agentId).length ?? 0) > 0
+      if (isCurrent && countFor(currState?.sessions ?? []) > countFor(prevState?.sessions ?? [])) {
+        setChatOpen(true)
+      }
+      if (!isCurrent && !hasSession && currState?.status !== 'preparing') {
+        setChatOpen(false)
+      }
+    })
+  }, [flowId, agentId])
+
+  // ── Handlers ──
   const handleSaveAgent = useCallback(
     (originalId: string, updated: Agent) => {
       saveFlows((flows) => {
@@ -50,15 +76,43 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
     [flowId, agentId, runFlow],
   )
 
+  const onSend = useCallback(
+    (text: string) => {
+      const status = flowState?.status
+
+      if (status === 'waiting-user' && isCurrentAgent) {
+        sendUserMessage(flowId, text)
+        return
+      }
+
+      const initMessage: UserMessageType = {
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+      }
+
+      if (!status || status === 'ready') {
+        handleRun(initMessage)
+        return
+      }
+
+      modal.confirm({
+        title: '确认运行',
+        content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
+        onOk: () => handleRun(initMessage),
+      })
+    },
+    [flowState, isCurrentAgent, flowId, sendUserMessage, handleRun, modal],
+  )
+
   const [editOpen, setEditOpen] = useState(false)
-  const { message, modal } = App.useApp()
 
   return (
     <>
       <div
         className={cn(
           'max-w-60 min-w-45 rounded-[10px] border border-[#45475a] bg-[#1e1e2e] p-0 text-[13px] shadow-[0_4px_16px_rgba(0,0,0,0.3)] transition-[box-shadow,border-color] duration-200 hover:border-[#6366f1] hover:shadow-[0_4px_24px_rgba(99,102,241,0.25)]',
-          isRunning && 'agent-node-running border-[#a6e3a1]',
+          isCurrentAgent && 'agent-node-running border-[#a6e3a1]',
         )}
       >
         {/* target handle：只接受连线，不允许从此拖出连线 */}
@@ -97,7 +151,28 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               tooltips: false,
             }}
           />
-          <ChatMessageIcon flowId={flowId} agentId={agentId} agentName={agentName} />
+
+          <Popover
+            open={chatOpen && flowId === activeFlowId}
+            onOpenChange={(val) => {
+              debugger
+              ;(flowId, activeFlowId, chatOpen)
+              setChatOpen(val)
+            }}
+            content={
+              <ChatPanel flowId={flowId} agentId={agentId} agentName={agentName} onSend={onSend} />
+            }
+            trigger='click'
+            placement='rightTop'
+            arrow={false}
+            overlayInnerStyle={{ padding: 0, overflow: 'hidden' }}
+          >
+            <span className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'>
+              <Badge dot={isCurrentAgent} offset={[-2, 2]}>
+                <MessageOutlined className='text-xs text-[#a6adc8]' />
+              </Badge>
+            </span>
+          </Popover>
           <span
             className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
             onClick={(e) => {
