@@ -150,7 +150,7 @@ export class FlowRunner {
     this.currentExecutor.sendUserMessage(message)
 
     // 回显
-    this.fire('flow.signal.userMessage', { runId, sessionId, message })
+    this.fire('flow.signal.aiMessage', { runId, sessionId, message })
   }
 
   private async handleInterrupt({

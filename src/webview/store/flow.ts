@@ -7,7 +7,7 @@ import { postMessageToExtension, subscribeExtensionMessage } from '../utils/Exte
 export type AgentSession = {
   sessionId: string
   agentId: string
-  agentName: string
+  /** 当前session的message */
   messages: ExtensionToWebviewMessage[]
   completed: boolean
   outputName?: string
@@ -17,6 +17,7 @@ export type FlowRunState = {
   runKey: string
   /** ready: 未启动 | preparing: 启动中 | chatting: AI生成中 | waiting-user: 等待用户输入 | completed: 完成 | error: 出错 */
   status: 'ready' | 'preparing' | 'chatting' | 'waiting-user' | 'completed' | 'error'
+  /** 每个flow拥有的session */
   sessions: AgentSession[]
   runId?: string
   currentSessionId?: string
@@ -93,7 +94,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             fs.sessions.push({
               sessionId: msg.data.sessionId,
               agentId: msg.data.agentId,
-              agentName: agent?.agent_name ?? '',
               messages: [],
               completed: false,
             })
@@ -106,7 +106,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           session?.messages.push(msg)
 
           match(msg)
-            .with({ type: 'flow.signal.userMessage' }, () => {})
             .with({ type: 'flow.signal.aiMessage' }, ({ data }) => {
               const { message } = data
               switch (message.type) {
@@ -140,7 +139,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                   fs.sessions.push({
                     sessionId: data.output.newSessionId,
                     agentId: nextAgentId,
-                    agentName: nextAgent?.agent_name ?? '',
                     messages: [],
                     completed: false,
                   })

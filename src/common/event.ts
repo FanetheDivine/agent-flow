@@ -92,10 +92,8 @@ export type ExtensionToWebviewMessage = EventMessageType<ExtensionToWebviewEvent
 type FlowSignalPayload = {
   /** Flow 启动成功，携带 key 供 webview 校验归属 */
   flowStart: { runId: string; runKey: string; sessionId: string; agentId: string }
-  /** AI 输出（流式），必须在 runId + sessionId 对齐下发生 */
+  /** AI 输出（流式），必须在 runId + sessionId 对齐下发生。用户消息会也会被视作aiMessage。 */
   aiMessage: { runId: string; sessionId: string; message: AIMessageType }
-  /** 回显用户消息，确保 webview 与 flow 数据一致 */
-  userMessage: { runId: string; sessionId: string; message: UserMessageType }
   /** Agent 执行完成，选择了输出分支；output.newSessionId 为下一轮交互的新 session */
   agentComplete: {
     runId: string
