@@ -129,6 +129,7 @@ export class FlowRunner {
     // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
     const runId = this.currentRunId!
     this.runAgent(initMessage, agent, (sessionId) => {
+      this.currentSessionId = sessionId
       this.fire('flow.signal.flowStart', {
         runId,
         runKey,
