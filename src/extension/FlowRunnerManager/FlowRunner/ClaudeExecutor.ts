@@ -62,7 +62,13 @@ export class ClaudeExecutor {
   /** 转发用户消息 */
   async sendUserMessage(message: SDKUserMessage) {
     if (this.disposed || this.completed) return
-    this.createQuery(message)
+    if (this.queryInstance) {
+      // 当前 query 仍在运行（如等待 AskUserQuestion 的 tool_result），直接推入流
+      this.userInputStream.push(message)
+    } else {
+      // query 已结束（中断/完成），创建新 query 并 resume
+      this.createQuery(message)
+    }
   }
 
   /**
@@ -104,18 +110,22 @@ export class ClaudeExecutor {
       options,
     })
     this.userInputStream.push(message)
-    for await (const msg of this.queryInstance) {
-      if (this.disposed) break
-      if (!this.sessionId) {
-        if (!msg.session_id) {
-          this.events.onError(new Error(JSON.stringify(msg)))
-          break
+    try {
+      for await (const msg of this.queryInstance) {
+        if (this.disposed) break
+        if (!this.sessionId) {
+          if (!msg.session_id) {
+            this.events.onError(new Error(JSON.stringify(msg)))
+            break
+          }
+          this.sessionId = msg.session_id
+          this.events.onSessionId(msg.session_id)
+          this.events.onMessage(message)
         }
-        this.sessionId = msg.session_id
-        this.events.onSessionId(msg.session_id)
-        this.events.onMessage(message)
+        this.events?.onMessage(msg)
       }
-      this.events?.onMessage(msg)
+    } finally {
+      this.queryInstance = null
     }
   }
 

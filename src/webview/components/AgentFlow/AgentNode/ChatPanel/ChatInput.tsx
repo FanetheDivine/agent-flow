@@ -1,46 +1,36 @@
 import { useState, useCallback } from 'react'
 import type { FC } from 'react'
-import { Input, Button } from 'antd'
-import { SendOutlined } from '@ant-design/icons'
+import { Sender } from '@ant-design/x'
 
 type Props = {
   onSend: (text: string) => void
   placeholder?: string
+  disabled?: boolean
 }
 
-export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...' }) => {
-  const [text, setText] = useState('')
+export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...', disabled }) => {
+  const [value, setValue] = useState('')
 
-  const handleSend = useCallback(() => {
-    const trimmed = text.trim()
-    if (!trimmed) return
-    onSend(trimmed)
-    setText('')
-  }, [text, onSend])
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
+  const handleSubmit = useCallback(
+    (msg: string) => {
+      const trimmed = msg.trim()
+      if (!trimmed) return
+      onSend(trimmed)
+      setValue('')
+    },
+    [onSend],
+  )
 
   return (
-    <div className='flex items-end gap-2 border-t border-[#45475a] px-3 py-2'>
-      <Input.TextArea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
+    <div className='border-t border-[#45475a] px-2 py-2'>
+      <Sender
+        value={value}
+        onChange={setValue}
+        onSubmit={handleSubmit}
         placeholder={placeholder}
+        disabled={disabled}
         autoSize={{ minRows: 1, maxRows: 4 }}
-        className='flex-1 text-xs'
-      />
-      <Button
-        type='primary'
-        size='small'
-        icon={<SendOutlined />}
-        disabled={!text.trim()}
-        onClick={handleSend}
+        submitType='enter'
       />
     </div>
   )

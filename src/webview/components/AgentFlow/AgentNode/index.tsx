@@ -29,6 +29,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const saveFlows = useFlowStore((s) => s.saveFlows)
   const runFlow = useFlowStore((s) => s.runFlow)
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
+  const sendToolResult = useFlowStore((s) => s.sendToolResult)
 
   const { message, modal } = App.useApp()
 
@@ -77,11 +78,19 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   )
 
   const onSend = useCallback(
-    (text: string) => {
+    (text: string, pendingToolUseId?: string) => {
       const status = flowState?.status
 
       if (status === 'waiting-user' && isCurrentAgent) {
-        sendUserMessage(flowId, text)
+        if (pendingToolUseId) {
+          // 用户用自由文本回答 AskUserQuestion：整段文本作为唯一答案回传
+          sendToolResult(flowId, pendingToolUseId, {
+            questions: [],
+            answers: { __freeText__: text },
+          })
+        } else {
+          sendUserMessage(flowId, text)
+        }
         return
       }
 
@@ -102,7 +111,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
         onOk: () => handleRun(initMessage),
       })
     },
-    [flowState, isCurrentAgent, flowId, sendUserMessage, handleRun, modal],
+    [flowState, isCurrentAgent, flowId, sendUserMessage, sendToolResult, handleRun, modal],
   )
 
   const [editOpen, setEditOpen] = useState(false)

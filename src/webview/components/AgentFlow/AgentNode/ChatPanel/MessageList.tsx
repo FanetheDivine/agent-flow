@@ -1,36 +1,61 @@
-import { useEffect, useRef } from 'react'
+import { useMemo } from 'react'
 import type { FC } from 'react'
 import { Divider } from 'antd'
+import { Bubble } from '@ant-design/x'
+import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
 import type { AgentSession } from '@/webview/store/flow'
-import { MessageBubble } from './MessageBubble'
+import { toBubbleItems, type BubbleCtx } from './MessageBubble'
 
 type Props = {
   sessions: AgentSession[]
+  ctx?: BubbleCtx
 }
 
-export const MessageList: FC<Props> = ({ sessions }) => {
-  const bottomRef = useRef<HTMLDivElement>(null)
+const roleMap = {
+  user: {
+    placement: 'end' as const,
+    variant: 'filled' as const,
+  },
+  ai: {
+    placement: 'start' as const,
+    variant: 'filled' as const,
+  },
+  system: {
+    placement: 'start' as const,
+    variant: 'borderless' as const,
+  },
+}
 
-  const totalMessages = sessions.reduce((n, s) => n + s.messages.length, 0)
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [totalMessages])
+export const MessageList: FC<Props> = ({ sessions, ctx }) => {
+  const items = useMemo<BubbleItemType[]>(() => {
+    const result: BubbleItemType[] = []
+    sessions.forEach((session, idx) => {
+      if (idx > 0) {
+        result.push({
+          key: `divider-${session.sessionId}`,
+          role: 'divider',
+          content: (
+            <Divider className='my-1 text-[10px]! text-[#6c7086]!'>第 {idx + 1} 次执行</Divider>
+          ),
+        })
+      }
+      toBubbleItems(session.messages, ctx).forEach((item) => {
+        result.push({
+          key: `${session.sessionId}-${item.key}`,
+          role: item.role,
+          content: item.content,
+        })
+      })
+    })
+    return result
+  }, [sessions, ctx])
 
   return (
-    <div className='flex-1 overflow-y-auto px-3 py-2'>
-      {sessions.map((session, idx) => (
-        <div key={session.sessionId}>
-          {idx > 0 && (
-            <Divider className='my-2 text-[10px]! text-[#6c7086]!'>第 {idx + 1} 次执行</Divider>
-          )}
-          <div className='flex flex-col gap-2'>
-            {session.messages.map((msg, i) => (
-              <MessageBubble key={i} msg={msg} />
-            ))}
-          </div>
-        </div>
-      ))}
-      <div ref={bottomRef} />
-    </div>
+    <Bubble.List
+      autoScroll
+      role={roleMap}
+      items={items}
+      className='flex-1 overflow-y-auto px-3 py-2'
+    />
   )
 }

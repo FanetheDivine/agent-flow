@@ -1,7 +1,13 @@
 import { produce } from 'immer'
 import { match } from 'ts-pattern'
 import { create } from 'zustand'
-import type { Agent, Flow, ExtensionToWebviewMessage, UserMessageType } from '@/common'
+import type {
+  Agent,
+  Flow,
+  ExtensionToWebviewMessage,
+  UserMessageType,
+  AskUserQuestionOutput,
+} from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
 export type AgentSession = {
@@ -41,6 +47,7 @@ type FlowStoreType = FlowState & {
   runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   saveFlows: (updateFn: (val: Flow[]) => void) => void
   sendUserMessage: (flowId: string, text: string) => void
+  sendToolResult: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
   interruptAgent: (flowId: string) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
@@ -206,6 +213,34 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             type: 'user',
             message: { role: 'user', content: text },
             parent_tool_use_id: null,
+          },
+        },
+      })
+    },
+    sendToolResult: (flowId, toolUseId, output) => {
+      const { flowStates } = get()
+      const fs = flowStates[flowId]
+      if (!fs?.runId || !fs.currentSessionId) return
+      postMessageToExtension({
+        type: 'flow.command.userMessage',
+        data: {
+          flowId,
+          runId: fs.runId,
+          sessionId: fs.currentSessionId,
+          message: {
+            type: 'user',
+            parent_tool_use_id: toolUseId,
+            message: {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: toolUseId,
+                  content: JSON.stringify(output),
+                },
+              ],
+            },
+            tool_use_result: output,
           },
         },
       })

@@ -38,6 +38,28 @@ export const FlowSchema = z.object({
 /** @see {@link FlowSchema} */
 export type Flow = z.infer<typeof FlowSchema>
 
+/** AskUserQuestion 工具的 input 结构（SDK 内建工具，claude_code 预设提供） */
+export type AskUserQuestionOption = {
+  label: string
+  description: string
+  preview?: string
+}
+export type AskUserQuestionItem = {
+  question: string
+  header: string
+  multiSelect?: boolean
+  options: AskUserQuestionOption[]
+}
+export type AskUserQuestionInput = {
+  questions: AskUserQuestionItem[]
+}
+export type AskUserQuestionOutput = {
+  questions: AskUserQuestionItem[]
+  /** 每个 question 对应的答案；多选以英文逗号分隔 */
+  answers: Record<string, string>
+  annotations?: Record<string, { notes?: string; preview?: string }>
+}
+
 /** 缓存至本地的flows */
 export const FlowStoreSchema = z.object({ flows: z.array(FlowSchema) })
 
