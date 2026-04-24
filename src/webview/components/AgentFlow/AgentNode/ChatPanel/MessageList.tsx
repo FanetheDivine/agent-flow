@@ -29,6 +29,8 @@ const roleMap = {
 export const MessageList: FC<Props> = ({ sessions, ctx }) => {
   const items = useMemo<BubbleItemType[]>(() => {
     const result: BubbleItemType[] = []
+    // 跨 session 共享，防止 SDK 历史 replay 导致同一 tool_use 被重复渲染
+    const seenToolUseIds = new Set<string>()
     sessions.forEach((session, idx) => {
       if (idx > 0) {
         result.push({
@@ -39,7 +41,7 @@ export const MessageList: FC<Props> = ({ sessions, ctx }) => {
           ),
         })
       }
-      toBubbleItems(session.messages, ctx).forEach((item) => {
+      toBubbleItems(session.messages, ctx, seenToolUseIds).forEach((item) => {
         result.push({
           key: `${session.sessionId}-${item.key}`,
           role: item.role,

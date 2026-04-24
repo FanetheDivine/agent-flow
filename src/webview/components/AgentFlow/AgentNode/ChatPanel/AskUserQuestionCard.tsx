@@ -1,6 +1,6 @@
 import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
-import { CheckOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import type {
   AskUserQuestionInput,
   AskUserQuestionItem,
@@ -15,13 +15,14 @@ type Props = {
   /** 历史态时是否由自由文本作答 */
   answeredByFreeText?: boolean
   onSubmit?: (output: AskUserQuestionOutput) => void
+  onDismiss?: () => void
 }
 
 type Selections = Record<number, string[]>
-type OtherState = { text: string; confirmed: boolean }
+type OtherState = { text: string }
 
 const OTHER_LABEL = 'Other'
-const OTHER_OPTION = { label: OTHER_LABEL, description: '自定义回答（需要确认）' }
+const OTHER_OPTION = { label: OTHER_LABEL, description: '自定义回答' }
 
 function buildOutput(
   questions: AskUserQuestionItem[],
@@ -29,22 +30,13 @@ function buildOutput(
   otherStates: Record<number, OtherState>,
 ): AskUserQuestionOutput {
   const answers: Record<string, string> = {}
-  const annotations: Record<string, { notes?: string; preview?: string }> = {}
   questions.forEach((q, i) => {
     const sel = selections[i] ?? []
     const o = otherStates[i]
-    // 将 "Other" 替换为用户自定义文本，保证 answers 可读
     const effective = sel.map((s) => (s === OTHER_LABEL && o?.text ? o.text : s))
     answers[q.question] = effective.join(',')
-    if (sel.includes(OTHER_LABEL) && o?.confirmed && o.text) {
-      annotations[q.question] = { notes: o.text }
-    }
   })
-  return {
-    questions,
-    answers,
-    ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
-  }
+  return { questions, answers }
 }
 
 export const AskUserQuestionCard: FC<Props> = ({
@@ -53,8 +45,9 @@ export const AskUserQuestionCard: FC<Props> = ({
   answeredValues,
   answeredByFreeText,
   onSubmit,
+  onDismiss,
 }) => {
-  const questions = input.questions ?? []
+  const questions = useMemo(() => input.questions ?? [], [input.questions])
   const isActive = mode === 'active'
   const [selections, setSelections] = useState<Selections>({})
   const [otherStates, setOtherStates] = useState<Record<number, OtherState>>({})
@@ -65,7 +58,7 @@ export const AskUserQuestionCard: FC<Props> = ({
       if (sel.length === 0) return false
       if (sel.includes(OTHER_LABEL)) {
         const o = otherStates[i]
-        if (!o || !o.confirmed || !o.text.trim()) return false
+        if (!o || !o.text.trim()) return false
       }
       return true
     })
@@ -76,7 +69,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     setSelections((prev) => ({ ...prev, [qIdx]: [value] }))
     if (value === OTHER_LABEL) {
       setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '', confirmed: false } },
+        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
       )
     } else {
       setOtherStates((prev) => {
@@ -93,7 +86,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     setSelections((prev) => ({ ...prev, [qIdx]: values }))
     if (values.includes(OTHER_LABEL)) {
       setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '', confirmed: false } },
+        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
       )
     } else {
       setOtherStates((prev) => {
@@ -106,14 +99,7 @@ export const AskUserQuestionCard: FC<Props> = ({
   }
 
   const handleOtherTextChange = (qIdx: number, text: string) => {
-    // 编辑文本会使已确认状态失效，必须重新点击"确认"
-    setOtherStates((prev) => ({ ...prev, [qIdx]: { text, confirmed: false } }))
-  }
-
-  const handleOtherConfirm = (qIdx: number) => {
-    const text = (otherStates[qIdx]?.text ?? '').trim()
-    if (!text) return
-    setOtherStates((prev) => ({ ...prev, [qIdx]: { text, confirmed: true } }))
+    setOtherStates((prev) => ({ ...prev, [qIdx]: { text } }))
   }
 
   const handleManualSend = () => {
@@ -145,6 +131,15 @@ export const AskUserQuestionCard: FC<Props> = ({
             {answeredByFreeText ? '以自由文本回答' : '已回答'}
           </Tag>
         )}
+        {isActive && onDismiss && (
+          <Button
+            type='text'
+            size='small'
+            className='ml-auto -mr-1 text-[#6c7086]'
+            icon={<CloseOutlined />}
+            onClick={onDismiss}
+          />
+        )}
       </div>
 
       {questions.map((q, qIdx) => {
@@ -155,7 +150,6 @@ export const AskUserQuestionCard: FC<Props> = ({
         const otherText = isActive
           ? otherStates[qIdx]?.text ?? ''
           : historical?.customText ?? ''
-        const otherConfirmed = isActive ? !!otherStates[qIdx]?.confirmed : true
 
         return (
           <div key={qIdx} className='flex flex-col gap-1.5'>
@@ -210,28 +204,6 @@ export const AskUserQuestionCard: FC<Props> = ({
                   placeholder='输入自定义回答...'
                   className='text-[11.5px]'
                 />
-                {isActive && (
-                  <div className='flex justify-end'>
-                    {otherConfirmed ? (
-                      <Tag
-                        color='success'
-                        className='m-0 text-[10px]'
-                        icon={<CheckOutlined />}
-                      >
-                        已确认
-                      </Tag>
-                    ) : (
-                      <Button
-                        size='small'
-                        type='primary'
-                        disabled={!otherText.trim()}
-                        onClick={() => handleOtherConfirm(qIdx)}
-                      >
-                        确认
-                      </Button>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>

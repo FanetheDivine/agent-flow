@@ -22,7 +22,6 @@ export type AnsweredInfo = {
 export type BubbleCtx = {
   pendingToolUseId?: string
   answeredMap: Map<string, AnsweredInfo>
-  onAnswer: (toolUseId: string, output: AskUserQuestionOutput) => void
 }
 
 type RenderedBubble = {
@@ -40,22 +39,39 @@ const Md: FC<{ content: string }> = ({ content }) => (
   />
 )
 
+function formatQaAnswer(result: AskUserQuestionOutput): string {
+  return Object.entries(result.answers)
+    .map(([q, a]) => `"${q}"="${a}"`)
+    .join('; ')
+}
+
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
+  seenToolUseIds = new Set<string>(),
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
-  const seenToolUseIds = new Set<string>()
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
       if (message.type === 'user') {
+        if (message.isSynthetic) return
         const rawContent = message.message.content
-        // tool_result 由 AskUserQuestionCard 展示，这里不再重复渲染
         if (
           Array.isArray(rawContent) &&
           rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
         ) {
+          const result = message.tool_use_result as AskUserQuestionOutput | undefined
+          const content = result?.answers
+            ? formatQaAnswer(result)
+            : rawContent
+                .map((b: any) => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)))
+                .join('\n')
+          items.push({
+            key: `${mIdx}-user`,
+            role: 'user',
+            content: <Md content={content} />,
+          })
           return
         }
         const content =
@@ -99,6 +115,7 @@ export function toBubbleItems(
               const input = block.input as AskUserQuestionInput | undefined
               if (!input || !Array.isArray(input.questions)) return
               const isPending = ctx.pendingToolUseId === block.id
+              if (isPending) return // active 卡片由 ChatPanel 渲染
               const answered = ctx.answeredMap.get(block.id)
               items.push({
                 key,
@@ -106,10 +123,9 @@ export function toBubbleItems(
                 content: (
                   <AskUserQuestionCard
                     input={input}
-                    mode={isPending ? 'active' : 'historical'}
+                    mode='historical'
                     answeredValues={answered?.values}
                     answeredByFreeText={answered?.byFreeText}
-                    onSubmit={(output) => ctx.onAnswer(block.id, output)}
                   />
                 ),
               })

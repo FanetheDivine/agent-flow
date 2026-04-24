@@ -1,4 +1,4 @@
-import { useMemo, type FC } from 'react'
+import { useMemo, useRef, useState, type FC } from 'react'
 import { Button, Tag } from 'antd'
 import { Welcome } from '@ant-design/x'
 import { PauseCircleOutlined, RobotOutlined } from '@ant-design/icons'
@@ -9,6 +9,7 @@ import {
   type FlowRunState,
 } from '@/webview/store/flow'
 import type { AskUserQuestionInput, AskUserQuestionOutput } from '@/common'
+import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
@@ -47,11 +48,14 @@ function analyzeQuestions(sessions: AgentSession[]): {
 } {
   const answeredMap = new Map<string, AnsweredInfo>()
   // 先走一遍，登记所有 user 消息里的 tool_result / parent_tool_use_id
+  // 跳过 isSynthetic 消息：SDK 在新 session 开始时会把历史会话（含已回答的 tool_result）
+  // 作为 replay 消息推入 messages，若不过滤会误认为问题"已回答"
   for (const session of sessions) {
     for (const msg of session.messages) {
       if (msg.type !== 'flow.signal.aiMessage') continue
       const m = msg.data.message
       if (m.type !== 'user') continue
+      if (m.isSynthetic) continue
       const parentId = m.parent_tool_use_id
       if (!parentId) continue
       const result = m.tool_use_result as AskUserQuestionOutput | undefined
@@ -103,18 +107,27 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
     [allSessions, agentId],
   )
   const displayStatus = resolveDisplayStatus(flowState, sessions)
-  const canInput = displayStatus === 'waiting-user'
+  const canInput = displayStatus === 'waiting-user' || displayStatus === 'ready'
   const canInterrupt = displayStatus === 'chatting'
 
   const { answeredMap, pending } = useMemo(() => analyzeQuestions(sessions), [sessions])
+
+  const [cardDismissed, setCardDismissed] = useState(false)
+  const prevToolUseIdRef = useRef<string | undefined>(undefined)
+  if (pending?.toolUseId !== prevToolUseIdRef.current) {
+    prevToolUseIdRef.current = pending?.toolUseId
+    if (cardDismissed) setCardDismissed(false)
+  }
+
+  const showCard = !!pending && !cardDismissed
+  const showInput = canInput && !showCard
 
   const ctx = useMemo<BubbleCtx>(
     () => ({
       pendingToolUseId: pending?.toolUseId,
       answeredMap,
-      onAnswer: (toolUseId, output) => sendToolResult(flowId, toolUseId, output),
     }),
-    [pending?.toolUseId, answeredMap, flowId, sendToolResult],
+    [pending?.toolUseId, answeredMap],
   )
 
   const { text: statusText, color: statusColor } = match(displayStatus)
@@ -126,11 +139,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
     .with('ready', () => ({ text: '就绪', color: 'default' as const }))
     .exhaustive()
 
-  const placeholder = canInput
-    ? pending
-      ? '点击上方选项，或输入文本自由回答...'
+  const placeholder = displayStatus === 'ready'
+    ? '输入消息以运行...'
+    : pending
+      ? '输入文本自由回答...'
       : '输入消息...'
-    : '输入消息以运行...'
 
   const handleSend = (text: string) => onSend(text, pending?.toolUseId)
 
@@ -171,8 +184,20 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
         <MessageList sessions={sessions} ctx={ctx} />
       )}
 
+      {/* Pending AskUserQuestion */}
+      {showCard && (
+        <div className='shrink-0 border-t border-[#45475a] px-3 py-2'>
+          <AskUserQuestionCard
+            input={pending.input}
+            mode='active'
+            onSubmit={(output) => sendToolResult(flowId, pending.toolUseId, output)}
+            onDismiss={() => setCardDismissed(true)}
+          />
+        </div>
+      )}
+
       {/* Input */}
-      <ChatInput onSend={handleSend} placeholder={placeholder} />
+      {showInput && <ChatInput onSend={handleSend} placeholder={placeholder} />}
     </div>
   )
 }
