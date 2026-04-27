@@ -25,6 +25,8 @@ export type FlowRunState = {
   status: 'ready' | 'preparing' | 'chatting' | 'waiting-user' | 'completed' | 'error'
   /** 每个flow拥有的session */
   sessions: AgentSession[]
+  /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
+  answeredQuestions: Record<string, AskUserQuestionOutput>
   runId?: string
   currentSessionId?: string
   currentAgentId?: string
@@ -47,7 +49,7 @@ type FlowStoreType = FlowState & {
   runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   saveFlows: (updateFn: (val: Flow[]) => void) => void
   sendUserMessage: (flowId: string, text: string) => void
-  sendToolResult: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
+  answerQuestion: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
   interruptAgent: (flowId: string) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
@@ -181,6 +183,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           runKey,
           status: 'preparing',
           sessions: [],
+          answeredQuestions: {},
         }
       })
       postMessageToExtension({
@@ -217,31 +220,22 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         },
       })
     },
-    sendToolResult: (flowId, toolUseId, output) => {
+    answerQuestion: (flowId, toolUseId, output) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
       if (!fs?.runId || !fs.currentSessionId) return
+      immerSet((draft) => {
+        const s = draft.flowStates[flowId]
+        if (s) s.answeredQuestions[toolUseId] = output
+      })
       postMessageToExtension({
-        type: 'flow.command.userMessage',
+        type: 'flow.command.answerQuestion',
         data: {
           flowId,
           runId: fs.runId,
           sessionId: fs.currentSessionId,
-          message: {
-            type: 'user',
-            parent_tool_use_id: toolUseId,
-            message: {
-              role: 'user',
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: toolUseId,
-                  content: JSON.stringify(output),
-                },
-              ],
-            },
-            tool_use_result: output,
-          },
+          toolUseId,
+          output,
         },
       })
     },

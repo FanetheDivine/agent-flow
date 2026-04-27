@@ -70,6 +70,9 @@ export class FlowRunner {
       .with('flow.command.interrupt', () => {
         this.handleInterrupt(data as FlowRunnerCommandEvents['flow.command.interrupt'])
       })
+      .with('flow.command.answerQuestion', () => {
+        this.handleAnswerQuestion(data as FlowRunnerCommandEvents['flow.command.answerQuestion'])
+      })
       .exhaustive()
   }
 
@@ -170,6 +173,17 @@ export class FlowRunner {
     })
   }
 
+  private handleAnswerQuestion({
+    runId,
+    sessionId,
+    toolUseId,
+    output,
+  }: FlowRunnerCommandEvents['flow.command.answerQuestion']): void {
+    if (!this.checkSession(runId, sessionId)) return
+    if (!this.currentExecutor) return
+    this.currentExecutor.answerQuestion(toolUseId, output)
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private runAgent(
@@ -190,14 +204,21 @@ export class FlowRunner {
 
     this.updateAgentStatus('generating')
 
+    // 本次 executor 专属 session 快照，防止过渡期间被 this.currentSessionId 覆盖污染
+    let executorSessionId: string | null = null
+
     this.currentExecutor = new ClaudeExecutor(initMessage, agent, this.runState.shareValues, {
-      onSessionId,
+      onSessionId: (sessionId) => {
+        executorSessionId = sessionId
+        onSessionId(sessionId)
+      },
       onMessage: (message) => {
-        const sessionId = this.currentSessionId
-        if (!sessionId) return
-        this.fire('flow.signal.aiMessage', { runId, sessionId, message })
+        if (!executorSessionId) return
+        this.fire('flow.signal.aiMessage', { runId, sessionId: executorSessionId, message })
       },
       onComplete: (result) => {
+        // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
+        if (this.currentAgentId !== agent.id) return
         this.onAgentComplete(agent, result)
       },
       onError: (err) => {
@@ -233,6 +254,10 @@ export class FlowRunner {
         return
       }
 
+      // 终结旧 executor（query 仍可能在发送 AgentComplete 的 tool_result 尾音），
+      // 必须 kill 后再建新 executor，否则旧消息会被错误地挂到新 session 上。
+      this.killCurrentExecutor()
+
       // 切换到下一个 agent
       this.runAgent(
         {
@@ -256,6 +281,7 @@ export class FlowRunner {
       )
     } else {
       // Flow 结束
+      this.killCurrentExecutor()
       this.fire('flow.signal.agentComplete', { runId, sessionId, content: result.content })
       this.updateAgentStatus('completed')
     }

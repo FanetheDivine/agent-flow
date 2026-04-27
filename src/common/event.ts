@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { Flow, FlowStore } from '.'
+import type { AskUserQuestionOutput, Flow, FlowStore } from '.'
 
 /**
  * AI消息类型 — 会话中一切事件的统一类型（判别联合），
@@ -126,6 +126,13 @@ type FlowCommandPayload = {
   userMessage: { runId: string; sessionId: string; message: UserMessageType }
   /** 中断当前 Agent，使其等待用户输入 */
   interrupt: { runId: string; sessionId: string }
+  /** 回答 SDK 内建 AskUserQuestion 工具的问题，resolve 对应的 canUseTool 挂起 */
+  answerQuestion: {
+    runId: string
+    sessionId: string
+    toolUseId: string
+    output: AskUserQuestionOutput
+  }
 }
 
 /** FlowRunner 内部指令（不含 flowId） */

@@ -22,6 +22,8 @@ export type AnsweredInfo = {
 export type BubbleCtx = {
   pendingToolUseId?: string
   answeredMap: Map<string, AnsweredInfo>
+  onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
+  onActiveDismiss?: (toolUseId: string) => void
 }
 
 type RenderedBubble = {
@@ -39,12 +41,6 @@ const Md: FC<{ content: string }> = ({ content }) => (
   />
 )
 
-function formatQaAnswer(result: AskUserQuestionOutput): string {
-  return Object.entries(result.answers)
-    .map(([q, a]) => `"${q}"="${a}"`)
-    .join('; ')
-}
-
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
@@ -57,21 +53,13 @@ export function toBubbleItems(
       if (message.type === 'user') {
         if (message.isSynthetic) return
         const rawContent = message.message.content
+        // 纯 tool_result 的 user message 属于工具循环内部产物（例如
+        // AskUserQuestion 回答后 SDK 发出的 tool_result），UI 不需要单独渲染，
+        // 结构化答案已由 AskUserQuestionCard 的历史态展示。
         if (
           Array.isArray(rawContent) &&
           rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
         ) {
-          const result = message.tool_use_result as AskUserQuestionOutput | undefined
-          const content = result?.answers
-            ? formatQaAnswer(result)
-            : rawContent
-                .map((b: any) => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)))
-                .join('\n')
-          items.push({
-            key: `${mIdx}-user`,
-            role: 'user',
-            content: <Md content={content} />,
-          })
           return
         }
         const content =
@@ -115,12 +103,18 @@ export function toBubbleItems(
               const input = block.input as AskUserQuestionInput | undefined
               if (!input || !Array.isArray(input.questions)) return
               const isPending = ctx.pendingToolUseId === block.id
-              if (isPending) return // active 卡片由 ChatPanel 渲染
               const answered = ctx.answeredMap.get(block.id)
               items.push({
                 key,
                 role: 'system',
-                content: (
+                content: isPending ? (
+                  <AskUserQuestionCard
+                    input={input}
+                    mode='active'
+                    onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
+                    onDismiss={() => ctx.onActiveDismiss?.(block.id)}
+                  />
+                ) : (
                   <AskUserQuestionCard
                     input={input}
                     mode='historical'

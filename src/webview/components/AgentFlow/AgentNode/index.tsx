@@ -4,7 +4,7 @@ import { App, Badge, Popover, Tag, Tooltip, Typography } from 'antd'
 import { EditOutlined, MessageOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent, UserMessageType } from '@/common'
-import { useFlowStore, type AgentSession } from '@/webview/store/flow'
+import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
@@ -29,7 +29,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const saveFlows = useFlowStore((s) => s.saveFlows)
   const runFlow = useFlowStore((s) => s.runFlow)
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
-  const sendToolResult = useFlowStore((s) => s.sendToolResult)
 
   const { message, modal } = App.useApp()
 
@@ -43,18 +42,15 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const [chatOpen, setChatOpen] = useState(false)
 
   useEffect(() => {
-    const countFor = (sessions: AgentSession[]) =>
-      sessions.filter((s) => s.agentId === agentId).reduce((n, s) => n + s.messages.length, 0)
-
     return useFlowStore.subscribe((state, prev) => {
       const currState = state.flowStates[flowId]
       const prevState = prev.flowStates[flowId]
       const isCurrent = currState?.currentAgentId === agentId
-      const hasSession = (currState?.sessions.filter((s) => s.agentId === agentId).length ?? 0) > 0
-      if (isCurrent && countFor(currState?.sessions ?? []) > countFor(prevState?.sessions ?? [])) {
+      const wasCurrent = prevState?.currentAgentId === agentId
+
+      if (!wasCurrent && isCurrent) {
         setChatOpen(true)
-      }
-      if (!isCurrent && !hasSession && currState?.status !== 'preparing') {
+      } else if (wasCurrent && !isCurrent) {
         setChatOpen(false)
       }
     })
@@ -78,19 +74,11 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   )
 
   const onSend = useCallback(
-    (text: string, pendingToolUseId?: string) => {
+    (text: string) => {
       const status = flowState?.status
 
       if (status === 'waiting-user' && isCurrentAgent) {
-        if (pendingToolUseId) {
-          // 用户用自由文本回答 AskUserQuestion：整段文本作为唯一答案回传
-          sendToolResult(flowId, pendingToolUseId, {
-            questions: [],
-            answers: { __freeText__: text },
-          })
-        } else {
-          sendUserMessage(flowId, text)
-        }
+        sendUserMessage(flowId, text)
         return
       }
 
@@ -111,7 +99,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
         onOk: () => handleRun(initMessage),
       })
     },
-    [flowState, isCurrentAgent, flowId, sendUserMessage, sendToolResult, handleRun, modal],
+    [flowState, isCurrentAgent, flowId, sendUserMessage, handleRun, modal],
   )
 
   const [editOpen, setEditOpen] = useState(false)
@@ -163,18 +151,23 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
           <Popover
             open={chatOpen && flowId === activeFlowId}
-            onOpenChange={setChatOpen}
             content={
-              <ChatPanel flowId={flowId} agentId={agentId} agentName={agentName} onSend={onSend} />
+              <ChatPanel flowId={flowId} agentId={agentId} agentName={agentName} onSend={onSend} onClose={() => setChatOpen(false)} />
             }
-            trigger='click'
             placement='rightTop'
             arrow={false}
+            autoAdjustOverflow={false}
             overlayInnerStyle={{ padding: 0, overflow: 'hidden' }}
+            getPopupContainer={(trigger) =>
+              (trigger.closest('.react-flow__node') as HTMLElement) ?? document.body
+            }
           >
             <span className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'>
               <Badge dot={isCurrentAgent} offset={[-2, 2]}>
-                <MessageOutlined className='text-xs text-[#a6adc8]' />
+                <MessageOutlined
+                  onClick={() => setChatOpen((v) => !v)}
+                  className='text-xs text-[#a6adc8]'
+                />
               </Badge>
             </span>
           </Popover>

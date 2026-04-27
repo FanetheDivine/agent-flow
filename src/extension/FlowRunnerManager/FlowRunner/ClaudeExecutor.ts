@@ -1,6 +1,19 @@
-import { query, type Query, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import {
+  query,
+  type CanUseTool,
+  type Options,
+  type PermissionResult,
+  type Query,
+  type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import * as vscode from 'vscode'
-import { Agent, AIMessageType, buildAgentSystemPrompt, UserMessageType } from '@/common'
+import {
+  Agent,
+  AIMessageType,
+  AskUserQuestionOutput,
+  buildAgentSystemPrompt,
+  UserMessageType,
+} from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
 
 export type ExecutorResult = {
@@ -40,6 +53,9 @@ export class ClaudeExecutor {
   private sessionId: string | null = null
   private events: ExecutorEvents
 
+  /** 挂起中的 AskUserQuestion 权限请求：toolUseId -> resolver */
+  private pendingPermissions = new Map<string, (result: PermissionResult) => void>()
+
   /**
    * @param agent - Agent 定义（model、outputs、prompt 等）
    * @param shareValues - Flow 全局共享上下文（引用传递，MCP 工具直接读写）
@@ -55,7 +71,17 @@ export class ClaudeExecutor {
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     this.prompt = buildAgentSystemPrompt(agent)
-    this.mcpServer = buildAgentMcpServer({ agent, shareValues, onComplete: events.onComplete })
+    this.mcpServer = buildAgentMcpServer({
+      agent,
+      shareValues,
+      onComplete: (result) => {
+        // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
+        // 旧 query 残存事件再次触发 onAgentComplete。
+        if (this.completed || this.disposed) return
+        this.completed = true
+        events.onComplete(result)
+      },
+    })
     this.createQuery(initMessage)
   }
 
@@ -80,6 +106,7 @@ export class ClaudeExecutor {
    */
   async interrupt() {
     if (!this.queryInstance) return
+    this.rejectAllPendingPermissions('interrupted')
     await this.queryInstance.interrupt()
     this.queryInstance = null
   }
@@ -87,7 +114,43 @@ export class ClaudeExecutor {
   /** 终止执行，销毁 executor */
   kill(): void {
     this.disposed = true
+    this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
+  }
+
+  /**
+   * 回答当前挂起的 AskUserQuestion：resolve 对应的 canUseTool Promise，
+   * SDK 随后用带 answers 的 updatedInput 执行工具并发出正规 tool_result。
+   */
+  answerQuestion(toolUseId: string, output: AskUserQuestionOutput): void {
+    const resolver = this.pendingPermissions.get(toolUseId)
+    if (!resolver) return
+    this.pendingPermissions.delete(toolUseId)
+    resolver({
+      behavior: 'allow',
+      updatedInput: {
+        questions: output.questions,
+        answers: output.answers,
+        ...(output.annotations ? { annotations: output.annotations } : {}),
+      },
+    })
+  }
+
+  private rejectAllPendingPermissions(reason: string): void {
+    for (const [, resolver] of this.pendingPermissions) {
+      resolver({ behavior: 'deny', message: reason })
+    }
+    this.pendingPermissions.clear()
+  }
+
+  private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
+    if (toolName === 'AskUserQuestion') {
+      // 挂起，等待 answerQuestion() 被调用
+      return new Promise<PermissionResult>((resolve) => {
+        this.pendingPermissions.set(toolUseID, resolve)
+      })
+    }
+    return Promise.resolve({ behavior: 'allow', updatedInput: input })
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
@@ -98,8 +161,8 @@ export class ClaudeExecutor {
       model: this.agent.model,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: this.prompt },
       mcpServers: { AgentControllerMcp: this.mcpServer },
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
+      permissionMode: 'default',
+      canUseTool: this.canUseTool,
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
     }
     if (this.sessionId) {

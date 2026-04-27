@@ -57,7 +57,7 @@ export const MessageList: FC<Props> = ({ sessions, ctx }) => {
       autoScroll
       role={roleMap}
       items={items}
-      className='flex-1 overflow-y-auto px-3 py-2'
+      className='min-h-0 flex-1 overflow-y-auto px-3 py-2'
     />
   )
 }

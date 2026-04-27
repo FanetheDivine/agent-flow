@@ -6,9 +6,17 @@ type Props = {
   onSend: (text: string) => void
   placeholder?: string
   disabled?: boolean
+  loading?: boolean
+  onCancel?: () => void
 }
 
-export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...', disabled }) => {
+export const ChatInput: FC<Props> = ({
+  onSend,
+  placeholder = '输入消息...',
+  disabled,
+  loading,
+  onCancel,
+}) => {
   const [value, setValue] = useState('')
 
   const handleSubmit = useCallback(
@@ -22,11 +30,13 @@ export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...', 
   )
 
   return (
-    <div className='border-t border-[#45475a] px-2 py-2'>
+    <div className='shrink-0 border-t border-[#45475a] px-2 py-2'>
       <Sender
         value={value}
         onChange={setValue}
         onSubmit={handleSubmit}
+        onCancel={onCancel}
+        loading={loading}
         placeholder={placeholder}
         disabled={disabled}
         autoSize={{ minRows: 1, maxRows: 4 }}

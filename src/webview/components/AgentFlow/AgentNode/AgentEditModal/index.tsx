@@ -40,7 +40,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
     })
   }
 
-  const currentAgent = useWatch(form)
+  const currentAgent = useWatch([], form)
 
   return (
     <Modal
@@ -90,7 +90,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
 
         <Form.Item
           label={
-            <span className='flex items-center gap-1'>
+            <span className='flex items-center gap-1 whitespace-nowrap'>
               提示词
               {currentAgent ? (
                 <Tooltip

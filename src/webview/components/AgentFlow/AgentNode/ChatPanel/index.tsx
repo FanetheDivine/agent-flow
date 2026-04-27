@@ -1,25 +1,21 @@
 import { useMemo, useRef, useState, type FC } from 'react'
-import { Button, Tag } from 'antd'
+import { Button, Tag, Tooltip } from 'antd'
+import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
-import { PauseCircleOutlined, RobotOutlined } from '@ant-design/icons'
 import { match } from 'ts-pattern'
-import {
-  useFlowStore,
-  type AgentSession,
-  type FlowRunState,
-} from '@/webview/store/flow'
-import type { AskUserQuestionInput, AskUserQuestionOutput } from '@/common'
-import { AskUserQuestionCard } from './AskUserQuestionCard'
+import type { AskUserQuestionInput, AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
+import { useFlowStore, type AgentSession, type FlowRunState } from '@/webview/store/flow'
 import { ChatInput } from './ChatInput'
-import { MessageList } from './MessageList'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
+import { MessageList } from './MessageList'
 
 type Props = {
   flowId: string
   agentId: string
   agentName: string
-  /** 第二参数若存在说明需要把文本作为 tool_result 回传给对应的 tool_use */
-  onSend: (text: string, pendingToolUseId?: string) => void
+  /** 普通用户消息（非 AskUserQuestion 回答）——由上层决定是启动/续跑还是追加消息 */
+  onSend: (text: string) => void
+  onClose?: () => void
 }
 
 type DisplayStatus = FlowRunState['status']
@@ -41,38 +37,30 @@ function resolveDisplayStatus(
   return 'ready'
 }
 
-/** 扫描当前 session 消息，构建已答 toolUseId 的回显数据 + 定位未答的 AskUserQuestion */
-function analyzeQuestions(sessions: AgentSession[]): {
+/**
+ * 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射，
+ * 并在最后一个 session 的 assistant 消息里定位仍未回答的 AskUserQuestion。
+ */
+function analyzeQuestions(
+  sessions: AgentSession[],
+  answeredQuestions: Record<string, AskUserQuestionOutput>,
+  answeredFreeText: Record<string, boolean>,
+): {
   answeredMap: Map<string, AnsweredInfo>
   pending: PendingQuestion | null
 } {
   const answeredMap = new Map<string, AnsweredInfo>()
-  // 先走一遍，登记所有 user 消息里的 tool_result / parent_tool_use_id
-  // 跳过 isSynthetic 消息：SDK 在新 session 开始时会把历史会话（含已回答的 tool_result）
-  // 作为 replay 消息推入 messages，若不过滤会误认为问题"已回答"
-  for (const session of sessions) {
-    for (const msg of session.messages) {
-      if (msg.type !== 'flow.signal.aiMessage') continue
-      const m = msg.data.message
-      if (m.type !== 'user') continue
-      if (m.isSynthetic) continue
-      const parentId = m.parent_tool_use_id
-      if (!parentId) continue
-      const result = m.tool_use_result as AskUserQuestionOutput | undefined
-      if (result?.answers) {
-        const values: Record<string, string[]> = {}
-        for (const [q, a] of Object.entries(result.answers)) {
-          values[q] = (a ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-        }
-        answeredMap.set(parentId, { values, byFreeText: false })
-      } else {
-        // 未附带结构化 answers → 视为自由文本作答
-        answeredMap.set(parentId, { values: {}, byFreeText: true })
-      }
+  for (const [toolUseId, output] of Object.entries(answeredQuestions)) {
+    const values: Record<string, string[]> = {}
+    for (const [q, a] of Object.entries(output.answers ?? {})) {
+      values[q] = (a ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
     }
+    answeredMap.set(toolUseId, { values, byFreeText: !!answeredFreeText[toolUseId] })
   }
 
-  // 再在最后一个 session 里找未答的 AskUserQuestion tool_use
   const lastSession = sessions[sessions.length - 1]
   let pending: PendingQuestion | null = null
   if (lastSession) {
@@ -96,10 +84,17 @@ function analyzeQuestions(sessions: AgentSession[]): {
   return { answeredMap, pending }
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => {
+/** 自由文本 → AskUserQuestionOutput：把整段文本映射到每个 question 的答案上 */
+function freeTextToOutput(questions: AskUserQuestionItem[], text: string): AskUserQuestionOutput {
+  const answers: Record<string, string> = {}
+  for (const q of questions) answers[q.question] = text
+  return { questions, answers }
+}
+
+export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClose }) => {
   const flowState = useFlowStore((s) => s.flowStates[flowId])
   const interruptAgent = useFlowStore((s) => s.interruptAgent)
-  const sendToolResult = useFlowStore((s) => s.sendToolResult)
+  const answerQuestion = useFlowStore((s) => s.answerQuestion)
 
   const allSessions = flowState?.sessions
   const sessions = useMemo<AgentSession[]>(
@@ -110,7 +105,14 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
   const canInput = displayStatus === 'waiting-user' || displayStatus === 'ready'
   const canInterrupt = displayStatus === 'chatting'
 
-  const { answeredMap, pending } = useMemo(() => analyzeQuestions(sessions), [sessions])
+  // 自由文本作答标记（本地 UI 状态，仅用于历史态显示 tag）
+  const [freeTextMap, setFreeTextMap] = useState<Record<string, boolean>>({})
+  const answeredQuestions = flowState?.answeredQuestions
+
+  const { answeredMap, pending } = useMemo(
+    () => analyzeQuestions(sessions, answeredQuestions ?? {}, freeTextMap),
+    [sessions, answeredQuestions, freeTextMap],
+  )
 
   const [cardDismissed, setCardDismissed] = useState(false)
   const prevToolUseIdRef = useRef<string | undefined>(undefined)
@@ -120,15 +122,14 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
   }
 
   const showCard = !!pending && !cardDismissed
-  const showInput = canInput && !showCard
+  const inputDisabled = !(canInput || canInterrupt)
 
-  const ctx = useMemo<BubbleCtx>(
-    () => ({
-      pendingToolUseId: pending?.toolUseId,
-      answeredMap,
-    }),
-    [pending?.toolUseId, answeredMap],
-  )
+  const ctx: BubbleCtx = {
+    pendingToolUseId: showCard ? pending?.toolUseId : undefined,
+    answeredMap,
+    onActiveSubmit: (toolUseId, output) => answerQuestion(flowId, toolUseId, output),
+    onActiveDismiss: () => setCardDismissed(true),
+  }
 
   const { text: statusText, color: statusColor } = match(displayStatus)
     .with('chatting', () => ({ text: '生成中', color: 'processing' as const }))
@@ -139,16 +140,35 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
     .with('ready', () => ({ text: '就绪', color: 'default' as const }))
     .exhaustive()
 
-  const placeholder = displayStatus === 'ready'
-    ? '输入消息以运行...'
-    : pending
-      ? '输入文本自由回答...'
-      : '输入消息...'
+  const placeholder =
+    displayStatus === 'ready'
+      ? '输入消息以运行...'
+      : pending
+        ? '输入文本自由回答...'
+        : '输入消息...'
 
-  const handleSend = (text: string) => onSend(text, pending?.toolUseId)
+  const handleSend = (text: string) => {
+    if (pending) {
+      const output = freeTextToOutput(pending.input.questions, text)
+      setFreeTextMap((prev) => ({ ...prev, [pending.toolUseId]: true }))
+      answerQuestion(flowId, pending.toolUseId, output)
+      return
+    }
+    onSend(text)
+  }
 
   return (
-    <div className='flex h-[450px] w-[380px] flex-col overflow-hidden rounded-lg bg-[#1e1e2e]'>
+    <div
+      className='flex h-[40vh] w-[30vw] flex-col overflow-hidden rounded-lg bg-[#1e1e2e]'
+      onWheel={(e) => e.stopPropagation()}
+      onCopyCapture={(e) => e.stopPropagation()}
+      onPasteCapture={(e) => {
+        e.stopPropagation()
+      }}
+      onMouseDownCapture={(e) => {
+        e.stopPropagation()
+      }}
+    >
       {/* Header */}
       <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>
         <div className='flex items-center gap-2'>
@@ -158,16 +178,23 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
           </Tag>
         </div>
         {canInterrupt && (
-          <Button
-            type='text'
-            size='small'
-            danger
-            icon={<PauseCircleOutlined />}
-            onClick={() => interruptAgent(flowId)}
-          >
-            中断
-          </Button>
+          <Tooltip title='中断工作流'>
+            <Button
+              size='small'
+              danger
+              type='text'
+              icon={<StopOutlined />}
+              onClick={() => interruptAgent(flowId)}
+            />
+          </Tooltip>
         )}
+        <Button
+          size='small'
+          type='text'
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          style={{ color: '#6c7086' }}
+        />
       </div>
 
       {/* Messages */}
@@ -184,20 +211,14 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend }) => 
         <MessageList sessions={sessions} ctx={ctx} />
       )}
 
-      {/* Pending AskUserQuestion */}
-      {showCard && (
-        <div className='shrink-0 border-t border-[#45475a] px-3 py-2'>
-          <AskUserQuestionCard
-            input={pending.input}
-            mode='active'
-            onSubmit={(output) => sendToolResult(flowId, pending.toolUseId, output)}
-            onDismiss={() => setCardDismissed(true)}
-          />
-        </div>
-      )}
-
-      {/* Input */}
-      {showInput && <ChatInput onSend={handleSend} placeholder={placeholder} />}
+      {/* Input (always shown; send button becomes cancel button during chatting) */}
+      <ChatInput
+        onSend={handleSend}
+        placeholder={placeholder}
+        disabled={inputDisabled}
+        loading={canInterrupt}
+        onCancel={() => interruptAgent(flowId)}
+      />
     </div>
   )
 }
