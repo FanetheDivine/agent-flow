@@ -70,7 +70,7 @@ export const FlowListPanel: FC = () => {
 
   return (
     <motion.div
-      onCopyCapture={(e) => e.stopPropagation()}
+      onKeyDownCapture={(e) => e.stopPropagation()}
       style={{ width: panelWidth }}
       className='relative flex h-full shrink-0 flex-col border-r border-[#313244] bg-[#181825]'
     >

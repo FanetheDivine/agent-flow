@@ -55,7 +55,9 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         form={form}
         layout='vertical'
         autoComplete='off'
-        onCopyCapture={(e) => e.stopPropagation()}
+        onKeyDownCapture={(e) => {
+          e.stopPropagation()
+        }}
         onPasteCapture={(e) => e.stopPropagation()}
       >
         <Form.Item

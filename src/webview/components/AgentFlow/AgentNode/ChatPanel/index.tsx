@@ -93,7 +93,10 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     onActiveDismiss: () => setCardDismissed(true),
   }
 
-  const { text: statusText, color: statusColor } = match<AgentPhase, { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }>(phase)
+  const { text: statusText, color: statusColor } = match<
+    AgentPhase,
+    { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }
+  >(phase)
     .with('starting', () => ({ text: '启动中', color: 'default' }))
     .with('running', () => ({ text: '生成中', color: 'processing' }))
     .with('awaiting-message', () => ({ text: '等待输入', color: 'warning' }))
@@ -104,11 +107,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     .exhaustive()
 
   const placeholder =
-    phase === 'idle'
-      ? '输入消息以运行...'
-      : pending
-        ? '输入文本自由回答...'
-        : '输入消息...'
+    phase === 'idle' ? '输入消息以运行...' : pending ? '输入文本自由回答...' : '输入消息...'
 
   const handleSend = (text: string) => {
     if (pending) {
@@ -124,7 +123,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     <div
       className='flex h-[40vh] w-[30vw] flex-col overflow-hidden rounded-lg bg-[#1e1e2e]'
       onWheel={(e) => e.stopPropagation()}
-      onCopyCapture={(e) => e.stopPropagation()}
+      onKeyDownCapture={(e) => e.stopPropagation()}
       onPasteCapture={(e) => {
         e.stopPropagation()
       }}
