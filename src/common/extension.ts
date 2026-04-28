@@ -9,7 +9,7 @@ import { type Agent, FlowSchema, validateFlow } from '.'
 export type AgentMcpServerOptions = {
   agent: Agent
   shareValues: Record<string, string>
-  onComplete: (output: { content: string; output_name?: string }) => void
+  onComplete: (output: { content: string; outputName?: string }) => void
 }
 
 /**
@@ -47,7 +47,7 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
           content: z.string().describe('输出任务结果，将传递给下一个 Agent 或作为最终结果'),
         },
         async ({ output_name, content }) => {
-          onComplete({ output_name, content })
+          onComplete({ outputName: output_name, content })
           return {
             content: [{ type: 'text', text: `任务完成，输出分支：${output_name}` }],
           }

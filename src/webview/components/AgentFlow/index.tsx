@@ -22,7 +22,7 @@ import '@xyflow/react/dist/style.css'
 import { useEventListener } from 'ahooks'
 import z from 'zod'
 import { AgentSchema, type Agent } from '@/common'
-import { useFlowStore } from '@/webview/store/flow'
+import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import AgentNodeComponent from './AgentNode'
 import MidArrowEdge from './MidArrowEdge'
@@ -57,7 +57,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   const state = useFlowStore((s) => s.flowStates[flowId])
   const saveFlows = useFlowStore((s) => s.saveFlows)
   /** 破坏性编辑禁止：删除 agent / 删除或破坏连线 */
-  const destructiveReadOnly = state?.status === 'chatting' || state?.status === 'preparing'
+  const destructiveReadOnly = state ? flowIsDestructiveReadOnly(state.phase) : false
   const { message } = App.useApp()
   const initial = useMemo(() => flowToReactFlow(flow), [flow])
 

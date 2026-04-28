@@ -4,7 +4,7 @@ import { App, Badge, Popover, Tag, Tooltip, Typography } from 'antd'
 import { EditOutlined, MessageOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent, UserMessageType } from '@/common'
-import { useFlowStore } from '@/webview/store/flow'
+import { useFlowStore, selectAgentPhase, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
@@ -23,7 +23,8 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
-  const flowState = useFlowStore((s) => s.flowStates[flowId])
+  const flowPhase = useFlowStore((s) => s.flowStates[flowId]?.phase)
+  const agentPhase = useFlowStore(selectAgentPhase(flowId, agentId))
   const activeFlowId = useFlowStore((s) => s.activeFlowId)
   const setActiveFlowId = useFlowStore((s) => s.setActiveFlowId)
   const saveFlows = useFlowStore((s) => s.saveFlows)
@@ -32,9 +33,9 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const { message, modal } = App.useApp()
 
-  const destructiveReadOnly = flowState?.status === 'chatting' || flowState?.status === 'preparing'
+  const destructiveReadOnly = flowPhase ? flowIsDestructiveReadOnly(flowPhase) : false
 
-  const isCurrentAgent = flowState?.currentAgentId === agentId
+  const isCurrentAgent = agentPhase !== 'idle' && agentPhase !== 'completed'
   const outputs = agent?.outputs ?? []
   const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
 
@@ -75,9 +76,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const onSend = useCallback(
     (text: string) => {
-      const status = flowState?.status
-
-      if (status === 'waiting-user' && isCurrentAgent) {
+      if (agentPhase === 'awaiting-message' || agentPhase === 'awaiting-question') {
         sendUserMessage(flowId, text)
         return
       }
@@ -88,7 +87,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
         parent_tool_use_id: null,
       }
 
-      if (!status || status === 'ready') {
+      if (agentPhase === 'idle') {
         handleRun(initMessage)
         return
       }
@@ -99,7 +98,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
         onOk: () => handleRun(initMessage),
       })
     },
-    [flowState, isCurrentAgent, flowId, sendUserMessage, handleRun, modal],
+    [agentPhase, flowId, sendUserMessage, handleRun, modal],
   )
 
   const [editOpen, setEditOpen] = useState(false)

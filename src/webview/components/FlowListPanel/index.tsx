@@ -70,6 +70,7 @@ export const FlowListPanel: FC = () => {
 
   return (
     <motion.div
+      onCopyCapture={(e) => e.stopPropagation()}
       style={{ width: panelWidth }}
       className='relative flex h-full shrink-0 flex-col border-r border-[#313244] bg-[#181825]'
     >
@@ -92,7 +93,7 @@ export const FlowListPanel: FC = () => {
                 key={flow.id}
                 flow={flow}
                 isActive={flow.id === activeFlowId}
-                status={flowStates[flow.id]?.status}
+                phase={flowStates[flow.id]?.phase}
                 onClick={() => setActiveFlowId(flow.id)}
                 onDelete={() => onDelete(flow.id)}
                 onRename={(name) => onRename(flow.id, name)}

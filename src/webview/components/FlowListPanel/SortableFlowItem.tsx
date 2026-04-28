@@ -7,13 +7,13 @@ import type { Flow } from '@/common'
 import type { FlowRunState } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 
-const STATUS_CONFIG: Record<
-  Exclude<FlowRunState['status'], 'ready'>,
+const PHASE_CONFIG: Record<
+  Exclude<FlowRunState['phase'], 'idle'>,
   { color: string; label: string; animate: boolean }
 > = {
-  preparing: { color: 'bg-[#f9e2af]', label: '启动中', animate: true },
-  chatting: { color: 'bg-[#a6e3a1]', label: 'AI 生成中', animate: true },
-  'waiting-user': { color: 'bg-[#89b4fa]', label: '等待用户输入', animate: true },
+  starting: { color: 'bg-[#f9e2af]', label: '启动中', animate: true },
+  running: { color: 'bg-[#a6e3a1]', label: 'AI 生成中', animate: true },
+  awaiting: { color: 'bg-[#89b4fa]', label: '等待用户', animate: true },
   completed: { color: 'bg-[#a6e3a1]/60', label: '已完成', animate: false },
   error: { color: 'bg-[#f38ba8]', label: '出错', animate: false },
 }
@@ -21,14 +21,14 @@ const STATUS_CONFIG: Record<
 export type SortableFlowItemProps = {
   flow: Flow
   isActive: boolean
-  status?: FlowRunState['status']
+  phase?: FlowRunState['phase']
   onClick: () => void
   onDelete: () => void
   onRename: (name: string) => void
 }
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
-  const { flow, isActive, status, onClick, onDelete, onRename } = props
+  const { flow, isActive, phase, onClick, onDelete, onRename } = props
   const { message } = App.useApp()
   const { id, name } = flow
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -40,7 +40,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
     opacity: isDragging ? 0.5 : 1,
   }
 
-  const statusConfig = status && status !== 'ready' ? STATUS_CONFIG[status] : undefined
+  const statusConfig = phase && phase !== 'idle' ? PHASE_CONFIG[phase] : undefined
 
   return (
     <div

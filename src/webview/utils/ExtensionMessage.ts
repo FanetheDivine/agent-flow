@@ -50,8 +50,10 @@ window.addEventListener('message', (e: MessageEvent) => {
 // ── Session ID 提取 ──────────────────────────────────────────────────────
 
 function getSessionId(msg: ExtensionToWebviewMessage): string | undefined {
-  if ('sessionId' in msg.data) {
-    return (msg.data as { sessionId: string }).sessionId
+  const data: unknown = msg.data
+  if (typeof data === 'object' && data !== null && 'sessionId' in data) {
+    const sid = (data as { sessionId: unknown }).sessionId
+    return typeof sid === 'string' ? sid : undefined
   }
   return undefined
 }

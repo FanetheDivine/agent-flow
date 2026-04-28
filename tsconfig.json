@@ -6,6 +6,7 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "sourceMap": true,
+    "noEmit": true,
     "rootDir": "src",
     "strict": true /* enable all strict type-checking options */,
     "paths": {

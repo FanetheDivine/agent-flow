@@ -257,6 +257,10 @@ export class FlowRunner {
       // 终结旧 executor（query 仍可能在发送 AgentComplete 的 tool_result 尾音），
       // 必须 kill 后再建新 executor，否则旧消息会被错误地挂到新 session 上。
       this.killCurrentExecutor()
+      // 过渡期间清空 currentSessionId：此时 webview 仍持有旧 sessionId，
+      // 若保留旧值会让 checkSession 放行命令，导致把 interrupt/userMessage
+      // 错误地派发给已经切到下一个 agent 的 currentExecutor。
+      this.currentSessionId = null
 
       // 切换到下一个 agent
       this.runAgent(
@@ -284,6 +288,8 @@ export class FlowRunner {
       this.killCurrentExecutor()
       this.fire('flow.signal.agentComplete', { runId, sessionId, content: result.content })
       this.updateAgentStatus('completed')
+      this.currentSessionId = null
+      this.currentAgentId = null
     }
   }
 

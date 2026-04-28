@@ -5,6 +5,7 @@
     "lib": ["ES2022", "DOM"],
     "jsx": "react-jsx",
     "sourceMap": true,
+    "noEmit": true,
     "rootDir": "src",
     "strict": true,
     "moduleResolution": "bundler",

@@ -6,6 +6,7 @@ import type {
   Flow,
   ExtensionToWebviewMessage,
   UserMessageType,
+  AskUserQuestionInput,
   AskUserQuestionOutput,
 } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
@@ -19,14 +20,33 @@ export type AgentSession = {
   outputName?: string
 }
 
+/**
+ * Flow 级 phase —— 只描述整个 flow 的生命周期。
+ * - idle: 未启动
+ * - starting: flowStart 命令已发送，等待 signal.flowStart
+ * - running: AI 在产出 / 工具在执行
+ * - awaiting: 当前 agent 停下，等待用户动作（普通消息或回答 AskUserQuestion）
+ * - completed: 全部 agent 完成（终态）
+ * - error: 出错（终态）
+ */
+export type FlowPhase = 'idle' | 'starting' | 'running' | 'awaiting' | 'completed' | 'error'
+
+export type PendingQuestion = {
+  toolUseId: string
+  input: AskUserQuestionInput
+  /** 所属 session，用于切换 agent 时自然失效 */
+  sessionId: string
+}
+
 export type FlowRunState = {
   runKey: string
-  /** ready: 未启动 | preparing: 启动中 | chatting: AI生成中 | waiting-user: 等待用户输入 | completed: 完成 | error: 出错 */
-  status: 'ready' | 'preparing' | 'chatting' | 'waiting-user' | 'completed' | 'error'
+  phase: FlowPhase
   /** 每个flow拥有的session */
   sessions: AgentSession[]
   /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
   answeredQuestions: Record<string, AskUserQuestionOutput>
+  /** 当前未回答的 AskUserQuestion，显式存储（不从消息反推） */
+  pendingQuestion?: PendingQuestion
   runId?: string
   currentSessionId?: string
   currentAgentId?: string
@@ -54,9 +74,90 @@ type FlowStoreType = FlowState & {
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
 
+// ── Agent 级派生状态 ──────────────────────────────────────────────────────────
+
+/**
+ * Agent 级 phase —— 每个 ChatPanel 只关心自己的状态。
+ * - idle: 该 agent 未参与过 / 后续 agent 已接管（也是未启动 flow 的默认）
+ * - starting / running / error: 直接映射 flow phase（仅对 currentAgent 有效）
+ * - awaiting-message: 等用户消息
+ * - awaiting-question: 有未回答的 AskUserQuestion
+ * - completed: 该 agent 的 session 已结束
+ */
+export type AgentPhase =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'awaiting-message'
+  | 'awaiting-question'
+  | 'completed'
+  | 'error'
+
+export const selectAgentPhase =
+  (flowId: string, agentId: string) =>
+  (s: FlowState): AgentPhase => {
+    const fs = s.flowStates[flowId]
+    if (!fs) return 'idle'
+    if (fs.currentAgentId === agentId) {
+      if (fs.phase === 'awaiting') {
+        return fs.pendingQuestion ? 'awaiting-question' : 'awaiting-message'
+      }
+      // 'idle' 不会出现在 currentAgentId 存在的情况下；但保险起见原样返回
+      if (fs.phase === 'idle') return 'idle'
+      return fs.phase
+    }
+    // 非当前 agent：看这个 agent 的最后一个 session 是否完成
+    const last = [...fs.sessions].reverse().find((sess) => sess.agentId === agentId)
+    if (last?.completed) return 'completed'
+    return 'idle'
+  }
+
+export const selectPendingQuestionFor =
+  (flowId: string, agentId: string) =>
+  (s: FlowState): PendingQuestion | undefined => {
+    const fs = s.flowStates[flowId]
+    if (!fs || fs.currentAgentId !== agentId) return undefined
+    return fs.pendingQuestion
+  }
+
+// ── UI helper ────────────────────────────────────────────────────────────────
+
+export const agentCanSendMessage = (p: AgentPhase) =>
+  p === 'idle' || p === 'awaiting-message' || p === 'awaiting-question'
+export const agentCanInterrupt = (p: AgentPhase) => p === 'running' || p === 'starting'
+export const agentIsRunning = (p: AgentPhase) => p === 'running' || p === 'starting'
+export const flowIsDestructiveReadOnly = (p: FlowPhase) => p === 'running' || p === 'starting'
+export const flowCanInterrupt = (p: FlowPhase) =>
+  p === 'starting' || p === 'running' || p === 'awaiting'
+
+export const selectFlowPhase =
+  (flowId: string) =>
+  (s: FlowState): FlowPhase =>
+    s.flowStates[flowId]?.phase ?? 'idle'
+
 /** 获取当前 session */
 function getCurrentSession(fs: FlowRunState): AgentSession | undefined {
   return fs.sessions.find((s) => s.sessionId === fs.currentSessionId)
+}
+
+/** 从 assistant 消息中抽取首个未回答的 AskUserQuestion */
+function extractPendingQuestion(
+  msg: Extract<ExtensionToWebviewMessage, { type: 'flow.signal.aiMessage' }>,
+  answered: Record<string, AskUserQuestionOutput>,
+  sessionId: string,
+): PendingQuestion | undefined {
+  const m = msg.data.message
+  if (m.type !== 'assistant') return undefined
+  const blocks = m.message.content
+  if (!Array.isArray(blocks)) return undefined
+  for (const block of blocks) {
+    if (block.type !== 'tool_use' || block.name !== 'AskUserQuestion') continue
+    if (answered[block.id]) continue
+    const input = block.input as AskUserQuestionInput | undefined
+    if (!input || !Array.isArray(input.questions)) continue
+    return { toolUseId: block.id, input, sessionId }
+  }
+  return undefined
 }
 
 export const useFlowStore = create<FlowStoreType>((set, get) => {
@@ -93,9 +194,10 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           if (msg.type === 'flow.signal.flowStart') {
             if (fs.runKey !== msg.data.runKey) return
             fs.runId = runId
-            fs.status = 'waiting-user'
+            fs.phase = 'awaiting'
             fs.currentSessionId = msg.data.sessionId
             fs.currentAgentId = msg.data.agentId
+            fs.pendingQuestion = undefined
             // 从 flow 定义中查找 agent name
             const flow = draft.flows.find((f) => f.id === flowId)
             const agent = flow?.agents?.find((a) => a.id === msg.data.agentId)
@@ -115,16 +217,20 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           session?.messages.push(msg)
 
           match(msg)
-            .with({ type: 'flow.signal.aiMessage' }, ({ data }) => {
-              const { message } = data
-              switch (message.type) {
-                case 'result': {
-                  fs.status = 'waiting-user'
-                  break
-                }
-                default: {
-                  fs.status = 'chatting'
-                }
+            .with({ type: 'flow.signal.aiMessage' }, (m) => {
+              const { message } = m.data
+              if (message.type === 'result') {
+                fs.phase = 'awaiting'
+                return
+              }
+              fs.phase = 'running'
+              if (fs.currentSessionId) {
+                const found = extractPendingQuestion(
+                  m,
+                  fs.answeredQuestions,
+                  fs.currentSessionId,
+                )
+                if (found) fs.pendingQuestion = found
               }
             })
             .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
@@ -132,6 +238,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 session.completed = true
                 session.outputName = data.output?.name
               }
+              fs.pendingQuestion = undefined
               if (data.output) {
                 fs.currentSessionId = data.output.newSessionId
                 // next_agent 存储的是 id，从 flow 定义中查找对应 agent
@@ -145,27 +252,35 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                   const nextAgent = flow?.agents?.find((a) => a.id === nextAgentId)
                   fs.currentAgentId = nextAgentId
                   fs.currentAgentName = nextAgent?.agent_name
+                  fs.phase = 'awaiting'
                   fs.sessions.push({
                     sessionId: data.output.newSessionId,
                     agentId: nextAgentId,
                     messages: [],
                     completed: false,
                   })
+                } else {
+                  fs.phase = 'completed'
+                  fs.currentAgentId = undefined
+                  fs.currentAgentName = undefined
                 }
               } else {
-                fs.status = 'completed'
+                fs.phase = 'completed'
                 fs.currentAgentId = undefined
                 fs.currentAgentName = undefined
               }
             })
             .with({ type: 'flow.signal.agentInterrupted' }, () => {
-              fs.status = 'waiting-user'
+              fs.phase = 'awaiting'
+              fs.pendingQuestion = undefined
             })
             .with({ type: 'flow.signal.agentError' }, () => {
-              fs.status = 'error'
+              fs.phase = 'error'
+              fs.pendingQuestion = undefined
             })
             .with({ type: 'flow.signal.error' }, () => {
-              fs.status = 'error'
+              fs.phase = 'error'
+              fs.pendingQuestion = undefined
             })
             .exhaustive()
         })
@@ -181,7 +296,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       immerSet((draft) => {
         draft.flowStates[flowId] = {
           runKey,
-          status: 'preparing',
+          phase: 'starting',
           sessions: [],
           answeredQuestions: {},
         }
@@ -226,7 +341,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       if (!fs?.runId || !fs.currentSessionId) return
       immerSet((draft) => {
         const s = draft.flowStates[flowId]
-        if (s) s.answeredQuestions[toolUseId] = output
+        if (!s) return
+        s.answeredQuestions[toolUseId] = output
+        if (s.pendingQuestion?.toolUseId === toolUseId) {
+          s.pendingQuestion = undefined
+        }
       })
       postMessageToExtension({
         type: 'flow.command.answerQuestion',
@@ -284,9 +403,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           outputs: agent.outputs?.map((output) => ({
             ...output,
             next_agent:
-              output.next_agent !== undefined
-                ? (idMap.get(output.next_agent) ?? output.next_agent)
-                : undefined,
+              output.next_agent !== undefined ? idMap.get(output.next_agent) : undefined,
           })),
         }))
 

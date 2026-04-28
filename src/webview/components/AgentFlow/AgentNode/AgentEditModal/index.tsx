@@ -51,7 +51,13 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       width={600}
       destroyOnHidden
     >
-      <Form form={form} layout='vertical' autoComplete='off'>
+      <Form
+        form={form}
+        layout='vertical'
+        autoComplete='off'
+        onCopyCapture={(e) => e.stopPropagation()}
+        onPasteCapture={(e) => e.stopPropagation()}
+      >
         <Form.Item
           name='agent_name'
           label='Agent 名称'
@@ -84,6 +90,11 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               { label: 'haiku', value: 'haiku' },
               { label: 'sonnet', value: 'sonnet' },
               { label: 'opus', value: 'opus' },
+              { label: 'gpt-5.4', value: 'gpt-5.4' },
+              { label: 'glm-5.1', value: 'glm-5.1' },
+              { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
+              { label: 'qwen3.6-plus', value: 'qwen3.6-plus' },
+              { label: 'DeepSeek-V3.2', value: 'DeepSeek-V3.2' },
             ]}
           />
         </Form.Item>
@@ -95,7 +106,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               {currentAgent ? (
                 <Tooltip
                   title={`完整提示词：\n\n${buildAgentSystemPrompt(currentAgent)}`}
-                  styles={{ root: { maxWidth: 480 } }}
+                  styles={{ root: { maxWidth: 'none', whiteSpace: 'pre', overflow: 'auto' } }}
                 >
                   <InfoCircleOutlined className='text-[#6366f1]' />
                 </Tooltip>
