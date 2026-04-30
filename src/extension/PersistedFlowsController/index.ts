@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
-import { type FlowStore as FlowStoreData, FlowStoreSchema, validateFlow } from '@/common'
+import { type PersistedFlows, PersistedFlowsSchema, validateFlow } from '@/common'
 import { defaultStore } from './defaultStore'
 
 const FLOWS_FILENAME = '.agent-flows.json'
@@ -10,15 +10,15 @@ function getFlowsPath(): string {
   return path.join(os.homedir(), FLOWS_FILENAME)
 }
 
-/** flows缓存 */
-export class FlowStoreController {
+/** 本地 flows 持久化读写 */
+export class PersistedFlowsController {
   private filePath = getFlowsPath()
 
-  async loadFlows(): Promise<FlowStoreData> {
+  async loadFlows(): Promise<PersistedFlows> {
     try {
       const raw = await fs.readFile(this.filePath, 'utf-8')
       const json = JSON.parse(raw)
-      const parsed = FlowStoreSchema.safeParse(json)
+      const parsed = PersistedFlowsSchema.safeParse(json)
 
       if (!parsed.success || parsed.data.flows.length === 0) {
         return { ...defaultStore }
@@ -40,7 +40,7 @@ export class FlowStoreController {
     }
   }
 
-  async saveFlows(data: FlowStoreData): Promise<void> {
+  async saveFlows(data: PersistedFlows): Promise<void> {
     const tmpPath = this.filePath + '.tmp'
     const content = JSON.stringify(data, null, 2)
     await fs.writeFile(tmpPath, content, 'utf-8')

@@ -1,9 +1,8 @@
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
-import type { ExtensionFromWebviewMessage, ExtensionToWebviewMessage } from '@/common'
-import type { FlowStore as FlowStoreData } from '@/common'
+import type { ExtensionFromWebviewMessage, ExtensionToWebviewMessage, PersistedFlows } from '@/common'
 import { FlowRunnerManager } from './FlowRunnerManager'
-import { FlowStoreController } from './FlowStoreController'
+import { PersistedFlowsController } from './PersistedFlowsController'
 
 export function activate(context: vscode.ExtensionContext) {
   let currentPanel: vscode.WebviewPanel | undefined
@@ -27,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
     currentPanel = panel
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri)
 
-    const flowStore = new FlowStoreController()
+    const flowStore = new PersistedFlowsController()
 
     const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
       console.log('[Extension → Webview]', msg.type, msg.data)
@@ -36,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const runnerManager = new FlowRunnerManager(postMessageToWebview)
 
-    let currentFlows: FlowStoreData = { flows: [] }
+    let currentFlows: PersistedFlows = { flows: [] }
 
     panel.webview.onDidReceiveMessage(async (e: ExtensionFromWebviewMessage) => {
       console.log('[Webview → Extension]', e.type, e.data)
@@ -46,7 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
           postMessageToWebview({ type: 'loadFlows', data: currentFlows })
         })
         .with({ type: 'saveFlows' }, async ({ data }) => {
-          const storeData: FlowStoreData = { flows: data }
+          const storeData: PersistedFlows = { flows: data }
           currentFlows = storeData
           await flowStore.saveFlows(storeData)
         })

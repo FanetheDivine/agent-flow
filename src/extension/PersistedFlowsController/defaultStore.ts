@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { toJSONSchema } from 'zod/v4/core'
-import { type Flow, FlowSchema, AgentSchema, OutputSchema, FlowStore } from '@/common'
+import { type Flow, FlowSchema, AgentSchema, OutputSchema, PersistedFlows } from '@/common'
 
 const flowSchemaJson = JSON.stringify(
   toJSONSchema(
@@ -144,6 +144,6 @@ const PresetFlows: Flow[] = [
   },
 ]
 
-export const defaultStore: FlowStore = {
+export const defaultStore: PersistedFlows = {
   flows: PresetFlows,
 }

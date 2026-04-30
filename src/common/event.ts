@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { AskUserQuestionOutput, Flow, FlowStore } from '.'
+import type { AskUserQuestionOutput, Flow, PersistedFlows } from '.'
 
 /**
  * AI消息类型 — 会话中一切事件的统一类型（判别联合），
@@ -55,7 +55,7 @@ export type ExtensionFromWebviewEvents = {
 /** extension发出 webview接受的事件 */
 export type ExtensionToWebviewEvents = {
   /** 返回所有 flows */
-  loadFlows: FlowStore
+  loadFlows: PersistedFlows
   /** extension异常 */
   error: string
 } & ExtensionFlowSignalEvents

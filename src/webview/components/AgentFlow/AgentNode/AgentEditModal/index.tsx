@@ -110,7 +110,14 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               {currentAgent ? (
                 <Tooltip
                   title={`完整提示词：\n\n${buildAgentSystemPrompt(currentAgent)}`}
-                  styles={{ root: { maxWidth: 'none', whiteSpace: 'pre', overflow: 'auto' } }}
+                  styles={{
+                    root: {
+                      maxWidth: 800,
+                      maxHeight: 300,
+                      whiteSpace: 'pre-wrap',
+                      overflow: 'auto',
+                    },
+                  }}
                 >
                   <InfoCircleOutlined className='text-[#6366f1]' />
                 </Tooltip>

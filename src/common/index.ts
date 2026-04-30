@@ -60,11 +60,11 @@ export type AskUserQuestionOutput = {
   annotations?: Record<string, { notes?: string; preview?: string }>
 }
 
-/** 缓存至本地的flows */
-export const FlowStoreSchema = z.object({ flows: z.array(FlowSchema) })
+/** 持久化到本地的 flows */
+export const PersistedFlowsSchema = z.object({ flows: z.array(FlowSchema) })
 
-/** @see {@link FlowStoreSchema} */
-export type FlowStore = z.infer<typeof FlowStoreSchema>
+/** @see {@link PersistedFlowsSchema} */
+export type PersistedFlows = z.infer<typeof PersistedFlowsSchema>
 
 /** 单条消息记录 */
 export const MessageSchema = z.object({
