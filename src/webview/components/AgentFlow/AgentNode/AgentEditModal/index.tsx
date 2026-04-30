@@ -89,14 +89,16 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
             placeholder='选择或输入模型名称'
             allowClear
             options={[
-              { label: 'haiku', value: 'haiku' },
-              { label: 'sonnet', value: 'sonnet' },
               { label: 'opus', value: 'opus' },
-              { label: 'gpt-5.4', value: 'gpt-5.4' },
               { label: 'glm-5.1', value: 'glm-5.1' },
-              { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
+              { label: 'DeepSeek-V4-Pro', value: 'DeepSeek-V4-Pro' },
               { label: 'qwen3.6-plus', value: 'qwen3.6-plus' },
               { label: 'DeepSeek-V3.2', value: 'DeepSeek-V3.2' },
+              { label: 'haiku', value: 'haiku' },
+              { label: 'sonnet', value: 'sonnet' },
+              { label: 'gpt-5.4', value: 'gpt-5.4' },
+              { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
+              { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
             ]}
           />
         </Form.Item>
