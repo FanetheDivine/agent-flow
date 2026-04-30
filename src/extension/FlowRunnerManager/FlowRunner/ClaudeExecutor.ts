@@ -159,6 +159,7 @@ export class ClaudeExecutor {
     const options: Options = {
       maxTurns: 100,
       model: this.agent.model,
+      effort: this.agent.effort,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: this.prompt },
       mcpServers: { AgentControllerMcp: this.mcpServer },
       permissionMode: 'default',

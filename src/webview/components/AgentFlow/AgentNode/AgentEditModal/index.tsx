@@ -24,6 +24,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       form.setFieldsValue({
         agent_name: agent.agent_name,
         model: agent.model,
+        effort: agent.effort,
         agent_prompt: agent.agent_prompt,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
@@ -99,6 +100,19 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               { label: 'gpt-5.4', value: 'gpt-5.4' },
               { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
               { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
+            ]}
+          />
+        </Form.Item>
+
+        <Form.Item name='effort' label='努力程度'>
+          <Select
+            placeholder='默认（不指定）'
+            allowClear
+            options={[
+              { label: 'low — 最快，最少思考', value: 'low' },
+              { label: 'medium — 适中', value: 'medium' },
+              { label: 'high — 较多思考', value: 'high' },
+              { label: 'max — 最大思考（仅 Opus 支持）', value: 'max' },
             ]}
           />
         </Form.Item>
