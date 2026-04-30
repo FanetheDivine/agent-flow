@@ -15,69 +15,126 @@ export type AgentNode = Node<AgentNodeData, 'agent'>
 
 // ── Flow → ReactFlow 转换 ──────────────────────────────────────────────────
 
-/** 将 Flow 中的 Agent 列表布局为 ReactFlow 节点 */
+// ── 布局常量 ───────────────────────────────────────────────────────────────
+// 节点宽度按 max-w-60 (240px) 估算
+const NODE_WIDTH = 240
+// 节点高度估算分段（与 AgentNode 样式保持一致）
+const HEADER_H = 40
+const MODEL_ROW_H = 28
+const OUTPUT_ROW_H = 24
+const OUTPUT_GAP = 4
+const OUTPUT_BLOCK_PADDING = 14 // pt-1.5 + pb-2
+// 层与层之间的水平间距
+const LAYER_GAP = 120
+// 同一层内节点之间的垂直间距
+const SIBLING_GAP = 40
+
+function estimateNodeHeight(agent: Agent): number {
+  let h = HEADER_H
+  if (agent.model) h += MODEL_ROW_H
+  const n = agent.outputs?.length ?? 0
+  if (n > 0) h += OUTPUT_BLOCK_PADDING + n * OUTPUT_ROW_H + (n - 1) * OUTPUT_GAP
+  return h
+}
+
+/**
+ * 将 Flow 中的 Agent 列表布局为 ReactFlow 节点。
+ *
+ * 算法：Sugiyama 风格的分层布局（左→右，与节点左右 handle 方向一致）
+ *   1. 最长路径分层：入度为 0 的 agent 为源，沿 outputs 做一次前向松弛，
+ *      level(v) = max(level(u)) + 1。环/孤点 fallback 到 level 0。
+ *   2. 层内重心排序：按父节点在上一层中的平均下标排序，降低交叉。
+ *   3. 高度感知垂直堆叠：每层按估算高度竖排，整层整体在 y=0 居中。
+ */
 function agentsToNodes(flowId: string, agents: Agent[]): AgentNode[] {
-  const ids = new Set(agents.map((a) => a.id))
+  if (agents.length === 0) return []
 
-  // BFS 分层
-  const levelMap = new Map<string, number>()
-  const queue: Array<{ id: string; level: number }> = agents.map((a) => ({
-    id: a.id,
-    level: 0,
-  }))
+  const agentMap = new Map(agents.map((a) => [a.id, a]))
 
-  // 未被连接的节点放到最后一层
-  const maxLevel = agents.length
+  // 1) 分层：入度 + 最长路径松弛
+  const inDegree = new Map<string, number>()
+  const parents = new Map<string, string[]>()
   for (const a of agents) {
-    if (!ids.has(a.id)) {
-      levelMap.set(a.id, maxLevel)
-    }
+    inDegree.set(a.id, 0)
+    parents.set(a.id, [])
   }
-
-  while (queue.length > 0) {
-    const { id, level } = queue.shift()!
-    if (levelMap.has(id) && levelMap.get(id)! <= level) continue
-    levelMap.set(id, level)
-
-    const agent = agents.find((a) => a.id === id)
-    if (!agent?.outputs) continue
-    for (const output of agent.outputs) {
-      if (
-        output.next_agent &&
-        (!levelMap.has(output.next_agent) || levelMap.get(output.next_agent)! > level + 1)
-      ) {
-        queue.push({ id: output.next_agent, level: level + 1 })
+  for (const a of agents) {
+    for (const o of a.outputs ?? []) {
+      if (o.next_agent && agentMap.has(o.next_agent)) {
+        inDegree.set(o.next_agent, (inDegree.get(o.next_agent) ?? 0) + 1)
+        parents.get(o.next_agent)!.push(a.id)
       }
     }
   }
 
-  // 按层级分组，计算 x, y
-  const levelGroups = new Map<number, Agent[]>()
-  for (const agent of agents) {
-    const level = levelMap.get(agent.id) ?? maxLevel
-    if (!levelGroups.has(level)) levelGroups.set(level, [])
-    levelGroups.get(level)!.push(agent)
+  const level = new Map<string, number>()
+  const sources = agents.filter((a) => inDegree.get(a.id) === 0)
+  const queue: string[] = sources.map((a) => a.id)
+  for (const id of queue) level.set(id, 0)
+
+  // 有环则无源，fallback：全部放 level 0
+  const maxIter = agents.length * agents.length + 1
+  let head = 0
+  let iter = 0
+  while (head < queue.length && iter++ < maxIter) {
+    const id = queue[head++]
+    const lv = level.get(id)!
+    for (const o of agentMap.get(id)?.outputs ?? []) {
+      if (!o.next_agent || !agentMap.has(o.next_agent)) continue
+      const cur = level.get(o.next_agent) ?? -1
+      if (lv + 1 > cur) {
+        level.set(o.next_agent, lv + 1)
+        queue.push(o.next_agent)
+      }
+    }
+  }
+  for (const a of agents) if (!level.has(a.id)) level.set(a.id, 0)
+
+  // 2) 分组 & 层内重心排序
+  const levelGroups = new Map<number, string[]>()
+  for (const a of agents) {
+    const lv = level.get(a.id)!
+    if (!levelGroups.has(lv)) levelGroups.set(lv, [])
+    levelGroups.get(lv)!.push(a.id)
+  }
+  const sortedLevels = [...levelGroups.keys()].sort((a, b) => a - b)
+
+  const layerOrder = new Map<number, string[]>()
+  // 第一层按 agents 原顺序稳定排列
+  layerOrder.set(sortedLevels[0], levelGroups.get(sortedLevels[0])!.slice())
+
+  for (let i = 1; i < sortedLevels.length; i++) {
+    const prevIndex = new Map(layerOrder.get(sortedLevels[i - 1])!.map((id, idx) => [id, idx]))
+    const ids = levelGroups.get(sortedLevels[i])!.slice()
+    ids.sort((x, y) => {
+      const barycenter = (id: string): number => {
+        const ps = parents.get(id) ?? []
+        const idxs = ps.map((p) => prevIndex.get(p)).filter((v): v is number => v !== undefined)
+        if (idxs.length === 0) return Number.POSITIVE_INFINITY
+        return idxs.reduce((s, v) => s + v, 0) / idxs.length
+      }
+      return barycenter(x) - barycenter(y)
+    })
+    layerOrder.set(sortedLevels[i], ids)
   }
 
-  const X_GAP = 280
-  const Y_GAP = 160
-
+  // 3) 高度感知垂直堆叠：整层居中
   const nodes: AgentNode[] = []
-  const sortedLevels = [...levelGroups.entries()].sort(([a], [b]) => a - b)
-
-  for (const [level, group] of sortedLevels) {
-    const totalWidth = (group.length - 1) * X_GAP
-    group.forEach((agent, idx) => {
+  for (const lv of sortedLevels) {
+    const ids = layerOrder.get(lv)!
+    const heights = ids.map((id) => estimateNodeHeight(agentMap.get(id)!))
+    const totalH = heights.reduce((s, h) => s + h, 0) + (ids.length - 1) * SIBLING_GAP
+    let y = -totalH / 2
+    const x = lv * (NODE_WIDTH + LAYER_GAP)
+    ids.forEach((id, idx) => {
+      const a = agentMap.get(id)!
       nodes.push({
-        id: agent.id,
+        id: a.id,
         type: 'agent',
-        position: { x: idx * X_GAP - totalWidth / 2 + 400, y: level * Y_GAP + 60 },
-        data: {
-          flowId,
-          agentId: agent.id,
-          agentName: agent.agent_name,
-        },
+        position: { x, y },
+        data: { flowId, agentId: a.id, agentName: a.agent_name },
       })
+      y += heights[idx] + SIBLING_GAP
     })
   }
 

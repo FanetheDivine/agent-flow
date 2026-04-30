@@ -58,6 +58,14 @@ export type ExtensionToWebviewEvents = {
   loadFlows: PersistedFlows
   /** extension异常 */
   error: string
+  /** 向当前 active 的输入框注入文本（由 VSCode 编辑器侧快捷键触发） */
+  insertSelection: {
+    text: string
+    languageId?: string
+    filename?: string
+    startLine?: number
+    endLine?: number
+  }
 } & ExtensionFlowSignalEvents
 
 /** extension接受 webview发出的消息 */
@@ -107,6 +115,14 @@ type FlowSignalPayload = {
   agentError: { runId: string; agentId: string; err: Error }
   /** flow运行错误 */
   error: { runId?: string; msg: string }
+  /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
+  toolPermissionRequest: {
+    runId: string
+    sessionId: string
+    toolUseId: string
+    toolName: string
+    input: unknown
+  }
 }
 
 /** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
@@ -132,6 +148,13 @@ type FlowCommandPayload = {
     sessionId: string
     toolUseId: string
     output: AskUserQuestionOutput
+  }
+  /** 回答工具权限请求：允许或拒绝当前挂起的工具调用 */
+  toolPermissionResult: {
+    runId: string
+    sessionId: string
+    toolUseId: string
+    allow: boolean
   }
 }
 

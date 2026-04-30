@@ -6,6 +6,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent, UserMessageType } from '@/common'
 import { useFlowStore, selectAgentPhase, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
+import type { CodeRef } from '@/webview/utils/activeInputRegistry'
+import { buildUserMessageContent } from '@/webview/utils/buildUserMessageContent'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
 import { ChatPanel } from './ChatPanel'
@@ -75,15 +77,17 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   )
 
   const onSend = useCallback(
-    (text: string) => {
+    async (text: string, files: File[], references: CodeRef[]) => {
+      const content = await buildUserMessageContent(text, files, references)
+
       if (agentPhase === 'awaiting-message' || agentPhase === 'awaiting-question') {
-        sendUserMessage(flowId, text)
+        sendUserMessage(flowId, content)
         return
       }
 
       const initMessage: UserMessageType = {
         type: 'user',
-        message: { role: 'user', content: text },
+        message: { role: 'user', content },
         parent_tool_use_id: null,
       }
 

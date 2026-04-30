@@ -107,6 +107,11 @@ export class FlowRunner {
       .with('flow.command.answerQuestion', () => {
         this.handleAnswerQuestion(data as FlowRunnerCommandEvents['flow.command.answerQuestion'])
       })
+      .with('flow.command.toolPermissionResult', () => {
+        this.handleToolPermissionResult(
+          data as FlowRunnerCommandEvents['flow.command.toolPermissionResult'],
+        )
+      })
       .exhaustive()
   }
 
@@ -218,6 +223,17 @@ export class FlowRunner {
     this.currentExecutor.answerQuestion(toolUseId, output)
   }
 
+  private handleToolPermissionResult({
+    runId,
+    sessionId,
+    toolUseId,
+    allow,
+  }: FlowRunnerCommandEvents['flow.command.toolPermissionResult']): void {
+    if (!this.checkSession(runId, sessionId)) return
+    if (!this.currentExecutor) return
+    this.currentExecutor.answerToolPermission(toolUseId, allow)
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private runAgent(
@@ -254,6 +270,16 @@ export class FlowRunner {
         // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
         if (this.currentAgentId !== agent.id) return
         this.onAgentComplete(agent, result)
+      },
+      onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
+        if (!executorSessionId) return
+        this.fire('flow.signal.toolPermissionRequest', {
+          runId,
+          sessionId: executorSessionId,
+          toolUseId,
+          toolName,
+          input,
+        })
       },
       onError: (err) => {
         this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })

@@ -38,6 +38,14 @@ export type PendingQuestion = {
   sessionId: string
 }
 
+export type PendingToolPermission = {
+  toolUseId: string
+  toolName: string
+  input: unknown
+  /** 所属 session，用于切换 agent 时自然失效 */
+  sessionId: string
+}
+
 export type FlowRunState = {
   runKey: string
   phase: FlowPhase
@@ -47,6 +55,10 @@ export type FlowRunState = {
   answeredQuestions: Record<string, AskUserQuestionOutput>
   /** 当前未回答的 AskUserQuestion，显式存储（不从消息反推） */
   pendingQuestion?: PendingQuestion
+  /** 已回答的工具权限请求：toolUseId -> allow，用于 UI 回显历史态 */
+  answeredToolPermissions: Record<string, { allow: boolean }>
+  /** 当前未回答的工具权限请求 */
+  pendingToolPermission?: PendingToolPermission
   runId?: string
   currentSessionId?: string
   currentAgentId?: string
@@ -68,8 +80,9 @@ type FlowStoreType = FlowState & {
   setActiveFlowId: (id: string) => void
   runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   saveFlows: (updateFn: (val: Flow[]) => void) => void
-  sendUserMessage: (flowId: string, text: string) => void
+  sendUserMessage: (flowId: string, content: UserMessageType['message']['content']) => void
   answerQuestion: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
+  answerToolPermission: (flowId: string, toolUseId: string, allow: boolean) => void
   interruptAgent: (flowId: string) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
@@ -119,6 +132,19 @@ export const selectPendingQuestionFor =
     if (!fs || fs.currentAgentId !== agentId) return undefined
     return fs.pendingQuestion
   }
+
+export const selectPendingToolPermissionFor =
+  (flowId: string, agentId: string) =>
+  (s: FlowState): PendingToolPermission | undefined => {
+    const fs = s.flowStates[flowId]
+    if (!fs || fs.currentAgentId !== agentId) return undefined
+    return fs.pendingToolPermission
+  }
+
+export const selectAnsweredToolPermissions =
+  (flowId: string) =>
+  (s: FlowState): Record<string, { allow: boolean }> =>
+    s.flowStates[flowId]?.answeredToolPermissions ?? {}
 
 // ── UI helper ────────────────────────────────────────────────────────────────
 
@@ -186,6 +212,10 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             draft.activeFlowId = data.flows[0]?.id
             return
           }
+          if (msg.type === 'insertSelection') {
+            // 由 App 层订阅处理，store 不参与
+            return
+          }
           const runId = msg.data.runId
           const flowId = msg.data.flowId
           const fs = draft.flowStates[flowId]
@@ -198,6 +228,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             fs.currentSessionId = msg.data.sessionId
             fs.currentAgentId = msg.data.agentId
             fs.pendingQuestion = undefined
+            fs.pendingToolPermission = undefined
             // 从 flow 定义中查找 agent name
             const flow = draft.flows.find((f) => f.id === flowId)
             const agent = flow?.agents?.find((a) => a.id === msg.data.agentId)
@@ -239,6 +270,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 session.outputName = data.output?.name
               }
               fs.pendingQuestion = undefined
+              fs.pendingToolPermission = undefined
               if (data.output) {
                 fs.currentSessionId = data.output.newSessionId
                 // next_agent 存储的是 id，从 flow 定义中查找对应 agent
@@ -270,17 +302,28 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 fs.currentAgentName = undefined
               }
             })
+            .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {
+              fs.pendingToolPermission = {
+                toolUseId: data.toolUseId,
+                toolName: data.toolName,
+                input: data.input,
+                sessionId: data.sessionId,
+              }
+            })
             .with({ type: 'flow.signal.agentInterrupted' }, () => {
               fs.phase = 'awaiting'
               fs.pendingQuestion = undefined
+              fs.pendingToolPermission = undefined
             })
             .with({ type: 'flow.signal.agentError' }, () => {
               fs.phase = 'error'
               fs.pendingQuestion = undefined
+              fs.pendingToolPermission = undefined
             })
             .with({ type: 'flow.signal.error' }, () => {
               fs.phase = 'error'
               fs.pendingQuestion = undefined
+              fs.pendingToolPermission = undefined
             })
             .exhaustive()
         })
@@ -299,6 +342,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           phase: 'starting',
           sessions: [],
           answeredQuestions: {},
+          answeredToolPermissions: {},
         }
       })
       postMessageToExtension({
@@ -317,7 +361,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
       postMessageToExtension({ type: 'saveFlows', data: get().flows })
     },
-    sendUserMessage: (flowId, text) => {
+    sendUserMessage: (flowId, content) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
       if (!fs?.runId || !fs.currentSessionId) return
@@ -329,7 +373,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           sessionId: fs.currentSessionId,
           message: {
             type: 'user',
-            message: { role: 'user', content: text },
+            message: { role: 'user', content },
             parent_tool_use_id: null,
           },
         },
@@ -355,6 +399,29 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           sessionId: fs.currentSessionId,
           toolUseId,
           output,
+        },
+      })
+    },
+    answerToolPermission: (flowId, toolUseId, allow) => {
+      const { flowStates } = get()
+      const fs = flowStates[flowId]
+      if (!fs?.runId || !fs.currentSessionId) return
+      immerSet((draft) => {
+        const s = draft.flowStates[flowId]
+        if (!s) return
+        s.answeredToolPermissions[toolUseId] = { allow }
+        if (s.pendingToolPermission?.toolUseId === toolUseId) {
+          s.pendingToolPermission = undefined
+        }
+      })
+      postMessageToExtension({
+        type: 'flow.command.toolPermissionResult',
+        data: {
+          flowId,
+          runId: fs.runId,
+          sessionId: fs.currentSessionId,
+          toolUseId,
+          allow,
         },
       })
     },

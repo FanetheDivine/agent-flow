@@ -9,6 +9,7 @@ import type {
   ExtensionToWebviewMessage,
 } from '@/common'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
+import { ToolPermissionCard } from './ToolPermissionCard'
 
 type Props = {
   msg: ExtensionToWebviewMessage
@@ -24,6 +25,12 @@ export type BubbleCtx = {
   answeredMap: Map<string, AnsweredInfo>
   onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
   onActiveDismiss?: (toolUseId: string) => void
+  /** 当前挂起的工具权限请求 toolUseId（若有） */
+  pendingToolPermissionToolUseId?: string
+  /** 已回答的工具权限历史 */
+  answeredToolPermissions?: Record<string, { allow: boolean }>
+  onToolPermissionAllow?: (toolUseId: string) => void
+  onToolPermissionDeny?: (toolUseId: string) => void
 }
 
 type RenderedBubble = {
@@ -127,6 +134,27 @@ export function toBubbleItems(
             }
             const toolName =
               'server_name' in block ? `${block.server_name}::${block.name}` : block.name
+            if (ctx) {
+              const isPendingPerm = ctx.pendingToolPermissionToolUseId === block.id
+              const answeredPerm = ctx.answeredToolPermissions?.[block.id]
+              if (isPendingPerm || answeredPerm) {
+                items.push({
+                  key,
+                  role: 'system',
+                  content: (
+                    <ToolPermissionCard
+                      toolName={toolName}
+                      input={block.input}
+                      mode={isPendingPerm ? 'active' : 'historical'}
+                      answered={answeredPerm}
+                      onAllow={() => ctx.onToolPermissionAllow?.(block.id)}
+                      onDeny={() => ctx.onToolPermissionDeny?.(block.id)}
+                    />
+                  ),
+                })
+                return
+              }
+            }
             items.push({
               key,
               role: 'system',

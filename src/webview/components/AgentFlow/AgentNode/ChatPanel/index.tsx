@@ -4,11 +4,14 @@ import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { match } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
+import type { CodeRef } from '@/webview/utils/activeInputRegistry'
 import {
   useFlowStore,
   selectAgentPhase,
   selectFlowPhase,
   selectPendingQuestionFor,
+  selectPendingToolPermissionFor,
+  selectAnsweredToolPermissions,
   agentCanSendMessage,
   agentCanInterrupt,
   flowCanInterrupt,
@@ -24,7 +27,7 @@ type Props = {
   agentId: string
   agentName: string
   /** 普通用户消息（非 AskUserQuestion 回答）——由上层决定是启动/续跑还是追加消息 */
-  onSend: (text: string) => void
+  onSend: (text: string, files: File[], references: CodeRef[]) => void
   onClose?: () => void
 }
 
@@ -57,10 +60,13 @@ function freeTextToOutput(questions: AskUserQuestionItem[], text: string): AskUs
 export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClose }) => {
   const interruptAgent = useFlowStore((s) => s.interruptAgent)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
+  const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
 
   const phase = useFlowStore(selectAgentPhase(flowId, agentId))
   const flowPhase = useFlowStore(selectFlowPhase(flowId))
   const pending = useFlowStore(selectPendingQuestionFor(flowId, agentId))
+  const pendingToolPerm = useFlowStore(selectPendingToolPermissionFor(flowId, agentId))
+  const answeredToolPermissions = useFlowStore(selectAnsweredToolPermissions(flowId))
   const allSessions = useFlowStore((s) => s.flowStates[flowId]?.sessions)
   const sessions = useMemo<AgentSession[]>(
     () => allSessions?.filter((s) => s.agentId === agentId) ?? [],
@@ -91,6 +97,10 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     answeredMap,
     onActiveSubmit: (toolUseId, output) => answerQuestion(flowId, toolUseId, output),
     onActiveDismiss: () => setCardDismissed(true),
+    pendingToolPermissionToolUseId: pendingToolPerm?.toolUseId,
+    answeredToolPermissions,
+    onToolPermissionAllow: (toolUseId) => answerToolPermission(flowId, toolUseId, true),
+    onToolPermissionDeny: (toolUseId) => answerToolPermission(flowId, toolUseId, false),
   }
 
   const { text: statusText, color: statusColor } = match<
@@ -109,14 +119,14 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const placeholder =
     phase === 'idle' ? '输入消息以运行...' : pending ? '输入文本自由回答...' : '输入消息...'
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, files: File[], references: CodeRef[]) => {
     if (pending) {
       const output = freeTextToOutput(pending.input.questions, text)
       setFreeTextMap((prev) => ({ ...prev, [pending.toolUseId]: true }))
       answerQuestion(flowId, pending.toolUseId, output)
       return
     }
-    onSend(text)
+    onSend(text, files, references)
   }
 
   return (

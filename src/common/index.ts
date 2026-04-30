@@ -27,6 +27,18 @@ export const AgentSchema = z.object({
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),
   agent_prompt: z.array(z.string()).describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
   outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
+  auto_allowed_tools: z
+    .union([z.literal(true), z.array(z.string())])
+    .optional()
+    .describe(
+      '自动允许执行的工具：true 表示全部放行；字符串数组为白名单。特殊值 "MCP" 匹配所有 mcp__* 工具',
+    ),
+  must_confirm_tools: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
+    ),
 })
 
 /** @see {@link AgentSchema} */
@@ -153,6 +165,45 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   }
 
   return result
+}
+
+/** 通配符：匹配所有 `mcp__*` 工具。用于 auto_allowed_tools / must_confirm_tools 的字符串项 */
+export const MCP_WILDCARD = 'MCP'
+
+/** Claude Code 预设提供的常见工具名，用于 AgentEditModal 的候选项 */
+export const BUILTIN_TOOL_NAMES = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'NotebookEdit',
+  'WebFetch',
+  'WebSearch',
+  'TodoWrite',
+  'AskUserQuestion',
+  'SlashCommand',
+  'Skill',
+  'Agent',
+] as const
+
+/**
+ * 判断工具名是否命中给定的 pattern 列表。
+ *
+ * 规则：
+ * - 字面量相等（大小写敏感）
+ * - 特殊值 "MCP" 匹配所有以 `mcp__` 开头的工具（即任意 MCP 工具）
+ */
+export function matchTool(toolName: string, patterns: readonly string[]): boolean {
+  for (const p of patterns) {
+    if (p === MCP_WILDCARD) {
+      if (toolName.startsWith('mcp__')) return true
+    } else if (p === toolName) {
+      return true
+    }
+  }
+  return false
 }
 
 /**

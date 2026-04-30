@@ -9,14 +9,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     if (currentPanel) {
-      currentPanel.reveal(vscode.ViewColumn.Active)
+      currentPanel.reveal(vscode.ViewColumn.Beside, true)
       return
     }
 
     const panel = vscode.window.createWebviewPanel(
       'agentFlow',
       'Agent Flow',
-      vscode.ViewColumn.Active,
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -69,7 +69,35 @@ export function activate(context: vscode.ExtensionContext) {
     })
   })
 
-  context.subscriptions.push(openPanel)
+  const addSelectionToInput = vscode.commands.registerCommand(
+    'agent-flow.addSelectionToInput',
+    () => {
+      const editor = vscode.window.activeTextEditor
+      if (!editor) return
+      const { selection, document } = editor
+      const text = document.getText(selection)
+      if (!text) return
+      if (!currentPanel) {
+        vscode.window.showInformationMessage(
+          'Agent Flow 面板未打开，请先通过 "Open Agent Flow" 打开面板',
+        )
+        return
+      }
+      currentPanel.reveal(vscode.ViewColumn.Beside, true)
+      currentPanel.webview.postMessage({
+        type: 'insertSelection',
+        data: {
+          text,
+          languageId: document.languageId,
+          filename: vscode.workspace.asRelativePath(document.uri),
+          startLine: selection.start.line + 1,
+          endLine: selection.end.line + 1,
+        },
+      } satisfies ExtensionToWebviewMessage)
+    },
+  )
+
+  context.subscriptions.push(openPanel, addSelectionToInput)
 }
 
 export function deactivate() {}

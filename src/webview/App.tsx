@@ -6,6 +6,8 @@ import { FlowSchema } from '@/common'
 import { AgentFlow } from './components/AgentFlow'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
+import { addReferenceToActiveInput } from './utils/activeInputRegistry'
+import { subscribeExtensionMessage } from './utils/ExtensionMessage'
 
 export const App: FC = () => {
   const { loading, flows, init } = useFlowStore()
@@ -22,6 +24,7 @@ export const App: FC = () => {
     })
   }, [globalError])
   usePasteFlow()
+  useInsertSelection()
 
   if (loading) {
     return (
@@ -68,4 +71,24 @@ const usePasteFlow = () => {
       return
     }
   })
+}
+
+const useInsertSelection = () => {
+  useEffect(() => {
+    return subscribeExtensionMessage((msg) => {
+      if (msg.type !== 'insertSelection') return
+      const { text, languageId, filename, startLine, endLine } = msg.data
+      const ok = addReferenceToActiveInput({
+        id: crypto.randomUUID(),
+        text,
+        languageId: languageId ?? '',
+        filename: filename ?? '',
+        startLine: startLine ?? 1,
+        endLine: endLine ?? startLine ?? 1,
+      })
+      if (!ok) {
+        notification.info({ message: '请先打开一个 ChatPanel 再使用 Ctrl+L' })
+      }
+    })
+  }, [])
 }

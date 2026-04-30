@@ -38,6 +38,11 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.answerQuestion']
         this.runners.get(flowId)?.emit('flow.command.answerQuestion', rest)
       })
+      .with('flow.command.toolPermissionResult', () => {
+        const { flowId, ...rest } =
+          data as ExtensionFlowCommandEvents['flow.command.toolPermissionResult']
+        this.runners.get(flowId)?.emit('flow.command.toolPermissionResult', rest)
+      })
       .otherwise(() => {})
   }
 

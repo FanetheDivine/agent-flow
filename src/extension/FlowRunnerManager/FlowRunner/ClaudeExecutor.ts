@@ -12,6 +12,7 @@ import {
   AIMessageType,
   AskUserQuestionOutput,
   buildAgentSystemPrompt,
+  matchTool,
   UserMessageType,
 } from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
@@ -28,6 +29,8 @@ export type ExecutorEvents = {
   onMessage: (message: AIMessageType) => void
   /** Agent 完成，选择了输出分支 */
   onComplete: (result: ExecutorResult) => void
+  /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
+  onToolPermissionRequest: (req: { toolUseId: string; toolName: string; input: unknown }) => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -55,6 +58,12 @@ export class ClaudeExecutor {
 
   /** 挂起中的 AskUserQuestion 权限请求：toolUseId -> resolver */
   private pendingPermissions = new Map<string, (result: PermissionResult) => void>()
+
+  /** 挂起中的工具权限请求：toolUseId -> { resolver, input } */
+  private pendingToolPermissions = new Map<
+    string,
+    { resolve: (result: PermissionResult) => void; input: Record<string, unknown> }
+  >()
 
   /**
    * @param agent - Agent 定义（model、outputs、prompt 等）
@@ -136,11 +145,30 @@ export class ClaudeExecutor {
     })
   }
 
+  /**
+   * 回答工具权限请求：allow 则原样放行 input；deny 则返回带 message 的拒绝结果，
+   * SDK 会在本次工具调用处产生一条 is_error 的 tool_result。
+   */
+  answerToolPermission(toolUseId: string, allow: boolean): void {
+    const pending = this.pendingToolPermissions.get(toolUseId)
+    if (!pending) return
+    this.pendingToolPermissions.delete(toolUseId)
+    if (allow) {
+      pending.resolve({ behavior: 'allow', updatedInput: pending.input })
+    } else {
+      pending.resolve({ behavior: 'deny', message: 'user denied' })
+    }
+  }
+
   private rejectAllPendingPermissions(reason: string): void {
     for (const [, resolver] of this.pendingPermissions) {
       resolver({ behavior: 'deny', message: reason })
     }
     this.pendingPermissions.clear()
+    for (const [, pending] of this.pendingToolPermissions) {
+      pending.resolve({ behavior: 'deny', message: reason })
+    }
+    this.pendingToolPermissions.clear()
   }
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
@@ -150,7 +178,31 @@ export class ClaudeExecutor {
         this.pendingPermissions.set(toolUseID, resolve)
       })
     }
-    return Promise.resolve({ behavior: 'allow', updatedInput: input })
+    const { auto_allowed_tools, must_confirm_tools } = this.agent
+    // 优先级 1：命中 must_confirm 列表，始终要求确认
+    if (must_confirm_tools && matchTool(toolName, must_confirm_tools)) {
+      return this.requestToolPermission(toolUseID, toolName, input)
+    }
+    // 优先级 2：auto_allowed 为 true 或命中数组，直接放行
+    if (auto_allowed_tools === true) {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input })
+    }
+    if (auto_allowed_tools && matchTool(toolName, auto_allowed_tools)) {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input })
+    }
+    // 兜底：未覆盖的工具默认要求用户确认
+    return this.requestToolPermission(toolUseID, toolName, input)
+  }
+
+  private requestToolPermission(
+    toolUseId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<PermissionResult> {
+    return new Promise<PermissionResult>((resolve) => {
+      this.pendingToolPermissions.set(toolUseId, { resolve, input })
+      this.events.onToolPermissionRequest({ toolUseId, toolName, input })
+    })
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────

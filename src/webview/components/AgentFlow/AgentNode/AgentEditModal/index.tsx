@@ -5,7 +5,7 @@ import { useWatch } from 'antd/es/form/Form'
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import type { Agent } from '@/common'
-import { buildAgentSystemPrompt } from '@/common'
+import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
 
 export type AgentEditModalProps = {
   open: boolean
@@ -13,6 +13,44 @@ export type AgentEditModalProps = {
   allAgents: { id: string; agent_name: string }[]
   onSave: (agent: Agent) => void
   onCancel: () => void
+}
+
+const TOOL_OPTIONS = [
+  { label: `${MCP_WILDCARD} — 匹配所有 mcp__* 工具`, value: MCP_WILDCARD },
+  ...BUILTIN_TOOL_NAMES.map((n) => ({ label: n, value: n })),
+]
+
+type AutoAllowedValue = true | string[] | undefined
+
+/** 受控：Switch 开 → true；关 → string[]（默认 []）。兼容 undefined 初值 */
+const AutoAllowedToolsField: FC<{
+  value?: AutoAllowedValue
+  onChange?: (v: AutoAllowedValue) => void
+}> = ({ value, onChange }) => {
+  const allowAll = value === true
+  const list = Array.isArray(value) ? value : []
+  return (
+    <div className='flex flex-col gap-2'>
+      <div className='flex items-center gap-2'>
+        <Switch
+          size='small'
+          checked={allowAll}
+          onChange={(checked) => onChange?.(checked ? true : [])}
+        />
+        <span className='text-[12px] text-[#cdd6f4]'>允许全部工具</span>
+      </div>
+      {!allowAll && (
+        <Select
+          mode='tags'
+          placeholder='选择或输入工具名（回车添加自定义）'
+          value={list}
+          onChange={(v) => onChange?.(v as string[])}
+          options={TOOL_OPTIONS}
+          tokenSeparators={[',', ' ']}
+        />
+      )}
+    </div>
+  )
 }
 
 export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
@@ -26,6 +64,8 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         model: agent.model,
         effort: agent.effort,
         agent_prompt: agent.agent_prompt,
+        auto_allowed_tools: agent.auto_allowed_tools,
+        must_confirm_tools: agent.must_confirm_tools,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -114,6 +154,27 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               { label: 'high — 较多思考', value: 'high' },
               { label: 'max — 最大思考（仅 Opus 支持）', value: 'max' },
             ]}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name='auto_allowed_tools'
+          label='自动允许的工具'
+          tooltip={`不需要用户确认、自动执行的工具。开启「允许全部」或留空表示全部放行；特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
+        >
+          <AutoAllowedToolsField />
+        </Form.Item>
+
+        <Form.Item
+          name='must_confirm_tools'
+          label='必须确认的工具'
+          tooltip={`每次调用都必须用户确认的工具，优先级高于「自动允许」。特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
+        >
+          <Select
+            mode='tags'
+            placeholder='选择或输入工具名（回车添加自定义）'
+            options={TOOL_OPTIONS}
+            tokenSeparators={[',', ' ']}
           />
         </Form.Item>
 
