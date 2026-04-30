@@ -66,61 +66,6 @@ export const PersistedFlowsSchema = z.object({ flows: z.array(FlowSchema) })
 /** @see {@link PersistedFlowsSchema} */
 export type PersistedFlows = z.infer<typeof PersistedFlowsSchema>
 
-/** 单条消息记录 */
-export const MessageSchema = z.object({
-  role: z.enum(['user', 'agent']),
-  content: z.string(),
-  timestamp: z.string(),
-})
-
-/** @see {@link MessageSchema} */
-export type Message = z.infer<typeof MessageSchema>
-
-/** 单步执行记录，一个 Agent 的执行过程 */
-export const StepSchema = z.object({
-  /** Agent 名称 */
-  agentName: z.string(),
-  /** 消息列表 */
-  messages: z.array(MessageSchema),
-  /** agent完成后，AI选择的输出分支名及输出内容 */
-  output: z
-    .object({
-      /** 输出分支名 */
-      output_name: z.string().optional(),
-      /** 输出内容 */
-      content: z.string(),
-    })
-    .optional(),
-})
-
-/** @see {@link StepSchema} */
-export type Step = z.infer<typeof StepSchema>
-
-/** 运行状态 */
-export const RunStateSchema = z.object({
-  /** 当前活跃的 agent，最多一个 */
-  currentAgent: z
-    .object({
-      id: z.string(),
-      /**
-       * 运行状态\
-       * preparing - agent 正在准备\
-       * ready - 可以接受用户输入\
-       * generating - AI 正在输出\
-       * completed - 已完成
-       */
-      status: z.enum(['preparing', 'ready', 'generating', 'completed']),
-    })
-    .optional(),
-  /** 执行步骤列表 */
-  steps: z.array(StepSchema),
-  /** Flow 全局共享上下文，agent 间通过 MCP tool 读写 */
-  shareValues: z.record(z.string(), z.string()),
-})
-
-/** @see {@link RunStateSchema} */
-export type RunState = z.infer<typeof RunStateSchema>
-
 // ── Flow 校验 ──────────────────────────────────────────────────────────────────
 
 /** Flow 语义校验结果 */

@@ -1,12 +1,46 @@
 import { match } from 'ts-pattern'
+import { z } from 'zod'
 import {
   type Agent,
   type FlowRunnerCommandEvents,
   type Flow,
-  type RunState,
   type FlowRunnerSignalEvents,
   UserMessageType,
 } from '@/common'
+
+const MessageSchema = z.object({
+  role: z.enum(['user', 'agent']),
+  content: z.string(),
+  timestamp: z.string(),
+})
+
+type Message = z.infer<typeof MessageSchema>
+
+const StepSchema = z.object({
+  agentName: z.string(),
+  messages: z.array(MessageSchema),
+  output: z
+    .object({
+      output_name: z.string().optional(),
+      content: z.string(),
+    })
+    .optional(),
+})
+
+type Step = z.infer<typeof StepSchema>
+
+const RunStateSchema = z.object({
+  currentAgent: z
+    .object({
+      id: z.string(),
+      status: z.enum(['preparing', 'ready', 'generating', 'completed']),
+    })
+    .optional(),
+  steps: z.array(StepSchema),
+  shareValues: z.record(z.string(), z.string()),
+})
+
+type RunState = z.infer<typeof RunStateSchema>
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 
 type SignalHandler<K extends keyof FlowRunnerSignalEvents> = (
