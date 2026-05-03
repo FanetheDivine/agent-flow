@@ -1,0 +1,41 @@
+/* ReactFlow dark theme overrides */
+.react-flow__controls button {
+  background: #1e1e2e !important;
+  border-color: #45475a !important;
+  fill: #cdd6f4 !important;
+}
+
+.react-flow__controls button:hover {
+  background: #313244 !important;
+}
+
+.react-flow__controls button svg {
+  fill: #cdd6f4 !important;
+}
+
+.react-flow__edge-textbg {
+  fill: #1e1e2e !important;
+}
+
+.react-flow__attribution {
+  display: none !important;
+}
+
+/* 运行中 Agent 节点发光动画 */
+@keyframes agent-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 8px rgba(166, 227, 161, 0.4),
+      0 0 16px rgba(166, 227, 161, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 16px rgba(166, 227, 161, 0.6),
+      0 0 32px rgba(166, 227, 161, 0.3);
+  }
+}
+
+.agent-node-running {
+  animation: agent-glow 2s ease-in-out infinite;
+}

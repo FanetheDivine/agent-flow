@@ -1,0 +1,77 @@
+@layer basic, theme, base, antd, components, utilities;
+
+@import 'tailwindcss';
+
+@layer basic {
+  * {
+    &::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: #bbb;
+      border-radius: 9999px;
+    }
+  }
+
+  html,
+  body,
+  #root,
+  .app {
+    @apply relative m-0 h-full w-full p-0;
+  }
+
+  html {
+    @apply min-w-80 overflow-auto;
+  }
+
+  body,
+  #root,
+  .app {
+    @apply overflow-hidden;
+  }
+}
+
+@layer components {
+  .chat-bubble-compact .ant-bubble {
+    margin-block: 2px;
+  }
+
+  .chat-bubble-compact .ant-bubble-content {
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 92%;
+  }
+
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark p {
+    margin-block: 0.25em;
+  }
+
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark pre {
+    margin-block: 0.3em;
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark code {
+    font-size: 11px;
+    padding: 0 3px;
+  }
+
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark ul,
+  .chat-bubble-compact .ant-bubble-content .x-markdown-dark ol {
+    margin-block: 0.25em;
+    padding-inline-start: 1.2em;
+  }
+}
