@@ -1,0 +1,129 @@
+{
+  "name": "agent-flow",
+  "license": "MIT",
+  "displayName": "agent-flow",
+  "description": "可视化地编排 Agent 工作流",
+  "version": "0.0.1",
+  "publisher": "FanetheDivine",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FanetheDivine/agent-flow.git"
+  },
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.115.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-flow-sidebar",
+          "title": "Agent Flow",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agent-flow.openPanel",
+        "title": "Open Agent Flow",
+        "icon": "resources/icon.svg"
+      },
+      {
+        "command": "agent-flow.addSelectionToInput",
+        "title": "Agent Flow: Add Selection to Active Input"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agent-flow.addSelectionToInput",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agent-flow.openPanel",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.mjs",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.mjs --watch",
+    "watch:tsc": "tsc --build --watch",
+    "package": "npm run check-types && npm run lint && node esbuild.mjs --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --build",
+    "format": "prettier --write .",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "build-extension": "npx @vscode/vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@ant-design/cssinjs": "^2.1.2",
+    "@ant-design/icons": "^6.1.1",
+    "@ant-design/x": "^2.5.0",
+    "@ant-design/x-markdown": "^2.5.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.104",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@xyflow/react": "^12.10.2",
+    "ahooks": "^3.9.7",
+    "antd": "^6.3.5",
+    "clsx": "^2.1.1",
+    "dayjs": "^1.11.20",
+    "immer": "^11.1.4",
+    "lodash-es": "^4.18.1",
+    "motion": "^12.38.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-error-boundary": "^6.1.1",
+    "swr": "^2.4.1",
+    "tailwind-merge": "^3.5.0",
+    "ts-pattern": "^5.9.0",
+    "use-immer": "^0.11.0",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
+    "@types/lodash-es": "^4.17.12",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "~22.19.17",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.115.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.27.3",
+    "esbuild-plugin-tailwindcss": "^2.2.0",
+    "eslint": "^9.39.3",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.5.9",
+    "prettier": "^3.8.2",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  }
+}

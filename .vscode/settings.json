@@ -1,0 +1,45 @@
+// Place your settings in this file to overwrite default and user settings.
+{
+  "files.exclude": {
+    "out": false, // set this to true to hide the "out" folder with the compiled JS files
+    "dist": false // set this to true to hide the "dist" folder with the compiled JS files
+  },
+  "search.exclude": {
+    "out": true, // set this to false to include "out" folder in search results
+    "dist": true // set this to false to include "dist" folder in search results
+  },
+  // Turn off tsc task auto detection since we have the necessary tasks as npm scripts
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "files.autoSave": "off",
+  "editor.quickSuggestionsDelay": 0,
+  "editor.parameterHints.enabled": false,
+  "editor.autoClosingBrackets": "always",
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "README.md": "LICENSE,*.md",
+    "package.json": ".prettierrc,.gitignore,*.yaml,*.json,*.d.ts,*.config.js,*.config.mjs,*.config.ts,.npmrc,.vscodeignore,*.mjs",
+    "vite.config.ts": "vite.*"
+  },
+  "tailwindCSS.classAttributes": [
+    "class",
+    "className",
+    "ngClass",
+    "class:list",
+    ".*[Cc]lass(Name)?"
+  ],
+  "emmet.showExpandedAbbreviation": "never",
+  "css.lint.unknownAtRules": "ignore",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "i18n-ally.localesPaths": ["src/locales/resource"],
+  "i18n-ally.keystyle": "nested",
+  "i18n-ally.displayLanguage": "zh"
+}
