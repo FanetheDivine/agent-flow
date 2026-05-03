@@ -72,6 +72,12 @@ export type FlowRunState = {
   currentSessionId?: string
   currentAgentId?: string
   currentAgentName?: string
+  /**
+   * Fork 起点（仅存在于"已 fork 但尚未发起首条消息"的新 Flow 上）。
+   * runFlow 读取它用于给 extension 传 forkFrom，并在读取后清空。
+   * flowStart signal 处理时据此把占位 session 的 sessionId 更新为 SDK 返回的 forked sessionId。
+   */
+  pendingForkFrom?: { sourceFlowId: string; sessionId: string; messageUuid: string }
 }
 
 export type FlowState = {
@@ -103,6 +109,12 @@ type FlowStoreType = FlowState & {
   answerToolPermission: (flowId: string, toolUseId: string, allow: boolean) => void
   interruptAgent: (flowId: string) => void
   killFlow: (flowId: string) => void
+  /**
+   * 在源 Flow 的某条消息处分叉：复制 agents 到新 Flow、预填 fork 点之前的消息历史、
+   * 切换到新 Flow 等待用户输入。用户发送首条消息时 runFlow 会据此带上 forkFrom
+   * 让 SDK 从该点 resume + forkSession。
+   */
+  forkFlow: (sourceFlowId: string, sourceSessionId: string, messageUuid: string) => void
   openChatDrawer: (flowId: string, agentId: string, agentName: string) => void
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
@@ -261,12 +273,21 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             const flow = draft.flows.find((f) => f.id === flowId)
             const agent = flow?.agents?.find((a) => a.id === msg.data.agentId)
             fs.currentAgentName = agent?.agent_name
-            fs.sessions.push({
-              sessionId: msg.data.sessionId,
-              agentId: msg.data.agentId,
-              messages: [],
-              completed: false,
-            })
+            // Fork 模式：占位 session（sessionId 为源 Flow 的 sessionId）已存在，
+            // 更新它的 sessionId 为 SDK 返回的真正 forked sessionId，而不是再 push 一个新的。
+            const forkPlaceholder = fs.sessions.find(
+              (s) => s.agentId === msg.data.agentId && !s.completed,
+            )
+            if (forkPlaceholder && forkPlaceholder.sessionId !== msg.data.sessionId) {
+              forkPlaceholder.sessionId = msg.data.sessionId
+            } else {
+              fs.sessions.push({
+                sessionId: msg.data.sessionId,
+                agentId: msg.data.agentId,
+                messages: [],
+                completed: false,
+              })
+            }
             const agentName = agent?.agent_name ?? ''
             if (draft.activeFlowId === flowId) {
               draft.chatDrawer = { flowId, agentId: msg.data.agentId, agentName }
@@ -393,22 +414,33 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       return subscribeExtensionMessage(onMessage)
     },
     runFlow: (flowId, agentId, initMessage) => {
-      const { flows } = get()
+      const { flows, flowStates } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
       const runKey = crypto.randomUUID()
+      const forkFrom = flowStates[flowId]?.pendingForkFrom
       immerSet((draft) => {
-        draft.flowStates[flowId] = {
-          runKey,
-          phase: 'starting',
-          sessions: [],
-          answeredQuestions: {},
-          answeredToolPermissions: {},
+        const existing = draft.flowStates[flowId]
+        // Fork 场景：保留预填的 sessions / answeredQuestions / answeredToolPermissions，
+        // 只更新 runKey 和 phase；清掉 pendingForkFrom（一次性）。
+        if (forkFrom && existing) {
+          existing.runKey = runKey
+          existing.phase = 'starting'
+          existing.runId = undefined
+          existing.pendingForkFrom = undefined
+        } else {
+          draft.flowStates[flowId] = {
+            runKey,
+            phase: 'starting',
+            sessions: [],
+            answeredQuestions: {},
+            answeredToolPermissions: {},
+          }
         }
       })
       postMessageToExtension({
         type: 'flow.command.flowStart',
-        data: { flowId, runKey, agentId, initMessage },
+        data: { flowId, runKey, agentId, initMessage, forkFrom },
       })
     },
     setActiveFlowId: (id) => {
@@ -552,6 +584,89 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         s.pendingToolPermission = undefined
         s.runId = undefined
       })
+    },
+    forkFlow: (sourceFlowId, sourceSessionId, messageUuid) => {
+      const { flows, flowStates } = get()
+      const sourceFlow = flows.find((f) => f.id === sourceFlowId)
+      if (!sourceFlow) return
+      const sourceFs = flowStates[sourceFlowId]
+      const sourceSession = sourceFs?.sessions.find((s) => s.sessionId === sourceSessionId)
+      if (!sourceSession) return
+
+      // 定位目标消息在 session 中的索引（按 SDK message uuid 匹配）
+      const targetIdx = sourceSession.messages.findIndex(
+        (m) =>
+          m.type === 'flow.signal.aiMessage' && (m.data.message as { uuid?: string }).uuid === messageUuid,
+      )
+      if (targetIdx < 0) return
+      const slicedMessages = sourceSession.messages.slice(0, targetIdx + 1)
+
+      // 按 copyAgents 的 id/name 重映射逻辑深拷贝 agents
+      const oldAgents = sourceFlow.agents ?? []
+      const idMap = new Map<string, string>()
+      for (const a of oldAgents) idMap.set(a.id, crypto.randomUUID())
+      const remappedAgents: Agent[] = oldAgents.map((a) => ({
+        ...a,
+        id: idMap.get(a.id)!,
+        outputs: a.outputs?.map((o) => ({
+          ...o,
+          next_agent: o.next_agent !== undefined ? idMap.get(o.next_agent) : undefined,
+        })),
+      }))
+      const newFlowId = crypto.randomUUID()
+      const newAgentId = idMap.get(sourceSession.agentId)
+      if (!newAgentId) return
+      const newFlow: Flow = {
+        id: newFlowId,
+        name: `${sourceFlow.name} (fork)`,
+        agents: remappedAgents,
+      }
+
+      // 仅保留被 fork 的 agent 的已回答记录（跨 agent 的无需携带）
+      const slicedToolUseIds = new Set<string>()
+      for (const m of slicedMessages) {
+        if (m.type !== 'flow.signal.aiMessage') continue
+        const msgObj = m.data.message
+        if (msgObj.type !== 'assistant') continue
+        const blocks = msgObj.message.content
+        if (!Array.isArray(blocks)) continue
+        for (const b of blocks) {
+          if (b.type === 'tool_use' || b.type === 'mcp_tool_use') slicedToolUseIds.add(b.id)
+        }
+      }
+      const answeredQuestions: Record<string, AskUserQuestionOutput> = {}
+      for (const [id, v] of Object.entries(sourceFs?.answeredQuestions ?? {})) {
+        if (slicedToolUseIds.has(id)) answeredQuestions[id] = v
+      }
+      const answeredToolPermissions: Record<string, { allow: boolean }> = {}
+      for (const [id, v] of Object.entries(sourceFs?.answeredToolPermissions ?? {})) {
+        if (slicedToolUseIds.has(id)) answeredToolPermissions[id] = v
+      }
+
+      immerSet((draft) => {
+        draft.flows.push(newFlow)
+        draft.flowStates[newFlowId] = {
+          runKey: crypto.randomUUID(),
+          phase: 'idle',
+          sessions: [
+            {
+              sessionId: sourceSessionId, // 占位，runFlow 发起后会被替换为 SDK 返回的 forked sessionId
+              agentId: newAgentId,
+              messages: slicedMessages,
+              completed: false,
+            },
+          ],
+          answeredQuestions,
+          answeredToolPermissions,
+          currentAgentId: newAgentId,
+          currentAgentName: remappedAgents.find((a) => a.id === newAgentId)?.agent_name,
+          pendingForkFrom: { sourceFlowId, sessionId: sourceSessionId, messageUuid },
+        }
+        draft.activeFlowId = newFlowId
+        const agentName = remappedAgents.find((a) => a.id === newAgentId)?.agent_name ?? ''
+        draft.chatDrawer = { flowId: newFlowId, agentId: newAgentId, agentName }
+      })
+      postMessageToExtension({ type: 'saveFlows', data: get().flows })
     },
     copyAgents: (newAgents, flowId) => {
       let remapped: Agent[] = []

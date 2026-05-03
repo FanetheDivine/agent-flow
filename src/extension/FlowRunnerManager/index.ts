@@ -15,15 +15,22 @@ export class FlowRunnerManager {
   handleCommand(type: string, data: any): void {
     match(type)
       .with('flow.command.flowStart', () => {
-        const { flowId, runKey, agentId, flow, initMessage } =
+        const { flowId, runKey, agentId, flow, initMessage, forkFrom } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
+        // 快照源 Flow 的 shareValues（若 forkFrom 指定）。必须在 disposeRunner 之前读取——
+        // 自 fork 的源与新 Flow 的 flowId 本应不同，但兜底：不在自 fork 场景下读自己。
+        let initialShareValues: Record<string, string> | undefined
+        if (forkFrom && forkFrom.sourceFlowId !== flowId) {
+          const source = this.runners.get(forkFrom.sourceFlowId)
+          if (source) initialShareValues = source.getShareValues()
+        }
         this.disposeRunner(flowId)
-        const runner = new FlowRunner(flow)
+        const runner = new FlowRunner(flow, { initialShareValues })
         runner.listenAllSignals((type, data) => {
           this.postMessage({ type, data: { ...data, flowId } } as ExtensionToWebviewMessage)
         })
         this.runners.set(flowId, runner)
-        runner.emit('flow.command.flowStart', { runKey, agentId, initMessage })
+        runner.emit('flow.command.flowStart', { runKey, agentId, initMessage, forkFrom })
       })
       .with('flow.command.userMessage', () => {
         const { flowId, ...rest } = data as ExtensionFlowCommandEvents['flow.command.userMessage']

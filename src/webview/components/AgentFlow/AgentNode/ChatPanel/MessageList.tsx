@@ -42,7 +42,7 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
           ),
         })
       }
-      toBubbleItems(session.messages, ctx, seenToolUseIds).forEach((item) => {
+      toBubbleItems(session.messages, ctx, seenToolUseIds, session.sessionId).forEach((item) => {
         result.push({
           key: `${session.sessionId}-${item.key}`,
           role: item.role,

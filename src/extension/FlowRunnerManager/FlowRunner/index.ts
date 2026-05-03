@@ -63,8 +63,16 @@ export class FlowRunner {
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
 
-  constructor(flow: Flow) {
+  constructor(flow: Flow, opts?: { initialShareValues?: Record<string, string> }) {
     this.flow = flow
+    if (opts?.initialShareValues) {
+      this.runState.shareValues = { ...opts.initialShareValues }
+    }
+  }
+
+  /** 导出当前 shareValues 快照（浅拷贝），供 fork 时复制给新 Flow */
+  getShareValues(): Record<string, string> {
+    return { ...this.runState.shareValues }
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -153,6 +161,7 @@ export class FlowRunner {
     runKey,
     agentId,
     initMessage,
+    forkFrom,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
@@ -164,21 +173,26 @@ export class FlowRunner {
       return
     }
 
-    // 重置运行状态
-    this.runState = { steps: [], shareValues: {} }
+    // 重置运行状态（shareValues 保留——构造时已注入 fork 快照）
+    this.runState = { steps: [], shareValues: this.runState.shareValues }
     this.currentRunId = crypto.randomUUID()
 
     // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
     const runId = this.currentRunId!
-    this.runAgent(initMessage, agent, (sessionId) => {
-      this.currentSessionId = sessionId
-      this.fire('flow.signal.flowStart', {
-        runId,
-        runKey,
-        sessionId,
-        agentId: agent.id,
-      })
-    })
+    this.runAgent(
+      initMessage,
+      agent,
+      (sessionId) => {
+        this.currentSessionId = sessionId
+        this.fire('flow.signal.flowStart', {
+          runId,
+          runKey,
+          sessionId,
+          agentId: agent.id,
+        })
+      },
+      forkFrom,
+    )
   }
 
   private handleUserMessage({
@@ -240,6 +254,7 @@ export class FlowRunner {
     initMessage: UserMessageType,
     agent: Agent,
     onSessionId: (sessionId: string) => void,
+    forkFrom?: { sessionId: string; messageUuid: string },
   ): void {
     this.currentAgentId = agent.id
     this.updateAgentStatus('preparing')
@@ -257,35 +272,41 @@ export class FlowRunner {
     // 本次 executor 专属 session 快照，防止过渡期间被 this.currentSessionId 覆盖污染
     let executorSessionId: string | null = null
 
-    this.currentExecutor = new ClaudeExecutor(initMessage, agent, this.runState.shareValues, {
-      onSessionId: (sessionId) => {
-        executorSessionId = sessionId
-        onSessionId(sessionId)
+    this.currentExecutor = new ClaudeExecutor(
+      initMessage,
+      agent,
+      this.runState.shareValues,
+      {
+        onSessionId: (sessionId) => {
+          executorSessionId = sessionId
+          onSessionId(sessionId)
+        },
+        onMessage: (message) => {
+          if (!executorSessionId) return
+          this.fire('flow.signal.aiMessage', { runId, sessionId: executorSessionId, message })
+        },
+        onComplete: (result) => {
+          // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
+          if (this.currentAgentId !== agent.id) return
+          this.onAgentComplete(agent, result)
+        },
+        onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
+          if (!executorSessionId) return
+          this.fire('flow.signal.toolPermissionRequest', {
+            runId,
+            sessionId: executorSessionId,
+            toolUseId,
+            toolName,
+            input,
+          })
+        },
+        onError: (err) => {
+          this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
+          this.updateAgentStatus('completed')
+        },
       },
-      onMessage: (message) => {
-        if (!executorSessionId) return
-        this.fire('flow.signal.aiMessage', { runId, sessionId: executorSessionId, message })
-      },
-      onComplete: (result) => {
-        // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
-        if (this.currentAgentId !== agent.id) return
-        this.onAgentComplete(agent, result)
-      },
-      onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
-        if (!executorSessionId) return
-        this.fire('flow.signal.toolPermissionRequest', {
-          runId,
-          sessionId: executorSessionId,
-          toolUseId,
-          toolName,
-          input,
-        })
-      },
-      onError: (err) => {
-        this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
-        this.updateAgentStatus('completed')
-      },
-    })
+      forkFrom,
+    )
   }
 
   private onAgentComplete(agent: Agent, result: ExecutorResult): void {

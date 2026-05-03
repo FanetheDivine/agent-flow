@@ -62,6 +62,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
+  const forkFlow = useFlowStore((s) => s.forkFlow)
 
   const phase = useFlowStore(selectAgentPhase(flowId, agentId))
   const flowPhase = useFlowStore(selectFlowPhase(flowId))
@@ -102,6 +103,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     answeredToolPermissions,
     onToolPermissionAllow: (toolUseId) => answerToolPermission(flowId, toolUseId, true),
     onToolPermissionDeny: (toolUseId) => answerToolPermission(flowId, toolUseId, false),
+    onFork: (sessionId, messageUuid) => forkFlow(flowId, sessionId, messageUuid),
   }
 
   const { text: statusText, color: statusColor } = match<

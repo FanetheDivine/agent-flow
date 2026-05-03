@@ -56,6 +56,9 @@ export class ClaudeExecutor {
   private sessionId: string | null = null
   private events: ExecutorEvents
 
+  /** Fork 起点，仅用于首次 createQuery。应用后即置空以避免中断重连时再次挂载。 */
+  private forkFrom: { sessionId: string; messageUuid: string } | null = null
+
   /** 挂起中的 AskUserQuestion 权限请求：toolUseId -> resolver */
   private pendingPermissions = new Map<string, (result: PermissionResult) => void>()
 
@@ -69,12 +72,14 @@ export class ClaudeExecutor {
    * @param agent - Agent 定义（model、outputs、prompt 等）
    * @param shareValues - Flow 全局共享上下文（引用传递，MCP 工具直接读写）
    * @param previousOutput - 上一个 Agent 的输出，用于注入 prompt 上下文
+   * @param forkFrom - 可选：从已有 session 的某条消息处分叉。首次 createQuery 会带上 resume+resumeSessionAt+forkSession
    */
   constructor(
     initMessage: UserMessageType,
     agent: Agent,
     shareValues: Record<string, string>,
     events: ExecutorEvents,
+    forkFrom?: { sessionId: string; messageUuid: string },
   ) {
     this.agent = agent
     this.events = events
@@ -91,6 +96,7 @@ export class ClaudeExecutor {
         events.onComplete(result)
       },
     })
+    this.forkFrom = forkFrom ?? null
     this.createQuery(initMessage)
   }
 
@@ -218,7 +224,13 @@ export class ClaudeExecutor {
       canUseTool: this.canUseTool,
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
     }
-    if (this.sessionId) {
+    if (this.forkFrom && !this.sessionId) {
+      // 首次 createQuery 且带 fork 起点：从源 session 的指定消息分叉出新 session
+      options.resume = this.forkFrom.sessionId
+      options.resumeSessionAt = this.forkFrom.messageUuid
+      options.forkSession = true
+      this.forkFrom = null
+    } else if (this.sessionId) {
       options.resume = this.sessionId
     }
     this.queryInstance = query({

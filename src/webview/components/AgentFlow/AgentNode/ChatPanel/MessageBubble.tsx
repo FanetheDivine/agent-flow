@@ -1,7 +1,13 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Tag } from 'antd'
 import { Bubble, Think } from '@ant-design/x'
-import { CheckCircleOutlined, CheckOutlined, CopyOutlined, ToolOutlined } from '@ant-design/icons'
+import {
+  BranchesOutlined,
+  CheckCircleOutlined,
+  CheckOutlined,
+  CopyOutlined,
+  ToolOutlined,
+} from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
@@ -31,6 +37,8 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
+  /** Fork：从指定 session 的指定消息 uuid 处分叉 */
+  onFork?: (sessionId: string, messageUuid: string) => void
 }
 
 type RenderedBubble = {
@@ -65,24 +73,54 @@ const CopyButton: FC<{ text: string }> = ({ text }) => {
   )
 }
 
-const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children }) => (
-  <div className='group/copy'>
-    {children}
-    <div className='mt-1 flex justify-end opacity-0 transition-opacity group-hover/copy:opacity-100'>
-      <CopyButton text={text} />
+const ForkButton: FC<{ onFork: () => void }> = ({ onFork }) => (
+  <span
+    className='cursor-pointer text-[11px] text-[#6c7086] transition-colors hover:text-[#cdd6f4]'
+    title='从此处 fork 为新工作流'
+    onClick={onFork}
+  >
+    <BranchesOutlined />
+  </span>
+)
+
+const BubbleActions: FC<{
+  children: ReactNode
+  copyText?: string
+  onFork?: () => void
+}> = ({ children, copyText, onFork }) => {
+  if (!copyText && !onFork) return <>{children}</>
+  return (
+    <div className='group/copy'>
+      {children}
+      <div className='mt-1 flex justify-end gap-2 opacity-0 transition-opacity group-hover/copy:opacity-100'>
+        {onFork && <ForkButton onFork={onFork} />}
+        {copyText && <CopyButton text={copyText} />}
+      </div>
     </div>
-  </div>
+  )
+}
+
+/** Back-compat alias: 旧调用点使用 Copyable（仅 copy，无 fork）。 */
+const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children }) => (
+  <BubbleActions copyText={text}>{children}</BubbleActions>
 )
 
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
   seenToolUseIds = new Set<string>(),
+  sessionId?: string,
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
+  const forkHandler = (uuid?: string): (() => void) | undefined => {
+    if (!uuid || !sessionId || !ctx?.onFork) return undefined
+    return () => ctx.onFork!(sessionId, uuid)
+  }
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
+      const msgUuid = (message as { uuid?: string }).uuid
+      const onFork = forkHandler(msgUuid)
       if (message.type === 'user') {
         if (message.isSynthetic) return
         const rawContent = message.message.content
@@ -100,7 +138,11 @@ export function toBubbleItems(
         items.push({
           key: `${mIdx}-user`,
           role: 'user',
-          content: <Copyable text={content}><Md content={content} /></Copyable>,
+          content: (
+            <BubbleActions copyText={content} onFork={onFork}>
+              <Md content={content} />
+            </BubbleActions>
+          ),
         })
         return
       }
@@ -113,7 +155,11 @@ export function toBubbleItems(
             items.push({
               key,
               role: 'ai',
-              content: <Copyable text={block.text}><Md content={block.text} /></Copyable>,
+              content: (
+                <BubbleActions copyText={block.text} onFork={onFork}>
+                  <Md content={block.text} />
+                </BubbleActions>
+              ),
             })
             return
           }
@@ -122,11 +168,11 @@ export function toBubbleItems(
               key,
               role: 'ai',
               content: (
-                <Copyable text={block.thinking}>
+                <BubbleActions copyText={block.thinking} onFork={onFork}>
                   <Think title='思考中' defaultExpanded={false}>
                     <Md content={block.thinking} />
                   </Think>
-                </Copyable>
+                </BubbleActions>
               ),
             })
             return
@@ -142,20 +188,24 @@ export function toBubbleItems(
               items.push({
                 key,
                 role: 'system',
-                content: isPending ? (
-                  <AskUserQuestionCard
-                    input={input}
-                    mode='active'
-                    onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
-                    onDismiss={() => ctx.onActiveDismiss?.(block.id)}
-                  />
-                ) : (
-                  <AskUserQuestionCard
-                    input={input}
-                    mode='historical'
-                    answeredValues={answered?.values}
-                    answeredByFreeText={answered?.byFreeText}
-                  />
+                content: (
+                  <BubbleActions onFork={onFork}>
+                    {isPending ? (
+                      <AskUserQuestionCard
+                        input={input}
+                        mode='active'
+                        onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
+                        onDismiss={() => ctx.onActiveDismiss?.(block.id)}
+                      />
+                    ) : (
+                      <AskUserQuestionCard
+                        input={input}
+                        mode='historical'
+                        answeredValues={answered?.values}
+                        answeredByFreeText={answered?.byFreeText}
+                      />
+                    )}
+                  </BubbleActions>
                 ),
               })
               return
@@ -170,14 +220,16 @@ export function toBubbleItems(
                   key,
                   role: 'system',
                   content: (
-                    <ToolPermissionCard
-                      toolName={toolName}
-                      input={block.input}
-                      mode={isPendingPerm ? 'active' : 'historical'}
-                      answered={answeredPerm}
-                      onAllow={() => ctx.onToolPermissionAllow?.(block.id)}
-                      onDeny={() => ctx.onToolPermissionDeny?.(block.id)}
-                    />
+                    <BubbleActions onFork={onFork}>
+                      <ToolPermissionCard
+                        toolName={toolName}
+                        input={block.input}
+                        mode={isPendingPerm ? 'active' : 'historical'}
+                        answered={answeredPerm}
+                        onAllow={() => ctx.onToolPermissionAllow?.(block.id)}
+                        onDeny={() => ctx.onToolPermissionDeny?.(block.id)}
+                      />
+                    </BubbleActions>
                   ),
                 })
                 return
@@ -187,19 +239,21 @@ export function toBubbleItems(
               key,
               role: 'ai',
               content: (
-                <details className='text-[11px] text-[#a6adc8]'>
-                  <summary className='cursor-pointer'>
-                    <ToolOutlined className='mr-1 text-[#f9e2af]' />
-                    {toolName}
-                  </summary>
-                  {block.input &&
-                    typeof block.input === 'object' &&
-                    Object.keys(block.input as object).length > 0 ? (
-                      <pre className='mt-1 text-[10px] text-[#7f849c] whitespace-pre-wrap break-all max-h-40 overflow-auto'>
-                        {JSON.stringify(block.input, null, 2)}
-                      </pre>
-                    ) : null}
-                </details>
+                <BubbleActions onFork={onFork}>
+                  <details className='text-[11px] text-[#a6adc8]'>
+                    <summary className='cursor-pointer'>
+                      <ToolOutlined className='mr-1 text-[#f9e2af]' />
+                      {toolName}
+                    </summary>
+                    {block.input &&
+                      typeof block.input === 'object' &&
+                      Object.keys(block.input as object).length > 0 ? (
+                        <pre className='mt-1 text-[10px] text-[#7f849c] whitespace-pre-wrap break-all max-h-40 overflow-auto'>
+                          {JSON.stringify(block.input, null, 2)}
+                        </pre>
+                      ) : null}
+                  </details>
+                </BubbleActions>
               ),
             })
             return
