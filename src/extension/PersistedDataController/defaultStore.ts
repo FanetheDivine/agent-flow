@@ -210,24 +210,20 @@ const PresetFlows: Flow[] = [
         ],
       },
       {
-        id: '1277e2e8-afcf-4dcb-a4ae-9223cb4e02b8',
+        id: '76412e44-2cee-400c-b383-da371d857f9b',
         agent_name: '修改代码（无限循环）',
         model: 'DeepSeek-V4-Pro',
         effort: 'high',
         auto_allowed_tools: true,
         auto_complete: true,
         agent_prompt: [
-          [
-            '根据用户的要求，完成对代码的修改，代码修改**必须**通过AskUserQuestion由用户验证。',
-            '验证后，生成commit message。消息应当是中文，只需要<subject>和<body>。message也**必须**通过AskUserQuestion由用户验证。',
-            '将修改的文件加入暂存区，然后commit，此时任务完成。',
-            '调用AgentComplete，参数为字符串"我将输入代码修改的目标"。',
-          ].join('\n'),
+          '将当前分支记为"$DEV"。\n根据用户的要求，基于$DEV创建新分支和worktree。新分支记为"$DEV_WORKTREE"\n进入worktree完成以下步骤：\n- 对代码的修改，代码修改**必须**通过AskUserQuestion由用户验证。\n- 生成commit message。消息应当是中文，只需要<subject>和<body>。message也**必须**通过AskUserQuestion由用户验证。\n- 将修改的文件加入暂存区，然后commit。\n\n回到主工作区。\n将$DEV_WORKTREE合并至$DEV。如果$DEV正在合并，轮询等待当前合并完成。如果存在冲突自行解决，但是*必须**通过AskUserQuestion由用户验证。\n合并完成后，删除$DEV_WORKTREE和worktree。\n询问用户后续执行怎样的代码修改，以用户的回复作为参数，调用AgentComplete。',
         ],
         outputs: [
           {
             output_name: 'output',
-            next_agent: '1277e2e8-afcf-4dcb-a4ae-9223cb4e02b8',
+            output_desc: '下一个代码修改的描述',
+            next_agent: '76412e44-2cee-400c-b383-da371d857f9b',
           },
         ],
       },
