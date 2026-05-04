@@ -100,8 +100,9 @@ function parseAttrs(s: string): Record<string, string> {
 
 function parseUserParts(text: string): UserPart[] {
   const parts: UserPart[] = []
-  // 三种 tag 之一：自闭合（file_ref）或成对（code_snippet / attachment）
-  const re = /<(code_snippet|file_ref|attachment)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/g
+  // 可选前导 HTML 注释 + 三种 tag 之一：自闭合（file_ref）或成对（code_snippet / attachment）
+  const re =
+    /(?:<!--[\s\S]*?-->\n?)?<(code_snippet|file_ref|attachment)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/g
   let lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
