@@ -132,7 +132,7 @@ export function activate(context: vscode.ExtensionContext) {
           try {
             const uri = vscode.Uri.joinPath(folders[0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
-            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One)
+            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside)
             if (line) {
               const [startLine, endLine] = line
               const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)
@@ -169,13 +169,16 @@ export function activate(context: vscode.ExtensionContext) {
 
   const addSelectionToInput = vscode.commands.registerCommand(
     'agent-flow.addSelectionToInput',
-    () => {
+    async () => {
       const editor = vscode.window.activeTextEditor
       if (!editor) return
+      if (!currentPanel) {
+        await vscode.commands.executeCommand('agent-flow.openPanel')
+      }
       if (!currentPanel) return
       const { selection, document } = editor
       const selectedText = document.getText(selection)
-      currentPanel.reveal(vscode.ViewColumn.Beside, true)
+      currentPanel.reveal(undefined, true)
       if (selectedText) {
         currentPanel.webview.postMessage({
           type: 'insertSelection',
