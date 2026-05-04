@@ -134,9 +134,13 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                 { label: 'haiku', value: 'haiku' },
                 { label: 'sonnet', value: 'sonnet' },
                 { label: 'gpt-5.4', value: 'gpt-5.4' },
+                { label: 'gpt-5.5', value: 'gpt-5.5' },
                 { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
                 { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
               ]}
+              filterOption={(inputValue, option) =>
+                option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false
+              }
             />
           </Form.Item>
 
