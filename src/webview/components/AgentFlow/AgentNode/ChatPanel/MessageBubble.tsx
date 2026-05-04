@@ -1,13 +1,20 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Tag } from 'antd'
 import { Bubble, Think } from '@ant-design/x'
-import { CheckCircleOutlined, CheckOutlined, CopyOutlined, ToolOutlined } from '@ant-design/icons'
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  CopyOutlined,
+  LinkOutlined,
+  ToolOutlined,
+} from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
   AskUserQuestionOutput,
   ExtensionToWebviewMessage,
 } from '@/common'
+import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 
@@ -74,6 +81,62 @@ const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children })
   </div>
 )
 
+/** 从 refToText 格式的文本块中提取文件引用信息 */
+function parseCodeRefFromText(text: string): { filename: string; range: string; line: number } | null {
+  const m = text.match(/^📎 (.+?) (L(\d+)(?:-\d+)?)\n/)
+  if (!m) return null
+  return { filename: m[1], range: m[2], line: parseInt(m[3], 10) }
+}
+
+/** 渲染用户消息内容，CodeRef 块显示为可点击的文件引用 Tag */
+function renderUserContent(rawContent: unknown): { copyText: string; node: ReactNode } {
+  if (typeof rawContent === 'string') {
+    return { copyText: rawContent, node: <Md content={rawContent} /> }
+  }
+  if (!Array.isArray(rawContent)) {
+    const s = JSON.stringify(rawContent)
+    return { copyText: s, node: <Md content={s} /> }
+  }
+  const copyParts: string[] = []
+  const nodes: ReactNode[] = []
+  rawContent.forEach((block: any, i: number) => {
+    if (!block || typeof block !== 'object') return
+    if (block.type === 'text') {
+      const ref = parseCodeRefFromText(block.text)
+      if (ref) {
+        copyParts.push(`${ref.filename} ${ref.range}`)
+        nodes.push(
+          <Tag
+            key={i}
+            style={{ cursor: 'pointer' }}
+            onClick={() =>
+              postMessageToExtension({
+                type: 'openFile',
+                data: { filename: ref.filename, line: ref.line },
+              })
+            }
+          >
+            <LinkOutlined /> {ref.filename} {ref.range}
+          </Tag>,
+        )
+      } else {
+        copyParts.push(block.text)
+        nodes.push(<Md key={i} content={block.text} />)
+      }
+    } else if (block.type === 'image') {
+      nodes.push(
+        <span key={i} className='text-[10px] text-[#6c7086]'>
+          [图片附件]
+        </span>,
+      )
+    }
+  })
+  return {
+    copyText: copyParts.join('\n'),
+    node: <div className='flex flex-col gap-1'>{nodes}</div>,
+  }
+}
+
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
@@ -95,12 +158,11 @@ export function toBubbleItems(
         ) {
           return
         }
-        const content =
-          typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+        const { copyText, node } = renderUserContent(rawContent)
         items.push({
           key: `${mIdx}-user`,
           role: 'user',
-          content: <Copyable text={content}><Md content={content} /></Copyable>,
+          content: <Copyable text={copyText}>{node}</Copyable>,
         })
         return
       }

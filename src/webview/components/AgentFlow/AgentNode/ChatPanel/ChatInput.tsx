@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FC } from 'react'
-import { Button, Tag, Tooltip, type GetRef, type UploadFile } from 'antd'
+import { Button, Tag, type GetRef, type UploadFile } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import { Attachments, Sender } from '@ant-design/x'
 import {
@@ -8,6 +8,7 @@ import {
   registerActiveInput,
   type CodeRef,
 } from '@/webview/utils/activeInputRegistry'
+import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
 
 type Props = {
   onSend: (text: string, files: File[], references: CodeRef[]) => void
@@ -114,18 +115,20 @@ export const ChatInput: FC<Props> = ({
                 ? `L${ref.startLine}`
                 : `L${ref.startLine}-${ref.endLine}`
             return (
-              <Tooltip
+              <Tag
                 key={ref.id}
-                title={
-                  <pre className='m-0 max-h-40 overflow-auto text-xs whitespace-pre-wrap'>
-                    {ref.text}
-                  </pre>
+                closable
+                onClose={() => removeReference(ref.id)}
+                style={{ margin: 0, cursor: 'pointer' }}
+                onClick={() =>
+                  postMessageToExtension({
+                    type: 'openFile',
+                    data: { filename: ref.filename, line: ref.startLine },
+                  })
                 }
               >
-                <Tag closable onClose={() => removeReference(ref.id)} style={{ margin: 0 }}>
-                  <LinkOutlined /> {ref.filename} {range}
-                </Tag>
-              </Tooltip>
+                <LinkOutlined /> {ref.filename} {range}
+              </Tag>
             )
           })}
         </div>

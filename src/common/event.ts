@@ -50,6 +50,8 @@ export type ExtensionFromWebviewEvents = {
   load: undefined
   /** 全量保存 flows */
   save: Flow[]
+  /** 打开文件并跳转到指定行 */
+  openFile: { filename: string; line: number }
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的事件 */

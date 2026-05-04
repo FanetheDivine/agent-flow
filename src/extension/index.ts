@@ -55,6 +55,23 @@ export function activate(context: vscode.ExtensionContext) {
           currentFlows = storeData
           await flowStore.save(storeData)
         })
+        .with({ type: 'openFile' }, async ({ data }) => {
+          const { filename, line } = data
+          const folders = vscode.workspace.workspaceFolders
+          if (!folders?.length) return
+          // asRelativePath 在 Windows 可能返回反斜杠路径，Uri.joinPath 不识别 \ 为分隔符
+          const segments = filename.split(/[/\\]/).filter(Boolean)
+          try {
+            const uri = vscode.Uri.joinPath(folders[0].uri, ...segments)
+            const doc = await vscode.workspace.openTextDocument(uri)
+            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One)
+            const pos = new vscode.Position(Math.max(0, line - 1), 0)
+            editor.selection = new vscode.Selection(pos, pos)
+            editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter)
+          } catch (err) {
+            log('[openFile] 打开文件失败', filename, err)
+          }
+        })
         .with({ type: P.string.startsWith('flow.command.') }, ({ type, data }) => {
           // 对 flowStart 特殊处理：注入 flow 定义
           if (type === 'flow.command.flowStart') {
