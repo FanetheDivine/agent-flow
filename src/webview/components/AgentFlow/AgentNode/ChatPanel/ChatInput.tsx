@@ -607,13 +607,8 @@ export const ChatInput: FC<Props> = ({
     if (e.key !== 'Enter') return
     if ((e.nativeEvent as KeyboardEvent).isComposing) return
 
-    // Shift+Enter：抑制换行（保持旧行为）
-    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault()
-      return
-    }
-    // Ctrl/Cmd+Enter：插入换行（段落分隔）
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+    // Ctrl / Shift / Alt / Cmd + Enter：插入换行
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
       e.preventDefault()
       editor.insertBreak()
       return
