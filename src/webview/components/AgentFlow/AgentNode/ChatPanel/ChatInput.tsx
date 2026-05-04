@@ -110,10 +110,11 @@ export const ChatInput: FC<Props> = ({
       {references.length > 0 && (
         <div className='mb-2 flex flex-wrap gap-1'>
           {references.map((ref) => {
-            const range =
-              ref.startLine === ref.endLine
-                ? `L${ref.startLine}`
-                : `L${ref.startLine}-${ref.endLine}`
+            const range = ref.line
+              ? ref.line[0] === ref.line[1]
+                ? `L${ref.line[0]}`
+                : `L${ref.line[0]}-${ref.line[1]}`
+              : undefined
             return (
               <Tag
                 key={ref.id}
@@ -123,11 +124,12 @@ export const ChatInput: FC<Props> = ({
                 onClick={() =>
                   postMessageToExtension({
                     type: 'openFile',
-                    data: { filename: ref.filename, line: [ref.startLine, ref.endLine] },
+                    data: { filename: ref.filename, line: ref.line },
                   })
                 }
               >
-                <LinkOutlined /> {ref.filename} {range}
+                <LinkOutlined /> {ref.filename}
+                {range ? ` ${range}` : ''}
               </Tag>
             )
           })}

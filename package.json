@@ -44,7 +44,7 @@
         "command": "agent-flow.addSelectionToInput",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
-        "when": "editorTextFocus && editorHasSelection"
+        "when": "editorTextFocus"
       }
     ],
     "menus": {

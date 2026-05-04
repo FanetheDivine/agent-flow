@@ -50,8 +50,8 @@ export type ExtensionFromWebviewEvents = {
   load: undefined
   /** 全量保存 flows */
   save: Flow[]
-  /** 打开文件并跳转到指定行 */
-  openFile: { filename: string; line: [number, number] }
+  /** 打开文件，line 存在时跳转并选中对应行 */
+  openFile: { filename: string; line?: [number, number] }
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的事件 */
@@ -65,8 +65,7 @@ export type ExtensionToWebviewEvents = {
     text: string
     languageId?: string
     filename?: string
-    startLine?: number
-    endLine?: number
+    line?: [number, number]
   }
 } & ExtensionFlowSignalEvents
 

@@ -21,9 +21,12 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 function refToText(ref: CodeRef): string {
-  const range =
-    ref.startLine === ref.endLine ? `L${ref.startLine}` : `L${ref.startLine}-${ref.endLine}`
-  return `📎 ${ref.filename} ${range}\n\`\`\`${ref.languageId}\n${ref.text}\n\`\`\``
+  const range = ref.line
+    ? ref.line[0] === ref.line[1]
+      ? `L${ref.line[0]}`
+      : `L${ref.line[0]}-${ref.line[1]}`
+    : ''
+  return `📎 ${ref.filename}${range ? ` ${range}` : ''}\n\`\`\`${ref.languageId}\n${ref.text}\n\`\`\``
 }
 
 /**

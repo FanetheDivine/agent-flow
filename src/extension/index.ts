@@ -63,14 +63,16 @@ export function activate(context: vscode.ExtensionContext) {
             const uri = vscode.Uri.joinPath(folders[0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
             const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One)
-            const [startLine, endLine] = line
-            const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)
-            const endPos = new vscode.Position(Math.max(0, endLine - 1), Number.MAX_SAFE_INTEGER)
-            editor.selection = new vscode.Selection(startPos, endPos)
-            editor.revealRange(
-              new vscode.Range(startPos, endPos),
-              vscode.TextEditorRevealType.InCenter,
-            )
+            if (line) {
+              const [startLine, endLine] = line
+              const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)
+              const endPos = new vscode.Position(Math.max(0, endLine - 1), Number.MAX_SAFE_INTEGER)
+              editor.selection = new vscode.Selection(startPos, endPos)
+              editor.revealRange(
+                new vscode.Range(startPos, endPos),
+                vscode.TextEditorRevealType.InCenter,
+              )
+            }
           } catch {
             // 文件不存在或无法打开时静默忽略
           }
@@ -100,23 +102,30 @@ export function activate(context: vscode.ExtensionContext) {
     () => {
       const editor = vscode.window.activeTextEditor
       if (!editor) return
+      if (!currentPanel) return
       const { selection, document } = editor
-      const text = document.getText(selection)
-      if (!text) return
-      if (!currentPanel) {
-        return
-      }
+      const selectedText = document.getText(selection)
       currentPanel.reveal(vscode.ViewColumn.Beside, true)
-      currentPanel.webview.postMessage({
-        type: 'insertSelection',
-        data: {
-          text,
-          languageId: document.languageId,
-          filename: vscode.workspace.asRelativePath(document.uri),
-          startLine: selection.start.line + 1,
-          endLine: selection.end.line + 1,
-        },
-      } satisfies ExtensionToWebviewMessage)
+      if (selectedText) {
+        currentPanel.webview.postMessage({
+          type: 'insertSelection',
+          data: {
+            text: selectedText,
+            languageId: document.languageId,
+            filename: vscode.workspace.asRelativePath(document.uri),
+            line: [selection.start.line + 1, selection.end.line + 1],
+          },
+        } satisfies ExtensionToWebviewMessage)
+      } else {
+        currentPanel.webview.postMessage({
+          type: 'insertSelection',
+          data: {
+            text: document.getText(),
+            languageId: document.languageId,
+            filename: vscode.workspace.asRelativePath(document.uri),
+          },
+        } satisfies ExtensionToWebviewMessage)
+      }
     },
   )
 
