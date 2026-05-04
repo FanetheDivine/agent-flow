@@ -92,17 +92,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       onCancel={onCancel}
       width={600}
       destroyOnHidden
-      modalRender={(node) => (
-        <div
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') return
-            e.stopPropagation()
-          }}
-          onPaste={(e) => e.stopPropagation()}
-        >
-          {node}
-        </div>
-      )}
+      modalRender={(node) => <div onPaste={(e) => e.stopPropagation()}>{node}</div>}
     >
       <Form form={form} layout='vertical' autoComplete='off'>
         <Form.Item

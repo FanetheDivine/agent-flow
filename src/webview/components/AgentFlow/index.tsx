@@ -207,7 +207,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
       (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
     )
       return
-    if (e.ctrlKey && e.key === 'c') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
       const selectedNodes = nodes.filter((n) => n.selected)
       if (selectedNodes.length === 0) return
       e.preventDefault()

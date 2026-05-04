@@ -8,8 +8,6 @@ import {
   type AgentPhase,
   type FlowPhase,
 } from '@/webview/store/flow'
-import type { CodeRef } from '@/webview/utils/activeInputRegistry'
-import { buildUserMessageContent } from '@/webview/utils/buildUserMessageContent'
 import { ChatPanel } from './AgentFlow/AgentNode/ChatPanel'
 
 export const ChatDrawer: FC = () => {
@@ -33,15 +31,12 @@ export const ChatDrawer: FC = () => {
 
   const { modal } = App.useApp()
 
-  const onSend = async (text: string, files: File[], references: CodeRef[]) => {
-    if (!chatDrawer) return
-    if (!text.trim() && files.length === 0 && references.length === 0) return
+  const onSend = (content: UserMessageType['message']['content']): boolean | Promise<boolean> => {
+    if (!chatDrawer) return false
 
     const { flowId, agentId } = chatDrawer
 
-    if (agentPhase === 'running' || agentPhase === 'starting') return
-
-    const content = await buildUserMessageContent(text, files, references)
+    if (agentPhase === 'running' || agentPhase === 'starting') return false
 
     if (flowPhase === 'idle') {
       runFlow(flowId, agentId, {
@@ -49,7 +44,7 @@ export const ChatDrawer: FC = () => {
         message: { role: 'user', content },
         parent_tool_use_id: null,
       })
-      return
+      return true
     }
 
     if (
@@ -57,7 +52,7 @@ export const ChatDrawer: FC = () => {
       (agentPhase === 'awaiting-message' || agentPhase === 'awaiting-question')
     ) {
       sendUserMessage(flowId, content)
-      return
+      return true
     }
 
     // completed / stopped / error / 非活跃agent → 确认清空后重新运行
@@ -66,10 +61,16 @@ export const ChatDrawer: FC = () => {
       message: { role: 'user', content },
       parent_tool_use_id: null,
     }
-    modal.confirm({
-      title: '确认运行',
-      content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
-      onOk: () => runFlow(flowId, agentId, initMessage),
+    return new Promise<boolean>((resolve) => {
+      modal.confirm({
+        title: '确认运行',
+        content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
+        onOk: () => {
+          runFlow(flowId, agentId, initMessage)
+          resolve(true)
+        },
+        onCancel: () => resolve(false),
+      })
     })
   }
 
@@ -83,14 +84,7 @@ export const ChatDrawer: FC = () => {
         body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
       }}
     >
-      <div
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') return
-          e.stopPropagation()
-        }}
-        onPaste={(e) => e.stopPropagation()}
-        className='flex flex-1 flex-col overflow-hidden'
-      >
+      <div className='flex flex-1 flex-col overflow-hidden'>
         {chatDrawer && (
           <ChatPanel
             flowId={chatDrawer.flowId}

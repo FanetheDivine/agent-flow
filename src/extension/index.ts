@@ -7,7 +7,63 @@ import type {
 } from '@/common'
 import { FlowRunnerManager } from './FlowRunnerManager'
 import { PersistedDataController } from './PersistedDataController'
-import { initLogger, log } from './logger'
+import { initLogger, log, logError } from './logger'
+
+/** 扩展名 → VSCode languageId（仅覆盖常见语言，未命中时保持 plaintext） */
+const LANG_BY_EXT: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescriptreact',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  jsx: 'javascriptreact',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  json: 'json',
+  jsonc: 'jsonc',
+  md: 'markdown',
+  markdown: 'markdown',
+  mdx: 'mdx',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  xml: 'xml',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  sass: 'sass',
+  less: 'less',
+  py: 'python',
+  pyi: 'python',
+  rb: 'ruby',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  kt: 'kotlin',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  php: 'php',
+  swift: 'swift',
+  dart: 'dart',
+  lua: 'lua',
+  sh: 'shellscript',
+  bash: 'shellscript',
+  zsh: 'shellscript',
+  ps1: 'powershell',
+  sql: 'sql',
+  graphql: 'graphql',
+  gql: 'graphql',
+  vue: 'vue',
+  svelte: 'svelte',
+  dockerfile: 'dockerfile',
+  makefile: 'makefile',
+}
 
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context)
@@ -54,6 +110,20 @@ export function activate(context: vscode.ExtensionContext) {
           const storeData: PersistedData = { flows: data }
           currentFlows = storeData
           await flowStore.save(storeData)
+        })
+        .with({ type: 'previewAttachment' }, async ({ data }) => {
+          const { name, content } = data
+          try {
+            const ext = name.toLowerCase().split('.').pop()
+            const language = ext ? LANG_BY_EXT[ext] : undefined
+            const doc = await vscode.workspace.openTextDocument({ language, content })
+            await vscode.window.showTextDocument(doc, {
+              viewColumn: vscode.ViewColumn.One,
+              preview: true,
+            })
+          } catch (err) {
+            logError('previewAttachment failed', err)
+          }
         })
         .with({ type: 'openFile' }, async ({ data }) => {
           const { filename, line } = data
