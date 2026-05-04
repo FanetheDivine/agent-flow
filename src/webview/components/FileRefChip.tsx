@@ -88,7 +88,7 @@ export const FileRefChip: FC<Props> = ({ data, closable, onClose }) => {
     <Tag
       closable={closable}
       onClose={onClose}
-      style={{ margin: 0, cursor: canPreview ? 'pointer' : 'default' }}
+      style={{ margin: 0, cursor: canPreview ? 'pointer' : 'default', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
       onClick={
         canPreview
           ? (e) => {
