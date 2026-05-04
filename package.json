@@ -44,7 +44,7 @@
         "command": "agent-flow.addSelectionToInput",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
-        "when": "editorTextFocus && editorHasSelection"
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
@@ -67,10 +67,11 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --build",
-    "format": "prettier --write .",
+    "format": "prettier --write src/",
     "lint": "eslint src",
     "test": "vscode-test",
-    "build-extension": "npx @vscode/vsce package --no-dependencies"
+    "build-extension": "npx @vscode/vsce package --no-dependencies",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^2.1.2",
@@ -92,6 +93,9 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-error-boundary": "^6.1.1",
+    "slate": "^0.124.1",
+    "slate-history": "^0.113.1",
+    "slate-react": "^0.124.0",
     "swr": "^2.4.1",
     "tailwind-merge": "^3.5.0",
     "ts-pattern": "^5.9.0",

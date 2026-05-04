@@ -100,18 +100,14 @@ const useInsertSelection = () => {
   useEffect(() => {
     return subscribeExtensionMessage((msg) => {
       if (msg.type !== 'insertSelection') return
-      const { text, languageId, filename, startLine, endLine } = msg.data
-      const ok = addReferenceToActiveInput({
+      const { text, languageId, filename, line } = msg.data
+      addReferenceToActiveInput({
         id: crypto.randomUUID(),
         text,
         languageId: languageId ?? '',
         filename: filename ?? '',
-        startLine: startLine ?? 1,
-        endLine: endLine ?? startLine ?? 1,
+        line,
       })
-      if (!ok) {
-        notification.info({ message: '请先打开一个 ChatPanel 再使用 Ctrl+L' })
-      }
     })
   }, [])
 }

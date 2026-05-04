@@ -1,13 +1,15 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Tag } from 'antd'
-import { Bubble, Think } from '@ant-design/x'
 import { CheckCircleOutlined, CheckOutlined, CopyOutlined, ToolOutlined } from '@ant-design/icons'
+import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
   AskUserQuestionOutput,
   ExtensionToWebviewMessage,
 } from '@/common'
+import { CodeRefChip } from '@/webview/components/CodeRefChip'
+import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 
@@ -40,12 +42,7 @@ type RenderedBubble = {
 }
 
 const Md: FC<{ content: string }> = ({ content }) => (
-  <XMarkdown
-    className='x-markdown-dark'
-    content={content}
-    openLinksInNewTab
-    escapeRawHtml
-  />
+  <XMarkdown className='x-markdown-dark' content={content} openLinksInNewTab escapeRawHtml />
 )
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
@@ -66,13 +63,171 @@ const CopyButton: FC<{ text: string }> = ({ text }) => {
 }
 
 const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children }) => (
-  <div className='group/copy'>
+  <div className='flex'>
     {children}
-    <div className='mt-1 flex justify-end opacity-0 transition-opacity group-hover/copy:opacity-100'>
+    <div className='ml-1'>
       <CopyButton text={text} />
     </div>
   </div>
 )
+
+// ChatInput 把代码片段 / 文件引用 / 附件序列化为下列 XML：
+//   <code_snippet path="..." lines="N[-M]" language="...">\n...body...\n</code_snippet>
+//   <file_ref path="..." />
+//   <attachment name="..." mime="...">\n...body...\n</attachment>
+// 属性值用 escapeAttr 做最小转义（& → &amp;、" → &quot;、< → &lt;），展示时要反转义。
+
+type UserPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'code_snippet'; path: string; line?: [number, number]; language?: string }
+  | { kind: 'file_ref'; path: string }
+  | { kind: 'attachment'; name: string; mime: string; text?: string }
+
+function unescapeAttr(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+}
+
+function parseAttrs(s: string): Record<string, string> {
+  const attrs: Record<string, string> = {}
+  const re = /(\w+)="([^"]*)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) attrs[m[1]] = unescapeAttr(m[2])
+  return attrs
+}
+
+function parseUserParts(text: string): UserPart[] {
+  const parts: UserPart[] = []
+  // 三种 tag 之一：自闭合（file_ref）或成对（code_snippet / attachment）
+  const re = /<(code_snippet|file_ref|attachment)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/g
+  let lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > lastIndex) {
+      parts.push({ kind: 'text', text: text.slice(lastIndex, m.index) })
+    }
+    const tag = m[1]
+    const attrs = parseAttrs(m[2])
+    if (tag === 'code_snippet') {
+      let line: [number, number] | undefined
+      const lm = (attrs.lines ?? '').match(/^(\d+)(?:-(\d+))?$/)
+      if (lm) {
+        const start = parseInt(lm[1], 10)
+        const end = lm[2] ? parseInt(lm[2], 10) : start
+        line = [start, end]
+      }
+      parts.push({ kind: 'code_snippet', path: attrs.path ?? '', line, language: attrs.language })
+    } else if (tag === 'file_ref') {
+      parts.push({ kind: 'file_ref', path: attrs.path ?? '' })
+    } else if (tag === 'attachment') {
+      const body = m[3] ?? ''
+      // 去掉序列化时额外包裹的首尾换行（见 attachmentToXml）
+      const text = body.replace(/^\n/, '').replace(/\n$/, '')
+      parts.push({ kind: 'attachment', name: attrs.name ?? '', mime: attrs.mime ?? '', text })
+    }
+    lastIndex = m.index + m[0].length
+  }
+  if (lastIndex < text.length) parts.push({ kind: 'text', text: text.slice(lastIndex) })
+  return parts
+}
+
+function codeRefLabel(path: string, line?: [number, number]): string {
+  if (!line) return path
+  return line[0] === line[1] ? `${path}:${line[0]}` : `${path}:${line[0]}-${line[1]}`
+}
+
+/** 渲染单个 text block 的各 part（文本/代码片段/文件引用/附件） */
+function renderTextBlockParts(
+  text: string,
+  keyPrefix: string,
+  copyParts: string[],
+  nodes: ReactNode[],
+): void {
+  const parts = parseUserParts(text)
+  parts.forEach((p, j) => {
+    const key = `${keyPrefix}-${j}`
+    if (p.kind === 'text') {
+      if (p.text.length === 0) return
+      copyParts.push(p.text)
+      nodes.push(
+        <span key={key} className='whitespace-pre-wrap'>
+          {p.text}
+        </span>,
+      )
+      return
+    }
+    if (p.kind === 'code_snippet') {
+      copyParts.push(codeRefLabel(p.path, p.line))
+      nodes.push(
+        <span key={key} className='mx-0.5 inline-flex align-middle'>
+          <CodeRefChip codeRef={{ filename: p.path, line: p.line }} />
+        </span>,
+      )
+      return
+    }
+    if (p.kind === 'file_ref') {
+      copyParts.push(p.path)
+      nodes.push(
+        <span key={key} className='mx-0.5 inline-flex align-middle'>
+          <CodeRefChip codeRef={{ filename: p.path }} />
+        </span>,
+      )
+      return
+    }
+    // attachment
+    copyParts.push(`📎 ${p.name}`)
+    nodes.push(
+      <span key={key} className='mx-0.5 inline-flex align-middle'>
+        <FileRefChip data={{ id: `att-${key}`, name: p.name, mimeType: p.mime, text: p.text }} />
+      </span>,
+    )
+  })
+}
+
+/** 渲染用户消息内容 —— 代码片段 / 文件 / 图片均以 chip 形式内联展示，允许换行 */
+function renderUserContent(rawContent: unknown): { copyText: string; node: ReactNode } {
+  if (typeof rawContent === 'string') {
+    const copyParts: string[] = []
+    const nodes: ReactNode[] = []
+    renderTextBlockParts(rawContent, 'str', copyParts, nodes)
+    return {
+      copyText: copyParts.join(''),
+      node: <div className='leading-relaxed wrap-break-word'>{nodes}</div>,
+    }
+  }
+  if (!Array.isArray(rawContent)) {
+    const s = JSON.stringify(rawContent)
+    return {
+      copyText: s,
+      node: <div className='wrap-break-word whitespace-pre-wrap'>{s}</div>,
+    }
+  }
+  const copyParts: string[] = []
+  const nodes: ReactNode[] = []
+  rawContent.forEach((block: any, i: number) => {
+    if (!block || typeof block !== 'object') return
+    if (block.type === 'text') {
+      renderTextBlockParts(block.text ?? '', String(i), copyParts, nodes)
+      return
+    }
+    if (block.type === 'image') {
+      const mime = block.source?.media_type ?? 'image/png'
+      const base64 = block.source?.data ?? ''
+      copyParts.push('[图片]')
+      nodes.push(
+        <span key={i} className='mx-0.5 inline-flex align-middle'>
+          <FileRefChip data={{ id: `img-${i}`, name: '图片', mimeType: mime, base64 }} />
+        </span>,
+      )
+    }
+  })
+  return {
+    copyText: copyParts.join('\n'),
+    node: <div className='leading-relaxed wrap-break-word'>{nodes}</div>,
+  }
+}
 
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
@@ -95,12 +250,11 @@ export function toBubbleItems(
         ) {
           return
         }
-        const content =
-          typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+        const { copyText, node } = renderUserContent(rawContent)
         items.push({
           key: `${mIdx}-user`,
           role: 'user',
-          content: <Copyable text={content}><Md content={content} /></Copyable>,
+          content: <Copyable text={copyText}>{node}</Copyable>,
         })
         return
       }
@@ -113,7 +267,11 @@ export function toBubbleItems(
             items.push({
               key,
               role: 'ai',
-              content: <Copyable text={block.text}><Md content={block.text} /></Copyable>,
+              content: (
+                <Copyable text={block.text}>
+                  <Md content={block.text} />
+                </Copyable>
+              ),
             })
             return
           }
@@ -193,12 +351,12 @@ export function toBubbleItems(
                     {toolName}
                   </summary>
                   {block.input &&
-                    typeof block.input === 'object' &&
-                    Object.keys(block.input as object).length > 0 ? (
-                      <pre className='mt-1 text-[10px] text-[#7f849c] whitespace-pre-wrap break-all max-h-40 overflow-auto'>
-                        {JSON.stringify(block.input, null, 2)}
-                      </pre>
-                    ) : null}
+                  typeof block.input === 'object' &&
+                  Object.keys(block.input as object).length > 0 ? (
+                    <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                      {JSON.stringify(block.input, null, 2)}
+                    </pre>
+                  ) : null}
                 </details>
               ),
             })
@@ -230,7 +388,9 @@ export function toBubbleItems(
       const completionText = [
         msg.data.output ? `完成 → ${msg.data.output.name}` : '完成',
         msg.data.content,
-      ].filter(Boolean).join('\n')
+      ]
+        .filter(Boolean)
+        .join('\n')
       items.push({
         key: `${mIdx}-complete`,
         role: 'ai',

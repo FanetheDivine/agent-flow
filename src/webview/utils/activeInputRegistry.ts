@@ -2,8 +2,7 @@ export type CodeRef = {
   id: string
   filename: string
   languageId: string
-  startLine: number
-  endLine: number
+  line?: [number, number]
   text: string
 }
 
