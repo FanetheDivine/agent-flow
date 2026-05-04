@@ -3,12 +3,12 @@ import type { FC } from 'react'
 import { Button, Tag, type GetRef, type UploadFile } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import { Attachments, Sender } from '@ant-design/x'
+import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
 import {
   promoteActiveInput,
   registerActiveInput,
   type CodeRef,
 } from '@/webview/utils/activeInputRegistry'
-import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
 
 type Props = {
   onSend: (text: string, files: File[], references: CodeRef[]) => void
@@ -123,7 +123,7 @@ export const ChatInput: FC<Props> = ({
                 onClick={() =>
                   postMessageToExtension({
                     type: 'openFile',
-                    data: { filename: ref.filename, line: ref.startLine },
+                    data: { filename: ref.filename, line: [ref.startLine, ref.endLine] },
                   })
                 }
               >

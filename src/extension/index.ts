@@ -6,8 +6,8 @@ import type {
   PersistedData,
 } from '@/common'
 import { FlowRunnerManager } from './FlowRunnerManager'
-import { initLogger, log } from './logger'
 import { PersistedDataController } from './PersistedDataController'
+import { initLogger, log } from './logger'
 
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context)
@@ -59,17 +59,20 @@ export function activate(context: vscode.ExtensionContext) {
           const { filename, line } = data
           const folders = vscode.workspace.workspaceFolders
           if (!folders?.length) return
-          // asRelativePath 在 Windows 可能返回反斜杠路径，Uri.joinPath 不识别 \ 为分隔符
-          const segments = filename.split(/[/\\]/).filter(Boolean)
           try {
-            const uri = vscode.Uri.joinPath(folders[0].uri, ...segments)
+            const uri = vscode.Uri.joinPath(folders[0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
             const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One)
-            const pos = new vscode.Position(Math.max(0, line - 1), 0)
-            editor.selection = new vscode.Selection(pos, pos)
-            editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter)
-          } catch (err) {
-            log('[openFile] 打开文件失败', filename, err)
+            const [startLine, endLine] = line
+            const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)
+            const endPos = new vscode.Position(Math.max(0, endLine - 1), Number.MAX_SAFE_INTEGER)
+            editor.selection = new vscode.Selection(startPos, endPos)
+            editor.revealRange(
+              new vscode.Range(startPos, endPos),
+              vscode.TextEditorRevealType.InCenter,
+            )
+          } catch {
+            // 文件不存在或无法打开时静默忽略
           }
         })
         .with({ type: P.string.startsWith('flow.command.') }, ({ type, data }) => {

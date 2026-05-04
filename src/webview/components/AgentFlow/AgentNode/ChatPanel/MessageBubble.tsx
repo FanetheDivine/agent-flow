@@ -1,6 +1,5 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Tag } from 'antd'
-import { Bubble, Think } from '@ant-design/x'
 import {
   CheckCircleOutlined,
   CheckOutlined,
@@ -8,6 +7,7 @@ import {
   LinkOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
+import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
@@ -47,12 +47,7 @@ type RenderedBubble = {
 }
 
 const Md: FC<{ content: string }> = ({ content }) => (
-  <XMarkdown
-    className='x-markdown-dark'
-    content={content}
-    openLinksInNewTab
-    escapeRawHtml
-  />
+  <XMarkdown className='x-markdown-dark' content={content} openLinksInNewTab escapeRawHtml />
 )
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
@@ -82,10 +77,14 @@ const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children })
 )
 
 /** 从 refToText 格式的文本块中提取文件引用信息 */
-function parseCodeRefFromText(text: string): { filename: string; range: string; line: number } | null {
-  const m = text.match(/^📎 (.+?) (L(\d+)(?:-\d+)?)\n/)
+function parseCodeRefFromText(
+  text: string,
+): { filename: string; range: string; line: [number, number] } | null {
+  const m = text.match(/^📎 (.+?) (L(\d+)(?:-(\d+))?)\n/)
   if (!m) return null
-  return { filename: m[1], range: m[2], line: parseInt(m[3], 10) }
+  const start = parseInt(m[3], 10)
+  const end = m[4] ? parseInt(m[4], 10) : start
+  return { filename: m[1], range: m[2], line: [start, end] }
 }
 
 /** 渲染用户消息内容，CodeRef 块显示为可点击的文件引用 Tag */
@@ -175,7 +174,11 @@ export function toBubbleItems(
             items.push({
               key,
               role: 'ai',
-              content: <Copyable text={block.text}><Md content={block.text} /></Copyable>,
+              content: (
+                <Copyable text={block.text}>
+                  <Md content={block.text} />
+                </Copyable>
+              ),
             })
             return
           }
@@ -255,12 +258,12 @@ export function toBubbleItems(
                     {toolName}
                   </summary>
                   {block.input &&
-                    typeof block.input === 'object' &&
-                    Object.keys(block.input as object).length > 0 ? (
-                      <pre className='mt-1 text-[10px] text-[#7f849c] whitespace-pre-wrap break-all max-h-40 overflow-auto'>
-                        {JSON.stringify(block.input, null, 2)}
-                      </pre>
-                    ) : null}
+                  typeof block.input === 'object' &&
+                  Object.keys(block.input as object).length > 0 ? (
+                    <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                      {JSON.stringify(block.input, null, 2)}
+                    </pre>
+                  ) : null}
                 </details>
               ),
             })
@@ -292,7 +295,9 @@ export function toBubbleItems(
       const completionText = [
         msg.data.output ? `完成 → ${msg.data.output.name}` : '完成',
         msg.data.content,
-      ].filter(Boolean).join('\n')
+      ]
+        .filter(Boolean)
+        .join('\n')
       items.push({
         key: `${mIdx}-complete`,
         role: 'ai',
