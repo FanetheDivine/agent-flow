@@ -33,6 +33,7 @@ export const ChatInput: FC<Props> = ({
 
   const handleSubmit = useCallback(
     (msg: string) => {
+      if (loading) return
       const trimmed = msg.trim()
       const files = attachments
         .map((a) => a.originFileObj as File | undefined)
@@ -44,7 +45,7 @@ export const ChatInput: FC<Props> = ({
       setReferences([])
       setHeaderOpen(false)
     },
-    [onSend, attachments, references],
+    [onSend, attachments, references, loading],
   )
 
   // 注册自身为“当前 active 输入框”栈的一员；聚焦时置顶
@@ -63,32 +64,34 @@ export const ChatInput: FC<Props> = ({
     }
   }, [])
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key !== 'Enter') return
-      if ((e.nativeEvent as KeyboardEvent).isComposing) return
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter') return
+    if ((e.nativeEvent as KeyboardEvent).isComposing) return
 
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault()
-        return false
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        const target = e.target as HTMLTextAreaElement
-        const start = target.selectionStart ?? value.length
-        const end = target.selectionEnd ?? value.length
-        const next = value.slice(0, start) + '\n' + value.slice(end)
-        setValue(next)
-        requestAnimationFrame(() => {
-          target.selectionStart = target.selectionEnd = start + 1
-        })
-        return false
-      }
-    },
-    [value],
-  )
+    if (loading) {
+      e.preventDefault()
+      return
+    }
 
-  const handlePasteFile = useCallback((files: FileList) => {
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault()
+      return false
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      const target = e.target as HTMLTextAreaElement
+      const start = target.selectionStart ?? value.length
+      const end = target.selectionEnd ?? value.length
+      const next = value.slice(0, start) + '\n' + value.slice(end)
+      setValue(next)
+      requestAnimationFrame(() => {
+        target.selectionStart = target.selectionEnd = start + 1
+      })
+      return false
+    }
+  }
+
+  const handlePasteFile = (files: FileList) => {
     const newFiles: UploadFile[] = Array.from(files).map((file, i) => ({
       uid: `paste-${Date.now()}-${i}`,
       name: file.name || `pasted.${file.type.split('/')[1] || 'bin'}`,
@@ -97,7 +100,7 @@ export const ChatInput: FC<Props> = ({
     }))
     setAttachments((prev) => [...prev, ...newFiles])
     setHeaderOpen(true)
-  }, [])
+  }
 
   const removeReference = (id: string) => setReferences((prev) => prev.filter((r) => r.id !== id))
 

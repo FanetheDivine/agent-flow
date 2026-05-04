@@ -1,7 +1,13 @@
-import { useCallback, type FC } from 'react'
+import { type FC } from 'react'
 import { App, Drawer } from 'antd'
 import type { UserMessageType } from '@/common'
-import { useFlowStore, selectAgentPhase, type AgentPhase } from '@/webview/store/flow'
+import {
+  useFlowStore,
+  selectAgentPhase,
+  selectFlowPhase,
+  type AgentPhase,
+  type FlowPhase,
+} from '@/webview/store/flow'
 import type { CodeRef } from '@/webview/utils/activeInputRegistry'
 import { buildUserMessageContent } from '@/webview/utils/buildUserMessageContent'
 import { ChatPanel } from './AgentFlow/AgentNode/ChatPanel'
@@ -15,39 +21,57 @@ export const ChatDrawer: FC = () => {
     if (!s.chatDrawer) return 'idle'
     return selectAgentPhase(s.chatDrawer.flowId, s.chatDrawer.agentId)(s)
   })
+  const flowPhase = useFlowStore((s): FlowPhase => {
+    if (!s.chatDrawer) return 'idle'
+    return selectFlowPhase(s.chatDrawer.flowId)(s)
+  })
+  const isActiveAgent = useFlowStore((s) => {
+    if (!s.chatDrawer) return false
+    const fs = s.flowStates[s.chatDrawer.flowId]
+    return fs?.currentAgentId === s.chatDrawer.agentId
+  })
 
   const { modal } = App.useApp()
 
-  const onSend = useCallback(
-    async (text: string, files: File[], references: CodeRef[]) => {
-      if (!chatDrawer) return
-      const { flowId, agentId } = chatDrawer
-      const content = await buildUserMessageContent(text, files, references)
+  const onSend = async (text: string, files: File[], references: CodeRef[]) => {
+    if (!chatDrawer) return
+    if (!text.trim() && files.length === 0 && references.length === 0) return
 
-      if (agentPhase === 'awaiting-message' || agentPhase === 'awaiting-question') {
-        sendUserMessage(flowId, content)
-        return
-      }
+    const { flowId, agentId } = chatDrawer
 
-      const initMessage: UserMessageType = {
+    if (agentPhase === 'running' || agentPhase === 'starting') return
+
+    const content = await buildUserMessageContent(text, files, references)
+
+    if (flowPhase === 'idle') {
+      runFlow(flowId, agentId, {
         type: 'user',
         message: { role: 'user', content },
         parent_tool_use_id: null,
-      }
-
-      if (agentPhase === 'idle') {
-        runFlow(flowId, agentId, initMessage)
-        return
-      }
-
-      modal.confirm({
-        title: '确认运行',
-        content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
-        onOk: () => runFlow(flowId, agentId, initMessage),
       })
-    },
-    [chatDrawer, agentPhase, sendUserMessage, runFlow, modal],
-  )
+      return
+    }
+
+    if (
+      isActiveAgent &&
+      (agentPhase === 'awaiting-message' || agentPhase === 'awaiting-question')
+    ) {
+      sendUserMessage(flowId, content)
+      return
+    }
+
+    // completed / stopped / error / 非活跃agent → 确认清空后重新运行
+    const initMessage: UserMessageType = {
+      type: 'user',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+    }
+    modal.confirm({
+      title: '确认运行',
+      content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
+      onOk: () => runFlow(flowId, agentId, initMessage),
+    })
+  }
 
   return (
     <Drawer

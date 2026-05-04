@@ -91,7 +91,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   }
 
   const showCard = !!pending && !cardDismissed
-  const inputDisabled = !canSend && !canInterrupt
+  const inputDisabled = false
 
   const ctx: BubbleCtx = {
     pendingToolUseId: showCard ? pending?.toolUseId : undefined,
