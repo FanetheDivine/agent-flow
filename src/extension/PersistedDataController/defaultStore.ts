@@ -209,6 +209,28 @@ const PresetFlows: Flow[] = [
           },
         ],
       },
+      {
+        id: '1277e2e8-afcf-4dcb-a4ae-9223cb4e02b8',
+        agent_name: '修改代码（无限循环）',
+        model: 'DeepSeek-V4-Pro',
+        effort: 'high',
+        auto_allowed_tools: true,
+        auto_complete: true,
+        agent_prompt: [
+          [
+            '根据用户的要求，完成对代码的修改，代码修改**必须**通过AskUserQuestion由用户验证。',
+            '验证后，生成commit message。消息应当是中文，只需要<subject>和<body>。message也**必须**通过AskUserQuestion由用户验证。',
+            '将修改的文件加入暂存区，然后commit，此时任务完成。',
+            '调用AgentComplete，参数为字符串"我将输入代码修改的目标"。',
+          ].join('\n'),
+        ],
+        outputs: [
+          {
+            output_name: 'output',
+            next_agent: '1277e2e8-afcf-4dcb-a4ae-9223cb4e02b8',
+          },
+        ],
+      },
     ],
   },
 ]
