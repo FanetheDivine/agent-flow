@@ -78,7 +78,7 @@ export function activate(context: vscode.ExtensionContext) {
     const panel = vscode.window.createWebviewPanel(
       'agentFlow',
       'Agent Flow',
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+      { viewColumn: vscode.ViewColumn.One, preserveFocus: true },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
