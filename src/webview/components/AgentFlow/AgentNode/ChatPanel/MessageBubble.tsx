@@ -236,6 +236,42 @@ export function toBubbleItems(
   seenToolUseIds = new Set<string>(),
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
+
+  // 预扫描：收集已有完整 assistant 消息的 uuid（这些 stream_event 已被完整消息取代）
+  const completedUuids = new Set<string>()
+  msgs.forEach((msg) => {
+    if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'assistant') {
+      completedUuids.add(msg.data.message.uuid)
+    }
+  })
+
+  // 累积尚未被完整消息取代的 stream_event 内容
+  const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
+  msgs.forEach((msg) => {
+    if (msg.type !== 'flow.signal.aiMessage') return
+    const { message } = msg.data
+    if (message.type !== 'stream_event') return
+    if (completedUuids.has(message.uuid)) return
+    const event = message.event as any
+    if (event.type === 'content_block_start') {
+      const block = event.content_block
+      if (block?.type === 'thinking') {
+        streamingBlocks.set(event.index, { type: 'thinking', content: block.thinking ?? '' })
+      } else if (block?.type === 'text') {
+        streamingBlocks.set(event.index, { type: 'text', content: block.text ?? '' })
+      }
+    } else if (event.type === 'content_block_delta') {
+      const existing = streamingBlocks.get(event.index)
+      if (!existing) return
+      const delta = event.delta
+      if (delta?.type === 'thinking_delta') {
+        existing.content += delta.thinking
+      } else if (delta?.type === 'text_delta') {
+        existing.content += delta.text
+      }
+    }
+  })
+
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
@@ -381,7 +417,7 @@ export function toBubbleItems(
         })
         return
       }
-      // stream_event / system / other — skip
+      // stream_event / system / other — 已在预扫描中累积处理
       return
     }
 
@@ -412,6 +448,32 @@ export function toBubbleItems(
       })
     }
   })
+
+  // 渲染正在流式生成中的内容（尚未被完整 assistant 消息取代的 stream_event 累积结果）
+  const sortedIndices = [...streamingBlocks.keys()].sort((a, b) => a - b)
+  for (const index of sortedIndices) {
+    const block = streamingBlocks.get(index)!
+    if (!block.content) continue
+    const key = `streaming-${index}`
+    if (block.type === 'text') {
+      items.push({
+        key,
+        role: 'ai',
+        content: <Md content={block.content} />,
+      })
+    } else if (block.type === 'thinking') {
+      items.push({
+        key,
+        role: 'ai',
+        content: (
+          <Think title='思考中' defaultExpanded>
+            <Md content={block.content} />
+          </Think>
+        ),
+      })
+    }
+  }
+
   return items
 }
 
