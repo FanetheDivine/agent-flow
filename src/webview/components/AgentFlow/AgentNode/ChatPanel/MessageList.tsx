@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import type { FC } from 'react'
 import { Divider } from 'antd'
-import { Bubble } from '@ant-design/x'
 import { LoadingOutlined } from '@ant-design/icons'
+import { Bubble } from '@ant-design/x'
 import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
 import type { AgentSession } from '@/webview/store/flow'
 import { toBubbleItems, type BubbleCtx } from './MessageBubble'
@@ -53,24 +53,18 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
     return result
   }, [sessions, ctx])
 
-  const hasAiContent = items.some((item) => item.role === 'ai')
-
   const finalItems = useMemo<BubbleItemType[]>(() => {
-    if (!loading || hasAiContent) return items
+    if (!loading) return items
     return [
       ...items,
       {
         key: '__loading__',
         role: 'ai',
-        content: (
-          <span className='text-xs text-[#a6adc8]'>
-            <LoadingOutlined className='mr-1' />
-            思考中...
-          </span>
-        ),
+        content: null,
+        loading: true,
       },
     ]
-  }, [items, loading, hasAiContent])
+  }, [items, loading])
 
   return (
     <Bubble.List

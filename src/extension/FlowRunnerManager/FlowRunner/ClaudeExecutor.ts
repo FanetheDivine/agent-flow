@@ -217,6 +217,7 @@ export class ClaudeExecutor {
       permissionMode: 'default',
       canUseTool: this.canUseTool,
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+      includePartialMessages: true,
     }
     if (this.sessionId) {
       options.resume = this.sessionId

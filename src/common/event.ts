@@ -54,6 +54,8 @@ export type ExtensionFromWebviewEvents = {
   openFile: { filename: string; line?: [number, number] }
   /** 在 VSCode 中预览一段外部粘入的文本附件（非文件系统文件） */
   previewAttachment: { name: string; content: string }
+  /** 插入选区失败（没有打开的 ChatPanel） */
+  insertSelectionFailed: undefined
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的事件 */

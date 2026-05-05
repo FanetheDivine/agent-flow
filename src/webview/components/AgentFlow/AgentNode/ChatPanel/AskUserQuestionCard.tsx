@@ -1,11 +1,8 @@
 import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
-import { CheckOutlined, CloseOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
-import type {
-  AskUserQuestionInput,
-  AskUserQuestionItem,
-  AskUserQuestionOutput,
-} from '@/common'
+import { CheckOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { XMarkdown } from '@ant-design/x-markdown'
+import type { AskUserQuestionInput, AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
 
 type Props = {
   input: AskUserQuestionInput
@@ -15,7 +12,6 @@ type Props = {
   /** 历史态时是否由自由文本作答 */
   answeredByFreeText?: boolean
   onSubmit?: (output: AskUserQuestionOutput) => void
-  onDismiss?: () => void
 }
 
 type Selections = Record<number, string[]>
@@ -45,7 +41,6 @@ export const AskUserQuestionCard: FC<Props> = ({
   answeredValues,
   answeredByFreeText,
   onSubmit,
-  onDismiss,
 }) => {
   const questions = useMemo(() => input.questions ?? [], [input.questions])
   const isActive = mode === 'active'
@@ -68,9 +63,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     if (!isActive) return
     setSelections((prev) => ({ ...prev, [qIdx]: [value] }))
     if (value === OTHER_LABEL) {
-      setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
-      )
+      setOtherStates((prev) => (prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } }))
     } else {
       setOtherStates((prev) => {
         if (!(qIdx in prev)) return prev
@@ -85,9 +78,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     if (!isActive) return
     setSelections((prev) => ({ ...prev, [qIdx]: values }))
     if (values.includes(OTHER_LABEL)) {
-      setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
-      )
+      setOtherStates((prev) => (prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } }))
     } else {
       setOtherStates((prev) => {
         if (!(qIdx in prev)) return prev
@@ -131,30 +122,27 @@ export const AskUserQuestionCard: FC<Props> = ({
             {answeredByFreeText ? '以自由文本回答' : '已回答'}
           </Tag>
         )}
-        {isActive && onDismiss && (
-          <Button
-            type='text'
-            size='small'
-            className='ml-auto -mr-1 text-[#6c7086]'
-            icon={<CloseOutlined />}
-            onClick={onDismiss}
-          />
-        )}
       </div>
 
       {questions.map((q, qIdx) => {
         const multi = !!q.multiSelect
         const historical = !isActive ? getHistoricalDisplay(q) : null
-        const value = isActive ? selections[qIdx] ?? [] : historical!.values
+        const value = isActive ? (selections[qIdx] ?? []) : historical!.values
         const otherSelected = value.includes(OTHER_LABEL)
         const otherText = isActive
-          ? otherStates[qIdx]?.text ?? ''
-          : historical?.customText ?? ''
+          ? (otherStates[qIdx]?.text ?? '')
+          : (historical?.customText ?? '')
 
         return (
           <div key={qIdx} className='flex flex-col gap-1.5'>
             <div className='flex items-start justify-between gap-2'>
-              <span className='text-[12px] text-[#cdd6f4]'>{q.question}</span>
+              <XMarkdown
+                className='x-markdown-dark text-[12px] text-[#cdd6f4]'
+                content={q.question}
+                openLinksInNewTab
+                escapeRawHtml
+                components={EMPTY_COMPONENTS}
+              />
               {q.header && (
                 <Tag color='processing' className='m-0 shrink-0 text-[10px]'>
                   {q.header}
@@ -212,12 +200,7 @@ export const AskUserQuestionCard: FC<Props> = ({
 
       {isActive && (
         <div className='flex justify-end'>
-          <Button
-            type='primary'
-            size='small'
-            disabled={!allAnswered}
-            onClick={handleManualSend}
-          >
+          <Button type='primary' size='small' disabled={!allAnswered} onClick={handleManualSend}>
             发送
           </Button>
         </div>
@@ -225,7 +208,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     </div>
   )
 }
-
+const EMPTY_COMPONENTS: Record<string, never> = {}
 const OptionRow: FC<{
   option: { label: string; description: string; preview?: string }
   children: React.ReactNode

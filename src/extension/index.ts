@@ -78,7 +78,7 @@ export function activate(context: vscode.ExtensionContext) {
     const panel = vscode.window.createWebviewPanel(
       'agentFlow',
       'Agent Flow',
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+      { viewColumn: vscode.ViewColumn.One, preserveFocus: true },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -86,6 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
     )
     currentPanel = panel
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg')
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri)
 
     const flowStore = new PersistedDataController()
@@ -132,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
           try {
             const uri = vscode.Uri.joinPath(folders[0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
-            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One)
+            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside)
             if (line) {
               const [startLine, endLine] = line
               const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)
@@ -146,6 +147,11 @@ export function activate(context: vscode.ExtensionContext) {
           } catch {
             // 文件不存在或无法打开时静默忽略
           }
+        })
+        .with({ type: 'insertSelectionFailed' }, () => {
+          vscode.window.showInformationMessage(
+            '请先打开一个 Agent 的对话面板，再使用此快捷键插入代码片段。',
+          )
         })
         .with({ type: P.string.startsWith('flow.command.') }, ({ type, data }) => {
           // 对 flowStart 特殊处理：注入 flow 定义
@@ -169,13 +175,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   const addSelectionToInput = vscode.commands.registerCommand(
     'agent-flow.addSelectionToInput',
-    () => {
+    async () => {
       const editor = vscode.window.activeTextEditor
       if (!editor) return
       if (!currentPanel) return
       const { selection, document } = editor
       const selectedText = document.getText(selection)
-      currentPanel.reveal(vscode.ViewColumn.Beside, true)
+      currentPanel.reveal(undefined, true)
       if (selectedText) {
         currentPanel.webview.postMessage({
           type: 'insertSelection',

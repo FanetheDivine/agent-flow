@@ -26,7 +26,7 @@ export const CodeRefChip: FC<Props> = ({ codeRef, closable, onClose, onClick }) 
     <Tag
       closable={closable}
       onClose={onClose}
-      style={{ margin: 0, cursor: 'pointer' }}
+      className='m-0 cursor-pointer break-all whitespace-pre-wrap'
       onClick={
         onClick ??
         (() =>

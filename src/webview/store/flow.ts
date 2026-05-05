@@ -301,10 +301,17 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 fs.phase = 'awaiting'
                 return
               }
-              fs.phase = 'running'
               if (fs.currentSessionId) {
                 const found = extractPendingQuestion(m, fs.answeredQuestions, fs.currentSessionId)
-                if (found) fs.pendingQuestion = found
+                if (found) {
+                  fs.pendingQuestion = found
+                  fs.phase = 'awaiting'
+                  return
+                }
+              }
+              // 只在没有未回答的提问/权限请求时才设为 running
+              if (!fs.pendingQuestion && !fs.pendingToolPermission) {
+                fs.phase = 'running'
               }
             })
             .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
@@ -366,6 +373,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 input: data.input,
                 sessionId: data.sessionId,
               }
+              fs.phase = 'awaiting'
             })
             .with({ type: 'flow.signal.agentInterrupted' }, () => {
               fs.phase = 'awaiting'
@@ -499,6 +507,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         if (s.pendingQuestion?.toolUseId === toolUseId) {
           s.pendingQuestion = undefined
         }
+        s.phase = 'running'
       })
       postMessageToExtension({
         type: 'flow.command.answerQuestion',
@@ -522,6 +531,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         if (s.pendingToolPermission?.toolUseId === toolUseId) {
           s.pendingToolPermission = undefined
         }
+        s.phase = 'running'
       })
       postMessageToExtension({
         type: 'flow.command.toolPermissionResult',

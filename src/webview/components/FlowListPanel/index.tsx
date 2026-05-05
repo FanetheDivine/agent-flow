@@ -87,7 +87,7 @@ export const FlowListPanel: FC = () => {
   }
 
   return (
-    <div className='absolute top-3 right-3 z-50' onKeyDown={(e) => e.stopPropagation()}>
+    <div className='absolute bottom-2 left-2 z-50' onKeyDown={(e) => e.stopPropagation()}>
       <AnimatePresence mode='wait'>
         {flowListCollapsed ? (
           <motion.div

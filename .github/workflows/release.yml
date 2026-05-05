@@ -9,8 +9,20 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - win32-x64
+          - win32-arm64
+          - darwin-x64
+          - darwin-arm64
+          - linux-x64
+          - linux-arm64
+          - alpine-x64
+          - alpine-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -22,10 +34,31 @@ jobs:
         run: npm i pnpm -g
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Package VSIX
-        run: pnpm run build-extension
+        env:
+          VSCE_TARGET: ${{ matrix.target }}
+        run: npx @vscode/vsce package --target ${{ matrix.target }} --no-dependencies -o agent-flow-${{ matrix.target }}.vsix
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: agent-flow-${{ matrix.target }}.vsix
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: artifacts
+          merge-multiple: true
 
       - name: Create GitHub Release
         env:
@@ -34,4 +67,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            ./*.vsix
+            ./artifacts/*.vsix

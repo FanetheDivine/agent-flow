@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState, type FC } from 'react'
-import { Button, Tag, Tooltip } from 'antd'
+import { useCallback, useMemo, useState, type FC } from 'react'
+import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
-import { match } from 'ts-pattern'
+import { match, P } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
 import {
   useFlowStore,
@@ -90,28 +90,49 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
 
   // 自由文本作答标记（本地 UI 状态，仅用于历史态显示 tag）
   const [freeTextMap, setFreeTextMap] = useState<Record<string, boolean>>({})
-  const answeredMap = buildAnsweredMap(answeredQuestions ?? {}, freeTextMap)
+  const answeredMap = useMemo(
+    () => buildAnsweredMap(answeredQuestions ?? {}, freeTextMap),
+    [answeredQuestions, freeTextMap],
+  )
 
-  const [cardDismissed, setCardDismissed] = useState(false)
-  const prevToolUseIdRef = useRef<string | undefined>(undefined)
-  if (pending?.toolUseId !== prevToolUseIdRef.current) {
-    prevToolUseIdRef.current = pending?.toolUseId
-    if (cardDismissed) setCardDismissed(false)
-  }
-
-  const showCard = !!pending && !cardDismissed
+  const showCard = !!pending
   const inputDisabled = false
 
-  const ctx: BubbleCtx = {
-    pendingToolUseId: showCard ? pending?.toolUseId : undefined,
-    answeredMap,
-    onActiveSubmit: (toolUseId, output) => answerQuestion(flowId, toolUseId, output),
-    onActiveDismiss: () => setCardDismissed(true),
-    pendingToolPermissionToolUseId: pendingToolPerm?.toolUseId,
-    answeredToolPermissions,
-    onToolPermissionAllow: (toolUseId) => answerToolPermission(flowId, toolUseId, true),
-    onToolPermissionDeny: (toolUseId) => answerToolPermission(flowId, toolUseId, false),
-  }
+  const onActiveSubmit = useCallback(
+    (toolUseId: string, output: AskUserQuestionOutput) => answerQuestion(flowId, toolUseId, output),
+    [answerQuestion, flowId],
+  )
+  const onToolPermissionAllow = useCallback(
+    (toolUseId: string) => answerToolPermission(flowId, toolUseId, true),
+    [answerToolPermission, flowId],
+  )
+  const onToolPermissionDeny = useCallback(
+    (toolUseId: string) => answerToolPermission(flowId, toolUseId, false),
+    [answerToolPermission, flowId],
+  )
+
+  const pendingToolUseId = showCard ? pending?.toolUseId : undefined
+  const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
+  const ctx = useMemo<BubbleCtx>(
+    () => ({
+      pendingToolUseId,
+      answeredMap,
+      onActiveSubmit,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    }),
+    [
+      pendingToolUseId,
+      answeredMap,
+      onActiveSubmit,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    ],
+  )
 
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
@@ -144,83 +165,85 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   }
 
   return (
-    <XProvider
-      bubble={{
-        className:
-          'p-0.5! [&_.ant-bubble-content]:py-1! [&_.ant-bubble-content]:px-2! [&_.ant-bubble-content]:min-h-[unset]!',
+    <div
+      className='flex h-full flex-col overflow-hidden bg-[#1e1e2e]'
+      tabIndex={-1}
+      onWheel={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+          e.stopPropagation()
+        }
+      }}
+      onPaste={(e) => {
+        e.stopPropagation()
       }}
     >
-      <div
-        className='flex h-full flex-col overflow-hidden bg-[#1e1e2e]'
-        tabIndex={-1}
-        onWheel={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-            e.stopPropagation()
-          }
-        }}
-        onPaste={(e) => {
-          e.stopPropagation()
-        }}
-        onMouseDownCapture={(e) => {
-          e.stopPropagation()
-        }}
-      >
-        {/* Header */}
-        <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>
-          <div className='flex items-center gap-2'>
-            <span className='text-xs font-semibold text-[#cdd6f4]'>{agentName}</span>
-            <Tag color={statusColor} className='m-0 text-[10px]'>
-              {statusText}
-            </Tag>
-          </div>
-          {canInterruptFlow && (
-            <Tooltip title='停止工作流'>
-              <Button
-                size='small'
-                danger
-                type='text'
-                icon={<StopOutlined />}
-                onClick={() => killFlow(flowId)}
-              />
-            </Tooltip>
-          )}
-          <Button
-            size='small'
-            type='text'
-            icon={<CloseOutlined />}
-            onClick={onClose}
-            style={{ color: '#6c7086' }}
-          />
+      {/* Header */}
+      <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>
+        <div className='flex items-center gap-2'>
+          <span className='text-xs font-semibold text-[#cdd6f4]'>{agentName}</span>
+          <Tag color={statusColor} className='m-0 text-[10px]'>
+            {statusText}
+          </Tag>
         </div>
-
-        {/* Messages */}
-        {sessions.length === 0 ? (
-          <div className='flex flex-1 items-center justify-center px-3'>
-            <Welcome
-              variant='borderless'
-              icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
-              title={agentName}
-              description='暂无消息，发送一条消息以运行当前 Agent。'
+        {canInterruptFlow && flowPhase !== 'starting' && (
+          <Tooltip title='停止工作流'>
+            <Button
+              size='small'
+              danger
+              type='text'
+              icon={<StopOutlined />}
+              onClick={() => killFlow(flowId)}
             />
-          </div>
-        ) : (
+          </Tooltip>
+        )}
+        <Button
+          size='small'
+          type='text'
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          style={{ color: '#6c7086' }}
+        />
+      </div>
+      {/* Messages */}
+      {match({
+        length: sessions.length,
+        phase,
+        flowPhase,
+      })
+        .with(
+          {
+            phase: 'idle',
+            flowPhase: P.not('starting'),
+          },
+          () => (
+            <div className='flex flex-1 items-center justify-center px-3'>
+              <Welcome
+                variant='borderless'
+                icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
+                title={agentName}
+                description='暂无消息，发送一条消息以运行当前 Agent。'
+              />
+            </div>
+          ),
+        )
+        .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
+        .otherwise(() => (
           <MessageList
             sessions={sessions}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
           />
-        )}
+        ))}
 
-        {/* Input (always shown; send button becomes cancel button during chatting) */}
-        <ChatInput
-          onSend={handleSend}
-          placeholder={placeholder}
-          disabled={inputDisabled}
-          loading={canInterrupt}
-          onCancel={() => interruptAgent(flowId)}
-        />
-      </div>
-    </XProvider>
+      {/* Input (always shown; send button becomes cancel button during chatting) */}
+      <ChatInput
+        onSend={handleSend}
+        placeholder={placeholder}
+        disabled={inputDisabled}
+        loading={canInterrupt}
+        onCancel={() => interruptAgent(flowId)}
+      />
+    </div>
   )
 }

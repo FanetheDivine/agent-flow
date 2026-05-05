@@ -1,6 +1,12 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
-import { Tag } from 'antd'
-import { CheckCircleOutlined, CheckOutlined, CopyOutlined, ToolOutlined } from '@ant-design/icons'
+import { Spin, Tag } from 'antd'
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  CloseCircleOutlined,
+  CopyOutlined,
+  LoadingOutlined,
+} from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
@@ -26,7 +32,6 @@ export type BubbleCtx = {
   pendingToolUseId?: string
   answeredMap: Map<string, AnsweredInfo>
   onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
-  onActiveDismiss?: (toolUseId: string) => void
   /** 当前挂起的工具权限请求 toolUseId（若有） */
   pendingToolPermissionToolUseId?: string
   /** 已回答的工具权限历史 */
@@ -41,8 +46,16 @@ type RenderedBubble = {
   content: ReactNode
 }
 
+const EMPTY_COMPONENTS: Record<string, never> = {}
+
 const Md: FC<{ content: string }> = ({ content }) => (
-  <XMarkdown className='x-markdown-dark' content={content} openLinksInNewTab escapeRawHtml />
+  <XMarkdown
+    className='x-markdown-dark'
+    content={content}
+    components={EMPTY_COMPONENTS}
+    openLinksInNewTab
+    escapeRawHtml
+  />
 )
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
@@ -100,8 +113,9 @@ function parseAttrs(s: string): Record<string, string> {
 
 function parseUserParts(text: string): UserPart[] {
   const parts: UserPart[] = []
-  // 三种 tag 之一：自闭合（file_ref）或成对（code_snippet / attachment）
-  const re = /<(code_snippet|file_ref|attachment)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/g
+  // 可选前导 HTML 注释 + 三种 tag 之一：自闭合（file_ref）或成对（code_snippet / attachment）
+  const re =
+    /(?:<!--[\s\S]*?-->\n?)?<(code_snippet|file_ref|attachment)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/g
   let lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
@@ -229,27 +243,167 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   }
 }
 
+/** 从 tool_result 的 content 中提取纯文本 */
+function extractToolResultText(content: unknown): string {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((b: any) => {
+        if (typeof b === 'string') return b
+        if (b && typeof b === 'object' && b.type === 'text') return b.text ?? ''
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
+/** 根据工具名和输入参数生成一行摘要 */
+function getToolSummary(toolName: string, input: any): string {
+  if (!input || typeof input !== 'object') return toolName
+  const name = toolName.replace(/^mcp__\w+__/, '')
+  switch (name) {
+    case 'Read':
+      return input.file_path ? `读取 ${shortenPath(input.file_path)}` : name
+    case 'Write':
+      return input.file_path ? `写入 ${shortenPath(input.file_path)}` : name
+    case 'Edit':
+      return input.file_path ? `编辑 ${shortenPath(input.file_path)}` : name
+    case 'Bash':
+      return input.command ? `执行 ${truncate(input.command, 60)}` : name
+    case 'Grep':
+      return input.pattern ? `搜索 ${truncate(input.pattern, 40)}` : name
+    case 'Glob':
+      return input.pattern ? `查找 ${truncate(input.pattern, 40)}` : name
+    case 'WebFetch':
+      return input.url ? `获取 ${truncate(input.url, 50)}` : name
+    case 'WebSearch':
+      return input.query ? `搜索 ${truncate(input.query, 40)}` : name
+    case 'Agent':
+      return input.description ? `子任务: ${truncate(input.description, 40)}` : name
+    case 'TodoWrite':
+      return '更新任务列表'
+    default:
+      return name
+  }
+}
+
+function shortenPath(p: string): string {
+  const parts = p.replace(/\\/g, '/').split('/')
+  if (parts.length <= 3) return parts.join('/')
+  return `.../${parts.slice(-2).join('/')}`
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s
+  return s.slice(0, max) + '...'
+}
+
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
   seenToolUseIds = new Set<string>(),
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
+
+  // 预扫描：找到最后一个 result 消息和最后一个 assistant 消息的位置
+  // 这两者之前的 stream_event 均来自已完成的回合，其内容已在 assistant 消息中呈现
+  let lastResultIdx = -1
+  let lastAssistantIdx = -1
+  msgs.forEach((msg, idx) => {
+    if (msg.type === 'flow.signal.aiMessage') {
+      if (msg.data.message.type === 'result') lastResultIdx = idx
+      if (msg.data.message.type === 'assistant') lastAssistantIdx = idx
+    }
+  })
+
+  // 累积当前正在流式生成的内容：只取最后一个已完成消息之后的 stream_event
+  // 这些事件来自尚未产生完整 assistant 消息的当前回合
+  const streamCutoff = Math.max(lastResultIdx, lastAssistantIdx)
+  const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
+  msgs.forEach((msg, idx) => {
+    if (idx <= streamCutoff) return
+    if (msg.type !== 'flow.signal.aiMessage') return
+    const { message } = msg.data
+    if (message.type !== 'stream_event') return
+    const event = message.event as any
+    if (event.type === 'content_block_start') {
+      const block = event.content_block
+      if (block?.type === 'thinking') {
+        streamingBlocks.set(event.index, { type: 'thinking', content: block.thinking ?? '' })
+      } else if (block?.type === 'text') {
+        streamingBlocks.set(event.index, { type: 'text', content: block.text ?? '' })
+      }
+    } else if (event.type === 'content_block_delta') {
+      const existing = streamingBlocks.get(event.index)
+      if (!existing) return
+      const delta = event.delta
+      if (delta?.type === 'thinking_delta') {
+        existing.content += delta.thinking
+      } else if (delta?.type === 'text_delta') {
+        existing.content += delta.text
+      }
+    }
+  })
+
+  // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
+  const toolUseIdToName = new Map<string, string>()
+  // tool_use_id → tool_result 映射，用于将结果合并展示到工具调用中
+  const toolUseIdToResult = new Map<string, { isError: boolean; text: string }>()
+  msgs.forEach((msg) => {
+    if (msg.type !== 'flow.signal.aiMessage') return
+    const { message } = msg.data
+    if (message.type === 'user') {
+      const rawContent = message.message.content
+      if (Array.isArray(rawContent)) {
+        rawContent.forEach((block: any) => {
+          if (block?.type === 'tool_result' && block.tool_use_id) {
+            const text = extractToolResultText(block.content)
+            if (text) {
+              toolUseIdToResult.set(block.tool_use_id, {
+                isError: !!block.is_error,
+                text,
+              })
+            }
+          }
+        })
+      }
+    }
+    if (message.type === 'assistant') {
+      const blocks = message.message.content
+      if (!Array.isArray(blocks)) return
+      blocks.forEach((block: any) => {
+        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
+          const text = extractToolResultText(block.content)
+          if (text) {
+            toolUseIdToResult.set(block.tool_use_id, {
+              isError: !!block.is_error,
+              text,
+            })
+          }
+        }
+      })
+    }
+  })
+
+  // 收集 assistant 消息中已渲染的文本，用于 agentComplete 去重
+  const renderedAssistantTexts = new Set<string>()
+
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
       if (message.type === 'user') {
-        if (message.isSynthetic) return
         const rawContent = message.message.content
-        // 纯 tool_result 的 user message 属于工具循环内部产物（例如
-        // AskUserQuestion 回答后 SDK 发出的 tool_result），UI 不需要单独渲染，
-        // 结构化答案已由 AskUserQuestionCard 的历史态展示。
+        // 含 tool_result 的 user message：结果已合并到 tool_use 展示中，跳过独立渲染
         if (
           Array.isArray(rawContent) &&
           rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
         ) {
           return
         }
+        if (message.isSynthetic) return
         const { copyText, node } = renderUserContent(rawContent)
         items.push({
           key: `${mIdx}-user`,
@@ -264,6 +418,7 @@ export function toBubbleItems(
         blocks.forEach((block, bIdx) => {
           const key = `${mIdx}-${bIdx}`
           if (block.type === 'text') {
+            renderedAssistantTexts.add(block.text)
             items.push({
               key,
               role: 'ai',
@@ -275,7 +430,7 @@ export function toBubbleItems(
             })
             return
           }
-          if (block.type === 'thinking') {
+          if (block.type === 'thinking' && block.thinking) {
             items.push({
               key,
               role: 'ai',
@@ -292,6 +447,9 @@ export function toBubbleItems(
           if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
             if (seenToolUseIds.has(block.id)) return
             seenToolUseIds.add(block.id)
+            const toolName =
+              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
+            toolUseIdToName.set(block.id, toolName)
             if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && ctx) {
               const input = block.input as AskUserQuestionInput | undefined
               if (!input || !Array.isArray(input.questions)) return
@@ -305,7 +463,6 @@ export function toBubbleItems(
                     input={input}
                     mode='active'
                     onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
-                    onDismiss={() => ctx.onActiveDismiss?.(block.id)}
                   />
                 ) : (
                   <AskUserQuestionCard
@@ -318,8 +475,6 @@ export function toBubbleItems(
               })
               return
             }
-            const toolName =
-              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
             if (ctx) {
               const isPendingPerm = ctx.pendingToolPermissionToolUseId === block.id
               const answeredPerm = ctx.answeredToolPermissions?.[block.id]
@@ -341,14 +496,28 @@ export function toBubbleItems(
                 return
               }
             }
+            const summary = getToolSummary(toolName, block.input)
+            const result = toolUseIdToResult.get(block.id)
             items.push({
               key,
               role: 'ai',
               content: (
                 <details className='text-[11px] text-[#a6adc8]'>
                   <summary className='cursor-pointer'>
-                    <ToolOutlined className='mr-1 text-[#f9e2af]' />
-                    {toolName}
+                    {result ? (
+                      result.isError ? (
+                        <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+                      ) : (
+                        <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+                      )
+                    ) : (
+                      <Spin
+                        size='small'
+                        indicator={<LoadingOutlined className='text-[10px]!' />}
+                        className='mr-1'
+                      />
+                    )}
+                    {summary}
                   </summary>
                   {block.input &&
                   typeof block.input === 'object' &&
@@ -357,12 +526,20 @@ export function toBubbleItems(
                       {JSON.stringify(block.input, null, 2)}
                     </pre>
                   ) : null}
+                  {result && (
+                    <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                      {result.text}
+                    </pre>
+                  )}
                 </details>
               ),
             })
             return
           }
-          // mcp_tool_result & others — skip (verbose)
+          if ((block as any).type === 'mcp_tool_result') {
+            // 结果已合并到对应 tool_use 展示中，跳过独立渲染
+            return
+          }
         })
         return
       }
@@ -380,14 +557,19 @@ export function toBubbleItems(
         })
         return
       }
-      // stream_event / system / other — skip
+      // stream_event / system / other — 流式内容在末尾统一渲染
       return
     }
 
     if (msg.type === 'flow.signal.agentComplete') {
+      // 如果 content 已在前面的 assistant 消息中渲染过，则不重复展示
+      const contentAlreadyShown = !!(
+        msg.data.content && renderedAssistantTexts.has(msg.data.content)
+      )
+      const displayContent = contentAlreadyShown ? undefined : msg.data.content
       const completionText = [
         msg.data.output ? `完成 → ${msg.data.output.name}` : '完成',
-        msg.data.content,
+        displayContent,
       ]
         .filter(Boolean)
         .join('\n')
@@ -400,9 +582,9 @@ export function toBubbleItems(
               <Tag color='green' className='m-0 text-[10px]'>
                 完成{msg.data.output ? ` → ${msg.data.output.name}` : ''}
               </Tag>
-              {msg.data.content && (
+              {displayContent && (
                 <div className='mt-2'>
-                  <Md content={msg.data.content} />
+                  <Md content={displayContent} />
                 </div>
               )}
             </div>
@@ -411,6 +593,32 @@ export function toBubbleItems(
       })
     }
   })
+
+  // 渲染正在流式生成中的内容（来自 streamCutoff 之后、尚未产生完整 assistant 消息的当前回合）
+  const sortedIndices = [...streamingBlocks.keys()].sort((a, b) => a - b)
+  for (const index of sortedIndices) {
+    const block = streamingBlocks.get(index)!
+    if (!block.content) continue
+    const key = `streaming-${index}`
+    if (block.type === 'text') {
+      items.push({
+        key,
+        role: 'ai',
+        content: <Md content={block.content} />,
+      })
+    } else if (block.type === 'thinking') {
+      items.push({
+        key,
+        role: 'ai',
+        content: (
+          <Think title='思考中' defaultExpanded>
+            <Md content={block.content} />
+          </Think>
+        ),
+      })
+    }
+  }
+
   return items
 }
 

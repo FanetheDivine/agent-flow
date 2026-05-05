@@ -7,7 +7,7 @@ import { AgentFlow } from './components/AgentFlow'
 import { ChatDrawer } from './components/ChatDrawer'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
-import { subscribeExtensionMessage } from './utils/ExtensionMessage'
+import { postMessageToExtension, subscribeExtensionMessage } from './utils/ExtensionMessage'
 import { addReferenceToActiveInput } from './utils/activeInputRegistry'
 
 export const App: FC = () => {
@@ -101,13 +101,16 @@ const useInsertSelection = () => {
     return subscribeExtensionMessage((msg) => {
       if (msg.type !== 'insertSelection') return
       const { text, languageId, filename, line } = msg.data
-      addReferenceToActiveInput({
+      const ok = addReferenceToActiveInput({
         id: crypto.randomUUID(),
         text,
         languageId: languageId ?? '',
         filename: filename ?? '',
         line,
       })
+      if (!ok) {
+        postMessageToExtension({ type: 'insertSelectionFailed', data: undefined })
+      }
     })
   }, [])
 }
