@@ -308,31 +308,26 @@ export function toBubbleItems(
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
 
-  // 预扫描：收集已有完整 assistant 消息的 uuid（这些 stream_event 已被完整消息取代）
-  const completedUuids = new Set<string>()
-  // 找到最后一个 result 消息的位置，其前的 stream_event 均视为已结束的回合
+  // 预扫描：找到最后一个 result 消息和最后一个 assistant 消息的位置
+  // 这两者之前的 stream_event 均来自已完成的回合，其内容已在 assistant 消息中呈现
   let lastResultIdx = -1
+  let lastAssistantIdx = -1
   msgs.forEach((msg, idx) => {
     if (msg.type === 'flow.signal.aiMessage') {
-      if (msg.data.message.type === 'assistant') {
-        completedUuids.add(msg.data.message.uuid)
-      }
-      if (msg.data.message.type === 'result') {
-        lastResultIdx = idx
-      }
+      if (msg.data.message.type === 'result') lastResultIdx = idx
+      if (msg.data.message.type === 'assistant') lastAssistantIdx = idx
     }
   })
 
-  // 累积尚未被完整消息取代的 stream_event 内容（仅最后一个 result 之后的事件）
+  // 累积当前正在流式生成的内容：只取最后一个已完成消息之后的 stream_event
+  // 这些事件来自尚未产生完整 assistant 消息的当前回合
+  const streamCutoff = Math.max(lastResultIdx, lastAssistantIdx)
   const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
-  let lastStreamIdx = -1
   msgs.forEach((msg, idx) => {
-    if (idx <= lastResultIdx) return
+    if (idx <= streamCutoff) return
     if (msg.type !== 'flow.signal.aiMessage') return
     const { message } = msg.data
     if (message.type !== 'stream_event') return
-    if (completedUuids.has(message.uuid)) return
-    lastStreamIdx = idx
     const event = message.event as any
     if (event.type === 'content_block_start') {
       const block = event.content_block
@@ -352,18 +347,6 @@ export function toBubbleItems(
       }
     }
   })
-
-  // 防御性检查：如果最后一个未过滤的 stream_event 之后存在 assistant 消息，
-  // 说明该轮已完成（uuid 可能因 SDK 时序问题未匹配），清除流式块避免重复渲染
-  if (streamingBlocks.size > 0 && lastStreamIdx >= 0) {
-    for (let i = lastStreamIdx + 1; i < msgs.length; i++) {
-      const msg = msgs[i]
-      if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'assistant') {
-        streamingBlocks.clear()
-        break
-      }
-    }
-  }
 
   // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
   const toolUseIdToName = new Map<string, string>()
@@ -574,7 +557,7 @@ export function toBubbleItems(
         })
         return
       }
-      // stream_event / system / other — 已在预扫描中累积处理
+      // stream_event / system / other — 流式内容在末尾统一渲染
       return
     }
 
@@ -611,7 +594,7 @@ export function toBubbleItems(
     }
   })
 
-  // 渲染正在流式生成中的内容（尚未被完整 assistant 消息取代的 stream_event 累积结果）
+  // 渲染正在流式生成中的内容（来自 streamCutoff 之后、尚未产生完整 assistant 消息的当前回合）
   const sortedIndices = [...streamingBlocks.keys()].sort((a, b) => a - b)
   for (const index of sortedIndices) {
     const block = streamingBlocks.get(index)!
@@ -623,7 +606,7 @@ export function toBubbleItems(
         role: 'ai',
         content: <Md content={block.content} />,
       })
-    } else if (block.type === 'thinking' && block.content) {
+    } else if (block.type === 'thinking') {
       items.push({
         key,
         role: 'ai',
