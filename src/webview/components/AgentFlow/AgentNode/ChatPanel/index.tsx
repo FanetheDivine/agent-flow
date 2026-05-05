@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, type FC } from 'react'
-import { Button, Tag, Tooltip } from 'antd'
+import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
-import { match } from 'ts-pattern'
+import { match, P } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
 import {
   useFlowStore,
@@ -174,7 +174,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
               {statusText}
             </Tag>
           </div>
-          {canInterruptFlow && (
+          {canInterruptFlow && flowPhase !== 'starting' && (
             <Tooltip title='停止工作流'>
               <Button
                 size='small'
@@ -193,24 +193,36 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
             style={{ color: '#6c7086' }}
           />
         </div>
-
         {/* Messages */}
-        {sessions.length === 0 ? (
-          <div className='flex flex-1 items-center justify-center px-3'>
-            <Welcome
-              variant='borderless'
-              icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
-              title={agentName}
-              description='暂无消息，发送一条消息以运行当前 Agent。'
+        {match({
+          length: sessions.length,
+          phase,
+          flowPhase,
+        })
+          .with(
+            {
+              phase: 'idle',
+              flowPhase: P.not('starting'),
+            },
+            () => (
+              <div className='flex flex-1 items-center justify-center px-3'>
+                <Welcome
+                  variant='borderless'
+                  icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
+                  title={agentName}
+                  description='暂无消息，发送一条消息以运行当前 Agent。'
+                />
+              </div>
+            ),
+          )
+          .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
+          .otherwise(() => (
+            <MessageList
+              sessions={sessions}
+              ctx={ctx}
+              loading={phase === 'running' || phase === 'starting'}
             />
-          </div>
-        ) : (
-          <MessageList
-            sessions={sessions}
-            ctx={ctx}
-            loading={phase === 'running' || phase === 'starting'}
-          />
-        )}
+          ))}
 
         {/* Input (always shown; send button becomes cancel button during chatting) */}
         <ChatInput
