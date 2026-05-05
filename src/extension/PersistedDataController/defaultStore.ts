@@ -227,6 +227,16 @@ const PresetFlows: Flow[] = [
         ],
         id: '76412e44-2cee-400c-b383-da371d857f9b',
       },
+      {
+        id: '8e937e3c-cc9d-4d63-a912-31dcf4c1bd9f',
+        model: 'DeepSeek-V4-Pro',
+        effort: 'high',
+        agent_name: 'AI对话',
+        agent_prompt: ['与用户进行多轮对话。对话持续进行，永不结束，不调用AgentComplete。'],
+        outputs: [],
+        auto_allowed_tools: true,
+        auto_complete: false,
+      },
     ],
   },
 ]
