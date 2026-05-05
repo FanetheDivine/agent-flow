@@ -5,7 +5,6 @@ import { PlusOutlined } from '@ant-design/icons'
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   Panel,
   useNodesState,
@@ -323,7 +322,6 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
         style={{ background: '#11111b' }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color='#313244' />
-        <Controls style={{ background: '#1e1e2e', borderColor: '#45475a', borderRadius: 8 }} />
         <MiniMap
           style={{ background: '#1e1e2e', borderColor: '#45475a', borderRadius: 8 }}
           nodeColor={() => '#6366f1'}
