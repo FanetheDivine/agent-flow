@@ -384,6 +384,9 @@ export function toBubbleItems(
     }
   })
 
+  // 收集 assistant 消息中已渲染的文本，用于 agentComplete 去重
+  const renderedAssistantTexts = new Set<string>()
+
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
@@ -411,6 +414,7 @@ export function toBubbleItems(
         blocks.forEach((block, bIdx) => {
           const key = `${mIdx}-${bIdx}`
           if (block.type === 'text') {
+            renderedAssistantTexts.add(block.text)
             items.push({
               key,
               role: 'ai',
@@ -555,9 +559,14 @@ export function toBubbleItems(
     }
 
     if (msg.type === 'flow.signal.agentComplete') {
+      // 如果 content 已在前面的 assistant 消息中渲染过，则不重复展示
+      const contentAlreadyShown = !!(
+        msg.data.content && renderedAssistantTexts.has(msg.data.content)
+      )
+      const displayContent = contentAlreadyShown ? undefined : msg.data.content
       const completionText = [
         msg.data.output ? `完成 → ${msg.data.output.name}` : '完成',
-        msg.data.content,
+        displayContent,
       ]
         .filter(Boolean)
         .join('\n')
@@ -570,9 +579,9 @@ export function toBubbleItems(
               <Tag color='green' className='m-0 text-[10px]'>
                 完成{msg.data.output ? ` → ${msg.data.output.name}` : ''}
               </Tag>
-              {msg.data.content && (
+              {displayContent && (
                 <div className='mt-2'>
-                  <Md content={msg.data.content} />
+                  <Md content={displayContent} />
                 </div>
               )}
             </div>
