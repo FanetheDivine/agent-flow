@@ -144,92 +144,85 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   }
 
   return (
-    <XProvider
-      bubble={{
-        className:
-          'p-0.5! [&_.ant-bubble-content]:py-1! [&_.ant-bubble-content]:px-2! [&_.ant-bubble-content]:min-h-[unset]!',
+    <div
+      className='flex h-full flex-col overflow-hidden bg-[#1e1e2e]'
+      tabIndex={-1}
+      onWheel={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+          e.stopPropagation()
+        }
+      }}
+      onPaste={(e) => {
+        e.stopPropagation()
       }}
     >
-      <div
-        className='flex h-full flex-col overflow-hidden bg-[#1e1e2e]'
-        tabIndex={-1}
-        onWheel={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-            e.stopPropagation()
-          }
-        }}
-        onPaste={(e) => {
-          e.stopPropagation()
-        }}
-      >
-        {/* Header */}
-        <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>
-          <div className='flex items-center gap-2'>
-            <span className='text-xs font-semibold text-[#cdd6f4]'>{agentName}</span>
-            <Tag color={statusColor} className='m-0 text-[10px]'>
-              {statusText}
-            </Tag>
-          </div>
-          {canInterruptFlow && flowPhase !== 'starting' && (
-            <Tooltip title='停止工作流'>
-              <Button
-                size='small'
-                danger
-                type='text'
-                icon={<StopOutlined />}
-                onClick={() => killFlow(flowId)}
-              />
-            </Tooltip>
-          )}
-          <Button
-            size='small'
-            type='text'
-            icon={<CloseOutlined />}
-            onClick={onClose}
-            style={{ color: '#6c7086' }}
-          />
+      {/* Header */}
+      <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>
+        <div className='flex items-center gap-2'>
+          <span className='text-xs font-semibold text-[#cdd6f4]'>{agentName}</span>
+          <Tag color={statusColor} className='m-0 text-[10px]'>
+            {statusText}
+          </Tag>
         </div>
-        {/* Messages */}
-        {match({
-          length: sessions.length,
-          phase,
-          flowPhase,
-        })
-          .with(
-            {
-              phase: 'idle',
-              flowPhase: P.not('starting'),
-            },
-            () => (
-              <div className='flex flex-1 items-center justify-center px-3'>
-                <Welcome
-                  variant='borderless'
-                  icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
-                  title={agentName}
-                  description='暂无消息，发送一条消息以运行当前 Agent。'
-                />
-              </div>
-            ),
-          )
-          .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
-          .otherwise(() => (
-            <MessageList
-              sessions={sessions}
-              ctx={ctx}
-              loading={phase === 'running' || phase === 'starting'}
+        {canInterruptFlow && flowPhase !== 'starting' && (
+          <Tooltip title='停止工作流'>
+            <Button
+              size='small'
+              danger
+              type='text'
+              icon={<StopOutlined />}
+              onClick={() => killFlow(flowId)}
             />
-          ))}
-
-        {/* Input (always shown; send button becomes cancel button during chatting) */}
-        <ChatInput
-          onSend={handleSend}
-          placeholder={placeholder}
-          disabled={inputDisabled}
-          loading={canInterrupt}
-          onCancel={() => interruptAgent(flowId)}
+          </Tooltip>
+        )}
+        <Button
+          size='small'
+          type='text'
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          style={{ color: '#6c7086' }}
         />
       </div>
-    </XProvider>
+      {/* Messages */}
+      {match({
+        length: sessions.length,
+        phase,
+        flowPhase,
+      })
+        .with(
+          {
+            phase: 'idle',
+            flowPhase: P.not('starting'),
+          },
+          () => (
+            <div className='flex flex-1 items-center justify-center px-3'>
+              <Welcome
+                variant='borderless'
+                icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
+                title={agentName}
+                description='暂无消息，发送一条消息以运行当前 Agent。'
+              />
+            </div>
+          ),
+        )
+        .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
+        .otherwise(() => (
+          <MessageList
+            sessions={sessions}
+            ctx={ctx}
+            loading={phase === 'running' || phase === 'starting'}
+          />
+        ))}
+
+      {/* Input (always shown; send button becomes cancel button during chatting) */}
+      <ChatInput
+        onSend={handleSend}
+        placeholder={placeholder}
+        disabled={inputDisabled}
+        loading={canInterrupt}
+        onCancel={() => interruptAgent(flowId)}
+      />
+    </div>
   )
 }
