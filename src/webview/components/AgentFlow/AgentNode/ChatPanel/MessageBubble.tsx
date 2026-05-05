@@ -32,7 +32,6 @@ export type BubbleCtx = {
   pendingToolUseId?: string
   answeredMap: Map<string, AnsweredInfo>
   onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
-  onActiveDismiss?: (toolUseId: string) => void
   /** 当前挂起的工具权限请求 toolUseId（若有） */
   pendingToolPermissionToolUseId?: string
   /** 已回答的工具权限历史 */
@@ -473,7 +472,6 @@ export function toBubbleItems(
                     input={input}
                     mode='active'
                     onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
-                    onDismiss={() => ctx.onActiveDismiss?.(block.id)}
                   />
                 ) : (
                   <AskUserQuestionCard

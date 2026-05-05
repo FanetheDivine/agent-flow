@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import { useCallback, useMemo, useState, type FC } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
@@ -95,23 +95,13 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     [answeredQuestions, freeTextMap],
   )
 
-  const [cardDismissed, setCardDismissed] = useState(false)
-  const prevToolUseIdRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (pending?.toolUseId !== prevToolUseIdRef.current) {
-      prevToolUseIdRef.current = pending?.toolUseId
-      if (cardDismissed) setCardDismissed(false)
-    }
-  }, [pending?.toolUseId, cardDismissed])
-
-  const showCard = !!pending && !cardDismissed
+  const showCard = !!pending
   const inputDisabled = false
 
   const onActiveSubmit = useCallback(
     (toolUseId: string, output: AskUserQuestionOutput) => answerQuestion(flowId, toolUseId, output),
     [answerQuestion, flowId],
   )
-  const onActiveDismiss = useCallback(() => setCardDismissed(true), [])
   const onToolPermissionAllow = useCallback(
     (toolUseId: string) => answerToolPermission(flowId, toolUseId, true),
     [answerToolPermission, flowId],
@@ -128,7 +118,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
       pendingToolUseId,
       answeredMap,
       onActiveSubmit,
-      onActiveDismiss,
       pendingToolPermissionToolUseId,
       answeredToolPermissions,
       onToolPermissionAllow,
@@ -138,7 +127,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
       pendingToolUseId,
       answeredMap,
       onActiveSubmit,
-      onActiveDismiss,
       pendingToolPermissionToolUseId,
       answeredToolPermissions,
       onToolPermissionAllow,

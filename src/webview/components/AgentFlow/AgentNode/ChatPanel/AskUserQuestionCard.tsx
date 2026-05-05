@@ -1,6 +1,6 @@
 import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
-import { CheckOutlined, CloseOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { CheckOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
@@ -16,7 +16,6 @@ type Props = {
   /** 历史态时是否由自由文本作答 */
   answeredByFreeText?: boolean
   onSubmit?: (output: AskUserQuestionOutput) => void
-  onDismiss?: () => void
 }
 
 type Selections = Record<number, string[]>
@@ -46,7 +45,6 @@ export const AskUserQuestionCard: FC<Props> = ({
   answeredValues,
   answeredByFreeText,
   onSubmit,
-  onDismiss,
 }) => {
   const questions = useMemo(() => input.questions ?? [], [input.questions])
   const isActive = mode === 'active'
@@ -131,15 +129,6 @@ export const AskUserQuestionCard: FC<Props> = ({
           >
             {answeredByFreeText ? '以自由文本回答' : '已回答'}
           </Tag>
-        )}
-        {isActive && onDismiss && (
-          <Button
-            type='text'
-            size='small'
-            className='ml-auto -mr-1 text-[#6c7086]'
-            icon={<CloseOutlined />}
-            onClick={onDismiss}
-          />
         )}
       </div>
 
