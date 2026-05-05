@@ -2,11 +2,7 @@ import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
 import { CheckOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
-import type {
-  AskUserQuestionInput,
-  AskUserQuestionItem,
-  AskUserQuestionOutput,
-} from '@/common'
+import type { AskUserQuestionInput, AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
 
 type Props = {
   input: AskUserQuestionInput
@@ -67,9 +63,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     if (!isActive) return
     setSelections((prev) => ({ ...prev, [qIdx]: [value] }))
     if (value === OTHER_LABEL) {
-      setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
-      )
+      setOtherStates((prev) => (prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } }))
     } else {
       setOtherStates((prev) => {
         if (!(qIdx in prev)) return prev
@@ -84,9 +78,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     if (!isActive) return
     setSelections((prev) => ({ ...prev, [qIdx]: values }))
     if (values.includes(OTHER_LABEL)) {
-      setOtherStates((prev) =>
-        prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } },
-      )
+      setOtherStates((prev) => (prev[qIdx] ? prev : { ...prev, [qIdx]: { text: '' } }))
     } else {
       setOtherStates((prev) => {
         if (!(qIdx in prev)) return prev
@@ -135,11 +127,11 @@ export const AskUserQuestionCard: FC<Props> = ({
       {questions.map((q, qIdx) => {
         const multi = !!q.multiSelect
         const historical = !isActive ? getHistoricalDisplay(q) : null
-        const value = isActive ? selections[qIdx] ?? [] : historical!.values
+        const value = isActive ? (selections[qIdx] ?? []) : historical!.values
         const otherSelected = value.includes(OTHER_LABEL)
         const otherText = isActive
-          ? otherStates[qIdx]?.text ?? ''
-          : historical?.customText ?? ''
+          ? (otherStates[qIdx]?.text ?? '')
+          : (historical?.customText ?? '')
 
         return (
           <div key={qIdx} className='flex flex-col gap-1.5'>
@@ -149,6 +141,7 @@ export const AskUserQuestionCard: FC<Props> = ({
                 content={q.question}
                 openLinksInNewTab
                 escapeRawHtml
+                components={EMPTY_COMPONENTS}
               />
               {q.header && (
                 <Tag color='processing' className='m-0 shrink-0 text-[10px]'>
@@ -207,12 +200,7 @@ export const AskUserQuestionCard: FC<Props> = ({
 
       {isActive && (
         <div className='flex justify-end'>
-          <Button
-            type='primary'
-            size='small'
-            disabled={!allAnswered}
-            onClick={handleManualSend}
-          >
+          <Button type='primary' size='small' disabled={!allAnswered} onClick={handleManualSend}>
             发送
           </Button>
         </div>
@@ -220,7 +208,7 @@ export const AskUserQuestionCard: FC<Props> = ({
     </div>
   )
 }
-
+const EMPTY_COMPONENTS: Record<string, never> = {}
 const OptionRow: FC<{
   option: { label: string; description: string; preview?: string }
   children: React.ReactNode

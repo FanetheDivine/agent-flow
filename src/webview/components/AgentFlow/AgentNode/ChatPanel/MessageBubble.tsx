@@ -46,8 +46,16 @@ type RenderedBubble = {
   content: ReactNode
 }
 
+const EMPTY_COMPONENTS: Record<string, never> = {}
+
 const Md: FC<{ content: string }> = ({ content }) => (
-  <XMarkdown className='x-markdown-dark' content={content} openLinksInNewTab escapeRawHtml />
+  <XMarkdown
+    className='x-markdown-dark'
+    content={content}
+    components={EMPTY_COMPONENTS}
+    openLinksInNewTab
+    escapeRawHtml
+  />
 )
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
