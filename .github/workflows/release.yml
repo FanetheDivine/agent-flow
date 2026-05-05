@@ -22,7 +22,7 @@ jobs:
         run: npm i pnpm -g
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Package VSIX
         run: pnpm run build-extension
