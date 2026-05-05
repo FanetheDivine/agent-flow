@@ -1,6 +1,12 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Tag } from 'antd'
-import { CheckCircleOutlined, CheckOutlined, CopyOutlined, ToolOutlined } from '@ant-design/icons'
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  CloseCircleOutlined,
+  CopyOutlined,
+  ToolOutlined,
+} from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type {
@@ -230,6 +236,23 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   }
 }
 
+/** 从 tool_result 的 content 中提取纯文本 */
+function extractToolResultText(content: unknown): string {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((b: any) => {
+        if (typeof b === 'string') return b
+        if (b && typeof b === 'object' && b.type === 'text') return b.text ?? ''
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
@@ -272,21 +295,51 @@ export function toBubbleItems(
     }
   })
 
+  // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
+  const toolUseIdToName = new Map<string, string>()
+
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
       if (message.type === 'user') {
-        if (message.isSynthetic) return
         const rawContent = message.message.content
-        // 纯 tool_result 的 user message 属于工具循环内部产物（例如
-        // AskUserQuestion 回答后 SDK 发出的 tool_result），UI 不需要单独渲染，
-        // 结构化答案已由 AskUserQuestionCard 的历史态展示。
+        // 含 tool_result 的 user message：渲染工具结果
         if (
           Array.isArray(rawContent) &&
           rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
         ) {
+          rawContent.forEach((block: any, bIdx: number) => {
+            if (!block || block.type !== 'tool_result') return
+            const toolUseId: string = block.tool_use_id ?? ''
+            // 跳过 AskUserQuestion / ToolPermission 的 tool_result（已由专用卡片展示）
+            if (seenToolUseIds.has(toolUseId)) return
+            const toolName = toolUseIdToName.get(toolUseId) ?? '工具'
+            const isError = !!block.is_error
+            const resultText = extractToolResultText(block.content)
+            if (!resultText) return
+            items.push({
+              key: `${mIdx}-tr-${bIdx}`,
+              role: 'ai',
+              content: (
+                <details className='text-[11px] text-[#a6adc8]'>
+                  <summary className='cursor-pointer'>
+                    {isError ? (
+                      <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+                    ) : (
+                      <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+                    )}
+                    {toolName} 结果
+                  </summary>
+                  <pre className='mt-1 max-h-60 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                    {resultText}
+                  </pre>
+                </details>
+              ),
+            })
+          })
           return
         }
+        if (message.isSynthetic) return
         const { copyText, node } = renderUserContent(rawContent)
         items.push({
           key: `${mIdx}-user`,
@@ -329,6 +382,9 @@ export function toBubbleItems(
           if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
             if (seenToolUseIds.has(block.id)) return
             seenToolUseIds.add(block.id)
+            const toolName =
+              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
+            toolUseIdToName.set(block.id, toolName)
             if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && ctx) {
               const input = block.input as AskUserQuestionInput | undefined
               if (!input || !Array.isArray(input.questions)) return
@@ -355,8 +411,6 @@ export function toBubbleItems(
               })
               return
             }
-            const toolName =
-              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
             if (ctx) {
               const isPendingPerm = ctx.pendingToolPermissionToolUseId === block.id
               const answeredPerm = ctx.answeredToolPermissions?.[block.id]
@@ -399,7 +453,34 @@ export function toBubbleItems(
             })
             return
           }
-          // mcp_tool_result & others — skip (verbose)
+          if ((block as any).type === 'mcp_tool_result') {
+            const b = block as any
+            const toolUseId: string = b.tool_use_id ?? ''
+            const toolName = toolUseIdToName.get(toolUseId) ?? '工具'
+            const isError = !!b.is_error
+            const resultText = extractToolResultText(b.content)
+            if (!resultText) return
+            items.push({
+              key,
+              role: 'ai',
+              content: (
+                <details className='text-[11px] text-[#a6adc8]'>
+                  <summary className='cursor-pointer'>
+                    {isError ? (
+                      <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+                    ) : (
+                      <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+                    )}
+                    {toolName} 结果
+                  </summary>
+                  <pre className='mt-1 max-h-60 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                    {resultText}
+                  </pre>
+                </details>
+              ),
+            })
+            return
+          }
         })
         return
       }
