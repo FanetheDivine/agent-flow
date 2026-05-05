@@ -426,7 +426,7 @@ export function toBubbleItems(
             })
             return
           }
-          if (block.type === 'thinking') {
+          if (block.type === 'thinking' && block.thinking) {
             items.push({
               key,
               role: 'ai',
@@ -603,7 +603,7 @@ export function toBubbleItems(
         role: 'ai',
         content: <Md content={block.content} />,
       })
-    } else if (block.type === 'thinking') {
+    } else if (block.type === 'thinking' && block.content) {
       items.push({
         key,
         role: 'ai',
