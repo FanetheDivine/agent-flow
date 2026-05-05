@@ -86,6 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
     )
     currentPanel = panel
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg')
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri)
 
     const flowStore = new PersistedDataController()
