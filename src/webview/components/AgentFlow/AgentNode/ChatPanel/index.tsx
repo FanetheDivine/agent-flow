@@ -162,9 +162,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
         onPaste={(e) => {
           e.stopPropagation()
         }}
-        onMouseDownCapture={(e) => {
-          e.stopPropagation()
-        }}
       >
         {/* Header */}
         <div className='flex items-center justify-between border-b border-[#45475a] px-3 py-2'>

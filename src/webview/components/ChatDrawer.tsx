@@ -80,8 +80,12 @@ export const ChatDrawer: FC = () => {
       placement='right'
       mask={false}
       closable={false}
+      resizable
       styles={{
         body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+      }}
+      onClose={() => {
+        closeChatDrawer()
       }}
     >
       <div className='flex flex-1 flex-col overflow-hidden'>
