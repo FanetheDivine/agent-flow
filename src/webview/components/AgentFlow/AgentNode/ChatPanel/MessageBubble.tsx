@@ -1,11 +1,11 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
-import { Tag } from 'antd'
+import { Spin, Tag } from 'antd'
 import {
   CheckCircleOutlined,
   CheckOutlined,
   CloseCircleOutlined,
   CopyOutlined,
-  ToolOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown } from '@ant-design/x-markdown'
@@ -253,6 +253,47 @@ function extractToolResultText(content: unknown): string {
   return ''
 }
 
+/** 根据工具名和输入参数生成一行摘要 */
+function getToolSummary(toolName: string, input: any): string {
+  if (!input || typeof input !== 'object') return toolName
+  const name = toolName.replace(/^mcp__\w+__/, '')
+  switch (name) {
+    case 'Read':
+      return input.file_path ? `读取 ${shortenPath(input.file_path)}` : name
+    case 'Write':
+      return input.file_path ? `写入 ${shortenPath(input.file_path)}` : name
+    case 'Edit':
+      return input.file_path ? `编辑 ${shortenPath(input.file_path)}` : name
+    case 'Bash':
+      return input.command ? `执行 ${truncate(input.command, 60)}` : name
+    case 'Grep':
+      return input.pattern ? `搜索 ${truncate(input.pattern, 40)}` : name
+    case 'Glob':
+      return input.pattern ? `查找 ${truncate(input.pattern, 40)}` : name
+    case 'WebFetch':
+      return input.url ? `获取 ${truncate(input.url, 50)}` : name
+    case 'WebSearch':
+      return input.query ? `搜索 ${truncate(input.query, 40)}` : name
+    case 'Agent':
+      return input.description ? `子任务: ${truncate(input.description, 40)}` : name
+    case 'TodoWrite':
+      return '更新任务列表'
+    default:
+      return name
+  }
+}
+
+function shortenPath(p: string): string {
+  const parts = p.replace(/\\/g, '/').split('/')
+  if (parts.length <= 3) return parts.join('/')
+  return `.../${parts.slice(-2).join('/')}`
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s
+  return s.slice(0, max) + '...'
+}
+
 export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
@@ -262,15 +303,23 @@ export function toBubbleItems(
 
   // 预扫描：收集已有完整 assistant 消息的 uuid（这些 stream_event 已被完整消息取代）
   const completedUuids = new Set<string>()
-  msgs.forEach((msg) => {
-    if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'assistant') {
-      completedUuids.add(msg.data.message.uuid)
+  // 找到最后一个 result 消息的位置，其前的 stream_event 均视为已结束的回合
+  let lastResultIdx = -1
+  msgs.forEach((msg, idx) => {
+    if (msg.type === 'flow.signal.aiMessage') {
+      if (msg.data.message.type === 'assistant') {
+        completedUuids.add(msg.data.message.uuid)
+      }
+      if (msg.data.message.type === 'result') {
+        lastResultIdx = idx
+      }
     }
   })
 
-  // 累积尚未被完整消息取代的 stream_event 内容
+  // 累积尚未被完整消息取代的 stream_event 内容（仅最后一个 result 之后的事件）
   const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
-  msgs.forEach((msg) => {
+  msgs.forEach((msg, idx) => {
+    if (idx <= lastResultIdx) return
     if (msg.type !== 'flow.signal.aiMessage') return
     const { message } = msg.data
     if (message.type !== 'stream_event') return
@@ -297,46 +346,54 @@ export function toBubbleItems(
 
   // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
   const toolUseIdToName = new Map<string, string>()
+  // tool_use_id → tool_result 映射，用于将结果合并展示到工具调用中
+  const toolUseIdToResult = new Map<string, { isError: boolean; text: string }>()
+  msgs.forEach((msg) => {
+    if (msg.type !== 'flow.signal.aiMessage') return
+    const { message } = msg.data
+    if (message.type === 'user') {
+      const rawContent = message.message.content
+      if (Array.isArray(rawContent)) {
+        rawContent.forEach((block: any) => {
+          if (block?.type === 'tool_result' && block.tool_use_id) {
+            const text = extractToolResultText(block.content)
+            if (text) {
+              toolUseIdToResult.set(block.tool_use_id, {
+                isError: !!block.is_error,
+                text,
+              })
+            }
+          }
+        })
+      }
+    }
+    if (message.type === 'assistant') {
+      const blocks = message.message.content
+      if (!Array.isArray(blocks)) return
+      blocks.forEach((block: any) => {
+        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
+          const text = extractToolResultText(block.content)
+          if (text) {
+            toolUseIdToResult.set(block.tool_use_id, {
+              isError: !!block.is_error,
+              text,
+            })
+          }
+        }
+      })
+    }
+  })
 
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
       if (message.type === 'user') {
         const rawContent = message.message.content
-        // 含 tool_result 的 user message：渲染工具结果
+        // 含 tool_result 的 user message：结果已合并到 tool_use 展示中，跳过独立渲染
         if (
           Array.isArray(rawContent) &&
           rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
         ) {
-          rawContent.forEach((block: any, bIdx: number) => {
-            if (!block || block.type !== 'tool_result') return
-            const toolUseId: string = block.tool_use_id ?? ''
-            // 跳过 AskUserQuestion / ToolPermission 的 tool_result（已由专用卡片展示）
-            if (seenToolUseIds.has(toolUseId)) return
-            const toolName = toolUseIdToName.get(toolUseId) ?? '工具'
-            const isError = !!block.is_error
-            const resultText = extractToolResultText(block.content)
-            if (!resultText) return
-            items.push({
-              key: `${mIdx}-tr-${bIdx}`,
-              role: 'ai',
-              content: (
-                <details className='text-[11px] text-[#a6adc8]'>
-                  <summary className='cursor-pointer'>
-                    {isError ? (
-                      <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
-                    ) : (
-                      <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
-                    )}
-                    {toolName} 结果
-                  </summary>
-                  <pre className='mt-1 max-h-60 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-                    {resultText}
-                  </pre>
-                </details>
-              ),
-            })
-          })
           return
         }
         if (message.isSynthetic) return
@@ -432,14 +489,28 @@ export function toBubbleItems(
                 return
               }
             }
+            const summary = getToolSummary(toolName, block.input)
+            const result = toolUseIdToResult.get(block.id)
             items.push({
               key,
               role: 'ai',
               content: (
                 <details className='text-[11px] text-[#a6adc8]'>
                   <summary className='cursor-pointer'>
-                    <ToolOutlined className='mr-1 text-[#f9e2af]' />
-                    {toolName}
+                    {result ? (
+                      result.isError ? (
+                        <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+                      ) : (
+                        <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+                      )
+                    ) : (
+                      <Spin
+                        size='small'
+                        indicator={<LoadingOutlined className='text-[10px]!' />}
+                        className='mr-1'
+                      />
+                    )}
+                    {summary}
                   </summary>
                   {block.input &&
                   typeof block.input === 'object' &&
@@ -448,37 +519,18 @@ export function toBubbleItems(
                       {JSON.stringify(block.input, null, 2)}
                     </pre>
                   ) : null}
+                  {result && (
+                    <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+                      {result.text}
+                    </pre>
+                  )}
                 </details>
               ),
             })
             return
           }
           if ((block as any).type === 'mcp_tool_result') {
-            const b = block as any
-            const toolUseId: string = b.tool_use_id ?? ''
-            const toolName = toolUseIdToName.get(toolUseId) ?? '工具'
-            const isError = !!b.is_error
-            const resultText = extractToolResultText(b.content)
-            if (!resultText) return
-            items.push({
-              key,
-              role: 'ai',
-              content: (
-                <details className='text-[11px] text-[#a6adc8]'>
-                  <summary className='cursor-pointer'>
-                    {isError ? (
-                      <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
-                    ) : (
-                      <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
-                    )}
-                    {toolName} 结果
-                  </summary>
-                  <pre className='mt-1 max-h-60 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-                    {resultText}
-                  </pre>
-                </details>
-              ),
-            })
+            // 结果已合并到对应 tool_use 展示中，跳过独立渲染
             return
           }
         })
