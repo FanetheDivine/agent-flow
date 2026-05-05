@@ -3,7 +3,7 @@
   "license": "MIT",
   "displayName": "agent-flow",
   "description": "可视化地编排 Agent 工作流",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "FanetheDivine",
   "repository": {
     "type": "git",
@@ -105,8 +105,15 @@
   },
   "pnpm": {
     "supportedArchitectures": {
-      "os": ["win32", "darwin", "linux"],
-      "cpu": ["x64", "arm64"]
+      "os": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "cpu": [
+        "x64",
+        "arm64"
+      ]
     }
   },
   "devDependencies": {
