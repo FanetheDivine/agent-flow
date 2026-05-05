@@ -651,13 +651,23 @@ export const ChatInput: FC<Props> = ({
       return
     }
 
-    // 无文件粘贴：保留 Slate 内部 fragment（内部复制的 code-ref / file-ref 需要原样粘回），
-    // 否则一律按纯文本插入，避免网页 / 富文本编辑器的 HTML 带样式进入。
-    if (e.clipboardData.getData('application/x-slate-fragment')) return
-    const text = e.clipboardData.getData('text/plain')
-    if (!text) return
+    // 无文件粘贴：始终 preventDefault 以避免浏览器原生粘贴绕过 Slate 状态树。
+    // Slate fragment：手动解码并 insertFragment，确保经过 Slate 操作系统触发 onChange。
+    // 其他：按纯文本插入，避免网页 / 富文本编辑器的 HTML 带样式进入。
     e.preventDefault()
-    editor.insertText(text)
+    const fragment = e.clipboardData.getData('application/x-slate-fragment')
+    if (fragment) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(window.atob(fragment))) as Descendant[]
+        editor.insertFragment(decoded)
+      } catch {
+        const text = e.clipboardData.getData('text/plain')
+        if (text) editor.insertText(text)
+      }
+      return
+    }
+    const text = e.clipboardData.getData('text/plain')
+    if (text) editor.insertText(text)
   }
 
   return (
