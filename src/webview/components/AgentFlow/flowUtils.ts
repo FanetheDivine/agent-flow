@@ -24,6 +24,8 @@ const MODEL_ROW_H = 28
 const OUTPUT_ROW_H = 24
 const OUTPUT_GAP = 4
 const OUTPUT_BLOCK_PADDING = 14 // pt-1.5 + pb-2
+// 左侧留白（为侧边面板预留空间）
+const LEFT_PADDING = 320
 // 层与层之间的水平间距
 const LAYER_GAP = 120
 // 同一层内节点之间的垂直间距
@@ -133,7 +135,7 @@ function agentsToNodes(flowId: string, agents: Agent[]): AgentNode[] {
     const heights = ids.map((id) => estimateNodeHeight(agentMap.get(id)!))
     const totalH = heights.reduce((s, h) => s + h, 0) + (ids.length - 1) * SIBLING_GAP
     let y = -totalH / 2
-    const x = lv * (NODE_WIDTH + LAYER_GAP)
+    const x = LEFT_PADDING + lv * (NODE_WIDTH + LAYER_GAP)
     ids.forEach((id, idx) => {
       const a = agentMap.get(id)!
       nodes.push({
