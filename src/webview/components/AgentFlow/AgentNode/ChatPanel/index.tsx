@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
@@ -90,28 +90,61 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
 
   // 自由文本作答标记（本地 UI 状态，仅用于历史态显示 tag）
   const [freeTextMap, setFreeTextMap] = useState<Record<string, boolean>>({})
-  const answeredMap = buildAnsweredMap(answeredQuestions ?? {}, freeTextMap)
+  const answeredMap = useMemo(
+    () => buildAnsweredMap(answeredQuestions ?? {}, freeTextMap),
+    [answeredQuestions, freeTextMap],
+  )
 
   const [cardDismissed, setCardDismissed] = useState(false)
   const prevToolUseIdRef = useRef<string | undefined>(undefined)
-  if (pending?.toolUseId !== prevToolUseIdRef.current) {
-    prevToolUseIdRef.current = pending?.toolUseId
-    if (cardDismissed) setCardDismissed(false)
-  }
+  useEffect(() => {
+    if (pending?.toolUseId !== prevToolUseIdRef.current) {
+      prevToolUseIdRef.current = pending?.toolUseId
+      if (cardDismissed) setCardDismissed(false)
+    }
+  }, [pending?.toolUseId, cardDismissed])
 
   const showCard = !!pending && !cardDismissed
   const inputDisabled = false
 
-  const ctx: BubbleCtx = {
-    pendingToolUseId: showCard ? pending?.toolUseId : undefined,
-    answeredMap,
-    onActiveSubmit: (toolUseId, output) => answerQuestion(flowId, toolUseId, output),
-    onActiveDismiss: () => setCardDismissed(true),
-    pendingToolPermissionToolUseId: pendingToolPerm?.toolUseId,
-    answeredToolPermissions,
-    onToolPermissionAllow: (toolUseId) => answerToolPermission(flowId, toolUseId, true),
-    onToolPermissionDeny: (toolUseId) => answerToolPermission(flowId, toolUseId, false),
-  }
+  const onActiveSubmit = useCallback(
+    (toolUseId: string, output: AskUserQuestionOutput) => answerQuestion(flowId, toolUseId, output),
+    [answerQuestion, flowId],
+  )
+  const onActiveDismiss = useCallback(() => setCardDismissed(true), [])
+  const onToolPermissionAllow = useCallback(
+    (toolUseId: string) => answerToolPermission(flowId, toolUseId, true),
+    [answerToolPermission, flowId],
+  )
+  const onToolPermissionDeny = useCallback(
+    (toolUseId: string) => answerToolPermission(flowId, toolUseId, false),
+    [answerToolPermission, flowId],
+  )
+
+  const pendingToolUseId = showCard ? pending?.toolUseId : undefined
+  const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
+  const ctx = useMemo<BubbleCtx>(
+    () => ({
+      pendingToolUseId,
+      answeredMap,
+      onActiveSubmit,
+      onActiveDismiss,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    }),
+    [
+      pendingToolUseId,
+      answeredMap,
+      onActiveSubmit,
+      onActiveDismiss,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    ],
+  )
 
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
