@@ -1,6 +1,7 @@
 import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
 import { CheckOutlined, CloseOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { XMarkdown } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
   AskUserQuestionItem,
@@ -154,7 +155,12 @@ export const AskUserQuestionCard: FC<Props> = ({
         return (
           <div key={qIdx} className='flex flex-col gap-1.5'>
             <div className='flex items-start justify-between gap-2'>
-              <span className='text-[12px] text-[#cdd6f4]'>{q.question}</span>
+              <XMarkdown
+                className='x-markdown-dark text-[12px] text-[#cdd6f4]'
+                content={q.question}
+                openLinksInNewTab
+                escapeRawHtml
+              />
               {q.header && (
                 <Tag color='processing' className='m-0 shrink-0 text-[10px]'>
                   {q.header}
