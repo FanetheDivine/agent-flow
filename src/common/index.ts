@@ -21,7 +21,7 @@ export const AgentSchema = z.object({
   id: z.string().describe('Agent 唯一 ID'),
   model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）'),
   effort: z
-    .enum(['low', 'medium', 'high', 'max'])
+    .enum(['low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
     .describe('AI 思考的努力程度，影响响应速度与质量的权衡'),
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),

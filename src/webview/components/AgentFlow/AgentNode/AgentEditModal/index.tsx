@@ -127,14 +127,14 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               allowClear
               options={[
                 { label: 'opus', value: 'opus' },
+                { label: 'gpt-5.5', value: 'gpt-5.5' },
                 { label: 'glm-5.1', value: 'glm-5.1' },
                 { label: 'DeepSeek-V4-Pro', value: 'DeepSeek-V4-Pro' },
-                { label: 'qwen3.6-plus', value: 'qwen3.6-plus' },
-                { label: 'DeepSeek-V3.2', value: 'DeepSeek-V3.2' },
-                { label: 'haiku', value: 'haiku' },
+                { label: 'opus4.7', value: 'claude-opus-4-7' },
+                { label: 'opus4.6', value: 'claude-opus-4-6-v1' },
                 { label: 'sonnet', value: 'sonnet' },
+                { label: 'haiku', value: 'haiku' },
                 { label: 'gpt-5.4', value: 'gpt-5.4' },
-                { label: 'gpt-5.5', value: 'gpt-5.5' },
                 { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
                 { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
               ]}
@@ -149,10 +149,11 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               placeholder='默认（不指定）'
               allowClear
               options={[
-                { label: 'low — 最快，最少思考', value: 'low' },
-                { label: 'medium — 适中', value: 'medium' },
-                { label: 'high — 较多思考', value: 'high' },
-                { label: 'max — 最大思考（仅 Opus 支持）', value: 'max' },
+                { label: 'low — 简单任务', value: 'low' },
+                { label: 'medium — 日常任务', value: 'medium' },
+                { label: 'high — 复杂任务', value: 'high' },
+                { label: 'xhigh — 长程任务(opus4.7+)', value: 'xhigh' },
+                { label: 'max — 最大性能(opus4.6+)', value: 'max' },
               ]}
             />
           </Form.Item>
