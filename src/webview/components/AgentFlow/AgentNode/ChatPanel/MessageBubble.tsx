@@ -318,12 +318,14 @@ export function toBubbleItems(
 
   // 累积尚未被完整消息取代的 stream_event 内容（仅最后一个 result 之后的事件）
   const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
+  let lastStreamIdx = -1
   msgs.forEach((msg, idx) => {
     if (idx <= lastResultIdx) return
     if (msg.type !== 'flow.signal.aiMessage') return
     const { message } = msg.data
     if (message.type !== 'stream_event') return
     if (completedUuids.has(message.uuid)) return
+    lastStreamIdx = idx
     const event = message.event as any
     if (event.type === 'content_block_start') {
       const block = event.content_block
@@ -343,6 +345,18 @@ export function toBubbleItems(
       }
     }
   })
+
+  // 防御性检查：如果最后一个未过滤的 stream_event 之后存在 assistant 消息，
+  // 说明该轮已完成（uuid 可能因 SDK 时序问题未匹配），清除流式块避免重复渲染
+  if (streamingBlocks.size > 0 && lastStreamIdx >= 0) {
+    for (let i = lastStreamIdx + 1; i < msgs.length; i++) {
+      const msg = msgs[i]
+      if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'assistant') {
+        streamingBlocks.clear()
+        break
+      }
+    }
+  }
 
   // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
   const toolUseIdToName = new Map<string, string>()
