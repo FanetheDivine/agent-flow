@@ -235,6 +235,47 @@ export function toBubbleItems(
   seenToolUseIds = new Set<string>(),
 ): RenderedBubble[] {
   const items: RenderedBubble[] = []
+
+  // 预扫描：找到最后一个 result 消息和最后一个 assistant 消息的位置
+  // 这两者之前的 stream_event 均来自已完成的回合，其内容已在 assistant 消息中呈现
+  let lastResultIdx = -1
+  let lastAssistantIdx = -1
+  msgs.forEach((msg, idx) => {
+    if (msg.type === 'flow.signal.aiMessage') {
+      if (msg.data.message.type === 'result') lastResultIdx = idx
+      if (msg.data.message.type === 'assistant') lastAssistantIdx = idx
+    }
+  })
+
+  // 累积当前正在流式生成的内容：只取最后一个已完成消息之后的 stream_event
+  // 这些事件来自尚未产生完整 assistant 消息的当前回合
+  const streamCutoff = Math.max(lastResultIdx, lastAssistantIdx)
+  const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
+  msgs.forEach((msg, idx) => {
+    if (idx <= streamCutoff) return
+    if (msg.type !== 'flow.signal.aiMessage') return
+    const { message } = msg.data
+    if (message.type !== 'stream_event') return
+    const event = message.event as any
+    if (event.type === 'content_block_start') {
+      const block = event.content_block
+      if (block?.type === 'thinking') {
+        streamingBlocks.set(event.index, { type: 'thinking', content: block.thinking ?? '' })
+      } else if (block?.type === 'text') {
+        streamingBlocks.set(event.index, { type: 'text', content: block.text ?? '' })
+      }
+    } else if (event.type === 'content_block_delta') {
+      const existing = streamingBlocks.get(event.index)
+      if (!existing) return
+      const delta = event.delta
+      if (delta?.type === 'thinking_delta') {
+        existing.content += delta.thinking
+      } else if (delta?.type === 'text_delta') {
+        existing.content += delta.text
+      }
+    }
+  })
+
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
@@ -380,7 +421,7 @@ export function toBubbleItems(
         })
         return
       }
-      // stream_event / system / other — skip
+      // stream_event / system / other — 流式内容在末尾统一渲染
       return
     }
 
@@ -411,6 +452,32 @@ export function toBubbleItems(
       })
     }
   })
+
+  // 渲染正在流式生成中的内容（来自 streamCutoff 之后、尚未产生完整 assistant 消息的当前回合）
+  const sortedIndices = [...streamingBlocks.keys()].sort((a, b) => a - b)
+  for (const index of sortedIndices) {
+    const block = streamingBlocks.get(index)!
+    if (!block.content) continue
+    const key = `streaming-${index}`
+    if (block.type === 'text') {
+      items.push({
+        key,
+        role: 'ai',
+        content: <Md content={block.content} />,
+      })
+    } else if (block.type === 'thinking') {
+      items.push({
+        key,
+        role: 'ai',
+        content: (
+          <Think title='思考中' defaultExpanded>
+            <Md content={block.content} />
+          </Think>
+        ),
+      })
+    }
+  }
+
   return items
 }
 
