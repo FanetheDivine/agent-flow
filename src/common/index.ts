@@ -25,7 +25,7 @@ export const AgentSchema = z.object({
     .optional()
     .describe('AI 思考的努力程度，影响响应速度与质量的权衡'),
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),
-  agent_prompt: z.array(z.string()).describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
+  agent_prompt: z.string().describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
   outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
   auto_allowed_tools: z
     .union([z.literal(true), z.array(z.string())])
@@ -260,5 +260,5 @@ export function buildAgentSystemPrompt(
       return ['\n**可选的输出分支**：', outputDescs]
     })
 
-  return prefix.concat(agent_prompt).concat(suffix).join('\n')
+  return [...prefix, agent_prompt, ...suffix].join('\n')
 }

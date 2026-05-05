@@ -165,7 +165,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
       agent_name: 'example-agent',
       model: 'haiku',
       auto_allowed_tools: true,
-      agent_prompt: ['将用户输入视作纯文本，原样输出。'],
+      agent_prompt: '将用户输入视作纯文本，原样输出。',
       outputs: [{ output_name: '输出', output_desc: '用户输入原文' }],
     }
     const remapped = copyAgents([defaultAgent], flowId)
