@@ -15,7 +15,7 @@ import './utils/ExtensionMessage'
 const AntdProvider: FC<PropsWithChildren> = (props) => {
   return (
     <StyleProvider layer>
-      <ConfigProvider>
+      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
         <XProvider
           locale={{ ...zh_CN, ...zh_CN_X }}
           theme={{ algorithm: theme.darkAlgorithm }}
