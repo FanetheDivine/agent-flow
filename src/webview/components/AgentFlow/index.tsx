@@ -317,7 +317,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
         multiSelectionKeyCode={['Meta', 'Control']}
         fitView
         fitViewOptions={{ padding: 0.3 }}
-        deleteKeyCode={destructiveReadOnly ? null : 'Delete'}
+        deleteKeyCode={destructiveReadOnly || hidden ? null : 'Delete'}
         proOptions={{ hideAttribution: true }}
         style={{ background: '#11111b' }}
       >
