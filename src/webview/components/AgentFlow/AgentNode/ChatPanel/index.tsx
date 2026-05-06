@@ -34,7 +34,7 @@ type Props = {
 /** 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射 */
 function buildAnsweredMap(
   answeredQuestions: Record<string, AskUserQuestionOutput>,
-  answeredFreeText: Record<string, boolean>,
+  freeTextQuestionIndicesMap: Record<string, number[]>,
 ): Map<string, AnsweredInfo> {
   const answeredMap = new Map<string, AnsweredInfo>()
   for (const [toolUseId, output] of Object.entries(answeredQuestions)) {
@@ -45,16 +45,24 @@ function buildAnsweredMap(
         .map((s) => s.trim())
         .filter(Boolean)
     }
-    answeredMap.set(toolUseId, { values, byFreeText: !!answeredFreeText[toolUseId] })
+    const indices = freeTextQuestionIndicesMap[toolUseId] ?? []
+    answeredMap.set(toolUseId, { values, freeTextQuestionIndices: new Set(indices) })
   }
   return answeredMap
 }
 
-/** 自由文本 → AskUserQuestionOutput：把整段文本映射到每个 question 的答案上 */
-function freeTextToOutput(questions: AskUserQuestionItem[], text: string): AskUserQuestionOutput {
+/** 自由文本 → AskUserQuestionOutput：把整段文本映射到每个 question 的答案上。
+ * 同时返回被自由文本作答的 question 索引集合（用于历史展示时跳过选项匹配）。 */
+function freeTextToOutput(
+  questions: AskUserQuestionItem[],
+  text: string,
+): { output: AskUserQuestionOutput; questionIndices: Set<number> } {
   const answers: Record<string, string> = {}
   for (const q of questions) answers[q.question] = text
-  return { questions, answers }
+  return {
+    output: { questions, answers },
+    questionIndices: new Set(questions.map((_, i) => i)),
+  }
 }
 
 /** 把 user message content 折叠为纯文本（非 text block 丢弃），用于自由文本作答 */
@@ -88,11 +96,13 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const canInterrupt = agentCanInterrupt(phase)
   const canInterruptFlow = flowCanInterrupt(flowPhase)
 
-  // 自由文本作答标记（本地 UI 状态，仅用于历史态显示 tag）
-  const [freeTextMap, setFreeTextMap] = useState<Record<string, boolean>>({})
+  // 自由文本作答标记（本地 UI 状态，按 toolUseId -> question 索引集合追踪）
+  const [freeTextQuestionIndicesMap, setFreeTextQuestionIndicesMap] = useState<
+    Record<string, number[]>
+  >({})
   const answeredMap = useMemo(
-    () => buildAnsweredMap(answeredQuestions ?? {}, freeTextMap),
-    [answeredQuestions, freeTextMap],
+    () => buildAnsweredMap(answeredQuestions ?? {}, freeTextQuestionIndicesMap),
+    [answeredQuestions, freeTextQuestionIndicesMap],
   )
 
   const showCard = !!pending
@@ -156,8 +166,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   ): boolean | Promise<boolean> => {
     if (pending) {
       const text = contentToPlainText(content)
-      const output = freeTextToOutput(pending.input.questions, text)
-      setFreeTextMap((prev) => ({ ...prev, [pending.toolUseId]: true }))
+      const { output, questionIndices } = freeTextToOutput(pending.input.questions, text)
+      setFreeTextQuestionIndicesMap((prev) => ({
+        ...prev,
+        [pending.toolUseId]: [...questionIndices],
+      }))
       answerQuestion(flowId, pending.toolUseId, output)
       return true
     }
@@ -241,7 +254,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
         onSend={handleSend}
         placeholder={placeholder}
         disabled={inputDisabled}
-        loading={canInterrupt}
+        loading={canInterrupt || phase === 'awaiting-question'}
         onCancel={() => interruptAgent(flowId)}
       />
     </div>

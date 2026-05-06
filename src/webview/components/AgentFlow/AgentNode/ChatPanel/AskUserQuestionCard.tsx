@@ -9,8 +9,8 @@ type Props = {
   mode: 'active' | 'historical'
   /** 历史态时展示用户之前选中的 label 列表（按 question 映射） */
   answeredValues?: Record<string, string[]>
-  /** 历史态时是否由自由文本作答 */
-  answeredByFreeText?: boolean
+  /** 历史态时按 question 索引标记哪些是通过自由文本作答的 */
+  freeTextQuestionIndices?: Set<number>
   onSubmit?: (output: AskUserQuestionOutput) => void
 }
 
@@ -39,7 +39,7 @@ export const AskUserQuestionCard: FC<Props> = ({
   input,
   mode,
   answeredValues,
-  answeredByFreeText,
+  freeTextQuestionIndices,
   onSubmit,
 }) => {
   const questions = useMemo(() => input.questions ?? [], [input.questions])
@@ -115,18 +115,20 @@ export const AskUserQuestionCard: FC<Props> = ({
         <span className='text-[11px] font-semibold text-[#cdd6f4]'>AI 提问</span>
         {mode === 'historical' && (
           <Tag
-            color={answeredByFreeText ? 'blue' : 'success'}
+            color={freeTextQuestionIndices?.size ? 'blue' : 'success'}
             className='m-0 text-[10px]'
-            icon={answeredByFreeText ? <EditOutlined /> : <CheckOutlined />}
+            icon={freeTextQuestionIndices?.size ? <EditOutlined /> : <CheckOutlined />}
           >
-            {answeredByFreeText ? '以自由文本回答' : '已回答'}
+            {freeTextQuestionIndices?.size ? '含自由文本回答' : '已回答'}
           </Tag>
         )}
       </div>
 
       {questions.map((q, qIdx) => {
         const multi = !!q.multiSelect
-        const historical = !isActive ? getHistoricalDisplay(q) : null
+        const isFreeTextAnswer = !isActive && freeTextQuestionIndices?.has(qIdx)
+        const freeTextValue = isFreeTextAnswer ? (answeredValues?.[q.question] ?? []).join(', ') : ''
+        const historical = !isFreeTextAnswer && !isActive ? getHistoricalDisplay(q) : null
         const value = isActive ? (selections[qIdx] ?? []) : historical!.values
         const otherSelected = value.includes(OTHER_LABEL)
         const otherText = isActive
@@ -149,7 +151,11 @@ export const AskUserQuestionCard: FC<Props> = ({
                 </Tag>
               )}
             </div>
-            {multi ? (
+            {isFreeTextAnswer ? (
+              <div className='rounded bg-[#1e1e2e] px-3 py-2 text-[12px] whitespace-pre-wrap text-[#cdd6f4]'>
+                {freeTextValue}
+              </div>
+            ) : multi ? (
               <Checkbox.Group
                 value={value}
                 disabled={!isActive}
