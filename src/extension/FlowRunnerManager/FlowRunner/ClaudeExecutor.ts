@@ -209,7 +209,7 @@ export class ClaudeExecutor {
 
   private async createQuery(message: UserMessageType) {
     const options: Options = {
-      maxTurns: 100,
+      maxTurns: 1000,
       model: this.agent.model,
       effort: this.agent.effort,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: this.prompt },
