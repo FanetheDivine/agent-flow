@@ -612,17 +612,13 @@ function renderItemToBubble(item: RenderItem, ctx?: BubbleCtx): RenderedBubble |
         }
       }
       const isPending = ctx.pendingToolUseId === item.toolUseId
+      // pending 卡片不在消息列表中渲染（改为固定在输入框上方），只渲染已回答的历史卡片
+      if (isPending) return null
       const answered = ctx.answeredMap.get(item.toolUseId)
       return {
         key: item.key,
         role: 'system',
-        content: isPending ? (
-          <AskUserQuestionCard
-            input={item.input}
-            mode='active'
-            onSubmit={(output) => ctx.onActiveSubmit?.(item.toolUseId, output)}
-          />
-        ) : (
+        content: (
           <AskUserQuestionCard
             input={item.input}
             mode='historical'
