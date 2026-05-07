@@ -12,6 +12,7 @@ const run = (cmd) => {
 const tag = execSync('npm version patch --no-git-tag-version', { cwd: root }).toString().trim()
 console.log(`> npm version patch -> ${tag}`)
 
+run(`npm run format`)
 run(`git add .`)
 run(`git commit -m "${tag}"`)
 run(`git tag ${tag}`)
