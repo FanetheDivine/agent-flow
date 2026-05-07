@@ -162,9 +162,9 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
     version: '1.0.0',
     tools: [
       agentCompleteTool,
-      setShareValuesTool,
-      getShareValuesTool,
-      getAllShareValuesTool,
+      ...(agent.enable_share_values
+        ? [setShareValuesTool, getShareValuesTool, getAllShareValuesTool]
+        : []),
       validateFlowTool,
     ],
   })

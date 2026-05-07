@@ -68,6 +68,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         must_confirm_tools: agent.must_confirm_tools,
         auto_complete: agent.auto_complete ?? true,
         no_input: agent.no_input ?? false,
+        enable_share_values: agent.enable_share_values ?? false,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -205,6 +206,15 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
             name='no_input'
             label='无输入'
             tooltip='开启后节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）'
+            valuePropName='checked'
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name='enable_share_values'
+            label='共享存储'
+            tooltip='开启后才会注入 setShareValues / getShareValues / getAllShareValues 工具，并在系统提示词中告知 Agent 共享存储的存在；关闭时本 Agent 完全无感知'
             valuePropName='checked'
           >
             <Switch />
