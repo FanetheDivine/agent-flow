@@ -1,7 +1,7 @@
+import type { NotificationInstance } from 'antd/es/notification/interface'
 import { produce } from 'immer'
 import { match, P } from 'ts-pattern'
 import { create } from 'zustand'
-import type { NotificationInstance } from 'antd/es/notification/interface'
 import type {
   Agent,
   Flow,

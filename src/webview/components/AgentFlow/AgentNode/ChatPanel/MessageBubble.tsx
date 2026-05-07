@@ -524,8 +524,10 @@ function buildRenderItems(
         partialBlockSeen.set(currentRenderingPartialMsgId, seen)
         // 当前 partial block 是该 mid 第几个该 type 的 block；如果完整 assistant
         // 已经发过对应序号的 block，则跳过流式版本（让完整版本独立渲染）。
-        const completed =
-          completedBlockCounts.get(currentRenderingPartialMsgId) ?? { thinking: 0, text: 0 }
+        const completed = completedBlockCounts.get(currentRenderingPartialMsgId) ?? {
+          thinking: 0,
+          text: 0,
+        }
         if (seen[blockType] <= completed[blockType]) return
         const block = partial.blocks.get(event.index)
         if (!block || !block.content) return

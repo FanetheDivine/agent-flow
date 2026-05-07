@@ -1,5 +1,33 @@
 # Change Log
 
+## [0.0.7] - 2026-05-08
+
+### 新增
+
+- Agent 新增 `enable_share_values` 配置项，默认关闭。仅在显式开启后才会注入 `setShareValues` / `getShareValues` / `getAllShareValues` 三个 MCP 工具，避免无关 Agent 误污染共享上下文。
+- Agent 完成后跟随切换 ChatPanel：当前面板正显示刚完成的 Agent 时切到下一个；用户停留在当前 Flow 且 ChatDrawer 未打开时自动打开下一个；其余情况保持不变，靠通知引导。
+- `AskUserQuestionCard` 容器高度支持拖拽调整。
+
+### 优化
+
+- "允许直接启动"相关文案统一为 "无输入"，与 `no_input` 字段语义对齐。
+- 工具调用成功 / 失败图标由 outlined 改为 filled 实心，色块面积更大、区分度显著提升。
+- 消息通知改用 AntD `App.useApp()` 拿到 `message` / `notification` 上下文，确保通知样式与全局主题一致；强化通知触发条件，覆盖更多等待 / 完成场景。
+- Agent 系统提示词与默认工作流提示词措辞优化。
+- 多处嵌套三元 / `if-else` 改用 `ts-pattern` 的 `match` + `with` / `P.union` 重写。
+- Release 流程在打包前自动执行 `prettier --write` 格式化。
+- 聊天面板初始 / 流式输出过程中的滚动行为优化。
+
+### 修复
+
+- 修复 `ClaudeExecutor` 复用同一 MCP Server 实例导致中断后再次发送消息时，SDK 对同一 Server 重复 `connect` 抛出 `Already connected to a transport`、被 SDK `.catch` 静默吞错使 `AgentControllerMcp` 工具集体不可用的问题。改为每次 `createQuery` 前先 `close` 旧 mcpServer 再重建。
+- MCP 工具（`AgentComplete` / `setShareValues` / `getShareValues` / `getAllShareValues` / `validateFlow`）统一加 `withErrorBoundary` 兜底，失败返回 `isError` 而非静默崩溃，消除 `AgentComplete` 链路的隐性失败。
+- `ClaudeExecutor.onComplete` 调换执行顺序：先调 `events.onComplete` 再置 `completed`，避免上层抛错时后续 AI 重试被 `completed` 检查直接吞掉。
+- `FlowRunner.onAgentComplete` 包 `try/catch`，失败时 fire `error` signal 后 rethrow，不再吃异常。
+- `ClaudeExecutor.kill` 中 `mcpServer.close` 的空 `catch` 改为 `logError`，不再静默丢错。
+- 修复 OpenAI 兼容代理下流式 text 气泡不显示 / 顺序错乱：OpenAI 兼容代理把每个 content_block 单独打包为完整 assistant 消息并共享同一 `message.id`，原"按 mid 整段丢 partial"在 thinking 完成后会一并干掉仍在流式的 text partial。改为按 type 计数 + 在 `content_block_start` 处就地插入 streaming partial，对 Anthropic 原生 SDK 行为等价。
+- 修复 `AgentComplete` 调用后 executor 立刻 kill、`mcp_tool_result` 不会到达 webview 导致工具气泡永久 spin：当 `session.completed=true` 且工具名含 `AgentComplete` 时视为成功并显示绿勾图标。
+
 ## [0.0.6] - 2026-05-07
 
 ### 新增

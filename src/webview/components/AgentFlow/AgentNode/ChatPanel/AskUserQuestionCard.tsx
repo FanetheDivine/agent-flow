@@ -129,7 +129,9 @@ export const AskUserQuestionCard: FC<Props> = ({
       {questions.map((q, qIdx) => {
         const multi = !!q.multiSelect
         const isFreeTextAnswer = !isActive && freeTextQuestionIndices?.has(qIdx)
-        const freeTextValue = isFreeTextAnswer ? (answeredValues?.[q.question] ?? []).join(', ') : ''
+        const freeTextValue = isFreeTextAnswer
+          ? (answeredValues?.[q.question] ?? []).join(', ')
+          : ''
         const historical = !isFreeTextAnswer && !isActive ? getHistoricalDisplay(q) : null
         const value = isActive ? (selections[qIdx] ?? []) : historical!.values
         const otherSelected = value.includes(OTHER_LABEL)

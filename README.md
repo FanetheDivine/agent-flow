@@ -42,7 +42,8 @@ pnpm build-extension   # 生成 .vsix 文件
 - **框选 / 拖拽画布**：左键拖空白处框选节点，中键或右键拖拽平移画布。
 - **模型自由搭配**：每个 Agent 独立配置模型（opus / sonnet / haiku）与思考强度（effort）。
 - **无输入启动**：开启 `no_input` 的 Agent 在节点上显示启动按钮，点击后始终以"开始"为初始消息自动运行，无需手动输入。
-- **上下文隔离**：每个 Agent 有自己独立的对话上下文；跨 Agent 共享数据通过 `shareValues`（由 Agent 自己读写）。
+- **上下文隔离**：每个 Agent 有自己独立的对话上下文。
+- **跨 Agent 共享数据需显式开启**：`shareValues` 默认关闭，需要在 Agent 配置中勾选 `enable_share_values`，对应的 `setShareValues` / `getShareValues` / `getAllShareValues` 三个 MCP 工具才会注入到该 Agent，避免无关节点污染共享上下文。
 - **连线约束**：每个 output 最多连一条出边；`next_agent` 允许指向自身以支持循环。
 
 ### 2. 自由复制粘贴
