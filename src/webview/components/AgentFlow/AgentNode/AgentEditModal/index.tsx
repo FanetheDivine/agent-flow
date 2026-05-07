@@ -136,7 +136,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                 { label: 'sonnet', value: 'sonnet' },
                 { label: 'haiku', value: 'haiku' },
                 { label: 'gpt-5.4', value: 'gpt-5.4' },
-                { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
+                { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
                 { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
               ]}
               filterOption={(inputValue, option) =>
