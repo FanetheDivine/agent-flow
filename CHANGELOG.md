@@ -1,5 +1,31 @@
 # Change Log
 
+## [0.0.6] - 2026-05-07
+
+### 新增
+
+- Agent 配置项 `auto_start` 重命名为 `no_input`，语义更明确：开启后始终以"开始"为初始消息自动运行，忽略用户实际输入。
+- Pending `AskUserQuestion` 卡片改为固定在输入框上方，不随消息滚动，回答时无需回滚页面。
+- Agent 切换时智能打开 ChatDrawer：无打开时自动打开，目标 Agent 已打开时保持。
+- ChatPanel 初始加载时自动滚动到底部。
+
+### 优化
+
+- 聊天气泡与输入框字体、间距调整，提升可读性。
+- 工具调用摘要改为显示原始工具名 + 路径/内容，替代中文缩略描述。
+- 多选问题允许不选（空数组视为有效回答）。
+- 防止终态（completed / stopped / error）之后退回 awaiting 阶段。
+- 任一 session 完成后不再显示 loading 指示器。
+- 嵌套用户消息（parent_tool_use_id 非空）不再独立渲染。
+- 代码片段插入失败时直接在 VSCode 中打开目标文件并显示通知，替代旧的 insertSelectionFailed 事件。
+- AgentEditModal 键盘事件：非 Escape 键阻止冒泡，避免误触快捷键。
+- MiniMax 大小写修正。
+
+### 修复
+
+- MCP server 在 executor dispose 时正确关闭，避免资源泄漏。
+- 工具调用详情 summary 文本溢出处理（省略号截断）。
+
 ## [0.0.5] - 2026-05-07
 
 ### 新增

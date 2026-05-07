@@ -3,13 +3,14 @@
   "license": "MIT",
   "displayName": "agent-flow",
   "description": "可视化地编排 Agent 工作流",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "FanetheDivine",
   "repository": {
     "type": "git",
     "url": "https://github.com/FanetheDivine/agent-flow.git"
   },
   "icon": "resources/icon.png",
+  "packageManager": "pnpm@10.32.1",
   "engines": {
     "vscode": "^1.115.0"
   },
@@ -104,6 +105,11 @@
     "zustand": "^5.0.12"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "@vscode/vsce-sign",
+      "esbuild",
+      "keytar"
+    ],
     "supportedArchitectures": {
       "os": [
         "win32",
@@ -113,6 +119,10 @@
       "cpu": [
         "x64",
         "arm64"
+      ],
+      "libc": [
+        "glibc",
+        "musl"
       ]
     }
   },

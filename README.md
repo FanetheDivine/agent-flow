@@ -41,7 +41,7 @@ pnpm build-extension   # 生成 .vsix 文件
 
 - **框选 / 拖拽画布**：左键拖空白处框选节点，中键或右键拖拽平移画布。
 - **模型自由搭配**：每个 Agent 独立配置模型（opus / sonnet / haiku）与思考强度（effort）。
-- **允许直接启动**：开启 `auto_start` 的 Agent 在节点上显示启动按钮，一键运行无需手动输入初始消息。
+- **无输入启动**：开启 `no_input` 的 Agent 在节点上显示启动按钮，点击后始终以"开始"为初始消息自动运行，无需手动输入。
 - **上下文隔离**：每个 Agent 有自己独立的对话上下文；跨 Agent 共享数据通过 `shareValues`（由 Agent 自己读写）。
 - **连线约束**：每个 output 最多连一条出边；`next_agent` 允许指向自身以支持循环。
 
