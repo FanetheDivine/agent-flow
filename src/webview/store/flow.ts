@@ -342,6 +342,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                 // next_agent 存储的是 id，从 flow 定义中查找对应 agent
                 const flow = draft.flows.find((f) => f.id === flowId)
                 const currentAgent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
+                const completedAgentId = currentAgent?.id
                 const output = currentAgent?.outputs?.find(
                   (o) => o.output_name === data.output!.name,
                 )
@@ -351,8 +352,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                   fs.currentAgentId = nextAgentId
                   fs.currentAgentName = nextAgent?.agent_name
                   fs.phase = 'awaiting'
-                  // 智能打开 ChatDrawer：无打开时自动打开；目标 agent 已打开时保持；否则不改变（靠通知引导）
-                  if (!draft.chatDrawer) {
+                  // 自动跟随：当前 ChatDrawer 显示的是刚完成的 agent，或用户停留在当前 flow 且未打开任何 ChatDrawer，
+                  // 切到/打开下一个 agent 的 ChatPanel；其余情况（看着别的 agent、不在当前 flow）保持不变，靠通知引导
+                  const drawerForCompleted =
+                    draft.chatDrawer?.flowId === flowId &&
+                    draft.chatDrawer.agentId === completedAgentId
+                  const inThisFlowWithoutDrawer =
+                    !draft.chatDrawer && draft.activeFlowId === flowId
+                  if (drawerForCompleted || inThisFlowWithoutDrawer) {
                     draft.chatDrawer = {
                       flowId,
                       agentId: nextAgentId,
