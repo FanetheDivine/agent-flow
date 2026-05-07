@@ -3,13 +3,22 @@ import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from
 import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
+type NotifyUserHandler = (data: {
+  agentId: string
+  agentName: string
+  flowId: string
+  flowName: string
+  reason: string
+}) => void
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
   private postMessage: PostMessage
+  private notifyUser: NotifyUserHandler
 
-  constructor(postMessage: PostMessage) {
+  constructor(postMessage: PostMessage, notifyUser: NotifyUserHandler) {
     this.postMessage = postMessage
+    this.notifyUser = notifyUser
   }
 
   handleCommand(type: string, data: any): void {
@@ -19,8 +28,14 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow)
-        runner.listenAllSignals((type, data) => {
-          this.postMessage({ type, data: { ...data, flowId } } as ExtensionToWebviewMessage)
+        runner.listenAllSignals((eventType, signalData) => {
+          if (eventType === 'flow.signal.notifyUser') {
+            this.notifyUser(signalData as Parameters<NotifyUserHandler>[0])
+          }
+          this.postMessage({
+            type: eventType,
+            data: { ...signalData, flowId },
+          } as ExtensionToWebviewMessage)
         })
         this.runners.set(flowId, runner)
         runner.emit('flow.command.flowStart', { runKey, agentId, initMessage })

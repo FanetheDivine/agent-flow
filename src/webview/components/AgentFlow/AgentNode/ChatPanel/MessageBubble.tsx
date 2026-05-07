@@ -25,7 +25,8 @@ type Props = {
 
 export type AnsweredInfo = {
   values: Record<string, string[]>
-  byFreeText: boolean
+  /** 通过自由文本作答的 question 索引集合 */
+  freeTextQuestionIndices: Set<number>
 }
 
 export type BubbleCtx = {
@@ -301,99 +302,130 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max) + '...'
 }
 
-export function toBubbleItems(
+// ── 数据归一化层 ─────────────────────────────────────────────────────────
+// 把流式 + 完整消息混合的原始事件流，整理为按时序排列的"已完成数据项"。
+// 流式 partial 与完整 assistant 通过 message.id 配对：
+//   - 若 partial 对应的 assistant 已到达，则丢弃 partial（用 assistant 完整内容渲染）
+//   - 若没到达（中断 / 仍在流式中），则用 partial 累积的内容渲染
+
+type ToolResult = { isError: boolean; text: string }
+
+type RenderItem =
+  | { kind: 'user'; key: string; rawContent: unknown }
+  | { kind: 'text'; key: string; text: string; streaming: boolean }
+  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
+  | {
+      kind: 'tool_use'
+      key: string
+      toolUseId: string
+      toolName: string
+      input: unknown
+      result?: ToolResult
+    }
+  | {
+      kind: 'ask_user_question'
+      key: string
+      toolUseId: string
+      input: AskUserQuestionInput
+    }
+  | { kind: 'turn_end'; key: string; isError: boolean }
+  | {
+      kind: 'agent_complete'
+      key: string
+      outputName?: string
+      displayContent?: string
+    }
+
+type StreamingBlock = { type: 'text' | 'thinking'; content: string }
+type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
+
+function buildRenderItems(
   msgs: ExtensionToWebviewMessage[],
-  ctx?: BubbleCtx,
-  seenToolUseIds = new Set<string>(),
-): RenderedBubble[] {
-  const items: RenderedBubble[] = []
+  seenToolUseIds: Set<string>,
+): RenderItem[] {
+  // ── 第一遍：辅助索引 ───────────────────────────────────────────────────
+  const toolUseIdToResult = new Map<string, ToolResult>()
+  const completedMessageIds = new Set<string>()
+  const renderedAssistantTexts = new Set<string>()
+  const partialsByMessageId = new Map<string, PartialMessage>()
+  let currentPartialMsgId: string | null = null
 
-  // 预扫描：找到最后一个 result 消息和最后一个 assistant 消息的位置
-  // 这两者之前的 stream_event 均来自已完成的回合，其内容已在 assistant 消息中呈现
-  let lastResultIdx = -1
-  let lastAssistantIdx = -1
-  msgs.forEach((msg, idx) => {
-    if (msg.type === 'flow.signal.aiMessage') {
-      if (msg.data.message.type === 'result') lastResultIdx = idx
-      if (msg.data.message.type === 'assistant') lastAssistantIdx = idx
-    }
-  })
-
-  // 累积当前正在流式生成的内容：只取最后一个已完成消息之后的 stream_event
-  // 这些事件来自尚未产生完整 assistant 消息的当前回合
-  const streamCutoff = Math.max(lastResultIdx, lastAssistantIdx)
-  const streamingBlocks = new Map<number, { type: 'text' | 'thinking'; content: string }>()
-  msgs.forEach((msg, idx) => {
-    if (idx <= streamCutoff) return
+  msgs.forEach((msg, mIdx) => {
     if (msg.type !== 'flow.signal.aiMessage') return
     const { message } = msg.data
-    if (message.type !== 'stream_event') return
-    const event = message.event as any
-    if (event.type === 'content_block_start') {
-      const block = event.content_block
-      if (block?.type === 'thinking') {
-        streamingBlocks.set(event.index, { type: 'thinking', content: block.thinking ?? '' })
-      } else if (block?.type === 'text') {
-        streamingBlocks.set(event.index, { type: 'text', content: block.text ?? '' })
-      }
-    } else if (event.type === 'content_block_delta') {
-      const existing = streamingBlocks.get(event.index)
-      if (!existing) return
-      const delta = event.delta
-      if (delta?.type === 'thinking_delta') {
-        existing.content += delta.thinking
-      } else if (delta?.type === 'text_delta') {
-        existing.content += delta.text
-      }
-    }
-  })
 
-  // tool_use_id → tool_name 映射，用于在 tool_result 中显示工具名
-  const toolUseIdToName = new Map<string, string>()
-  // tool_use_id → tool_result 映射，用于将结果合并展示到工具调用中
-  const toolUseIdToResult = new Map<string, { isError: boolean; text: string }>()
-  msgs.forEach((msg) => {
-    if (msg.type !== 'flow.signal.aiMessage') return
-    const { message } = msg.data
     if (message.type === 'user') {
       const rawContent = message.message.content
-      if (Array.isArray(rawContent)) {
-        rawContent.forEach((block: any) => {
-          if (block?.type === 'tool_result' && block.tool_use_id) {
-            const text = extractToolResultText(block.content)
-            if (text) {
-              toolUseIdToResult.set(block.tool_use_id, {
-                isError: !!block.is_error,
-                text,
-              })
-            }
-          }
-        })
-      }
-    }
-    if (message.type === 'assistant') {
-      const blocks = message.message.content
-      if (!Array.isArray(blocks)) return
-      blocks.forEach((block: any) => {
-        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
+      if (!Array.isArray(rawContent)) return
+      rawContent.forEach((block: any) => {
+        if (block?.type === 'tool_result' && block.tool_use_id) {
           const text = extractToolResultText(block.content)
           if (text) {
-            toolUseIdToResult.set(block.tool_use_id, {
-              isError: !!block.is_error,
-              text,
-            })
+            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
           }
         }
       })
+      return
+    }
+
+    if (message.type === 'assistant') {
+      completedMessageIds.add(message.message.id)
+      const blocks = message.message.content
+      if (!Array.isArray(blocks)) return
+      blocks.forEach((block: any) => {
+        if (block?.type === 'text' && typeof block.text === 'string') {
+          renderedAssistantTexts.add(block.text)
+        }
+        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
+          const text = extractToolResultText(block.content)
+          if (text) {
+            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
+          }
+        }
+      })
+      return
+    }
+
+    if (message.type === 'stream_event') {
+      const event = message.event as any
+      if (event?.type === 'message_start') {
+        const id = event.message?.id
+        if (typeof id !== 'string') return
+        currentPartialMsgId = id
+        if (!partialsByMessageId.has(id)) {
+          partialsByMessageId.set(id, { mIdx, blocks: new Map() })
+        }
+        return
+      }
+      if (!currentPartialMsgId) return
+      const partial = partialsByMessageId.get(currentPartialMsgId)
+      if (!partial) return
+      if (event?.type === 'content_block_start') {
+        const cb = event.content_block
+        if (cb?.type === 'thinking') {
+          partial.blocks.set(event.index, { type: 'thinking', content: cb.thinking ?? '' })
+        } else if (cb?.type === 'text') {
+          partial.blocks.set(event.index, { type: 'text', content: cb.text ?? '' })
+        }
+      } else if (event?.type === 'content_block_delta') {
+        const existing = partial.blocks.get(event.index)
+        if (!existing) return
+        const delta = event.delta
+        if (delta?.type === 'thinking_delta') existing.content += delta.thinking
+        else if (delta?.type === 'text_delta') existing.content += delta.text
+      } else if (event?.type === 'message_stop') {
+        currentPartialMsgId = null
+      }
     }
   })
 
-  // 收集 assistant 消息中已渲染的文本，用于 agentComplete 去重
-  const renderedAssistantTexts = new Set<string>()
+  // ── 第二遍：按时序生成 RenderItem ──────────────────────────────────────
+  const items: RenderItem[] = []
 
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
       const { message } = msg.data
+
       if (message.type === 'user') {
         const rawContent = message.message.content
         // 含 tool_result 的 user message：结果已合并到 tool_use 展示中，跳过独立渲染
@@ -404,44 +436,21 @@ export function toBubbleItems(
           return
         }
         if (message.isSynthetic) return
-        const { copyText, node } = renderUserContent(rawContent)
-        items.push({
-          key: `${mIdx}-user`,
-          role: 'user',
-          content: <Copyable text={copyText}>{node}</Copyable>,
-        })
+        items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
         return
       }
+
       if (message.type === 'assistant') {
         const blocks = message.message.content
         if (!Array.isArray(blocks)) return
-        blocks.forEach((block, bIdx) => {
+        blocks.forEach((block: any, bIdx) => {
           const key = `${mIdx}-${bIdx}`
-          if (block.type === 'text') {
-            renderedAssistantTexts.add(block.text)
-            items.push({
-              key,
-              role: 'ai',
-              content: (
-                <Copyable text={block.text}>
-                  <Md content={block.text} />
-                </Copyable>
-              ),
-            })
+          if (block.type === 'text' && typeof block.text === 'string') {
+            items.push({ kind: 'text', key, text: block.text, streaming: false })
             return
           }
           if (block.type === 'thinking' && block.thinking) {
-            items.push({
-              key,
-              role: 'ai',
-              content: (
-                <Copyable text={block.thinking}>
-                  <Think title='思考中' defaultExpanded={false}>
-                    <Md content={block.thinking} />
-                  </Think>
-                </Copyable>
-              ),
-            })
+            items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
             return
           }
           if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
@@ -449,177 +458,260 @@ export function toBubbleItems(
             seenToolUseIds.add(block.id)
             const toolName =
               'server_name' in block ? `${block.server_name}::${block.name}` : block.name
-            toolUseIdToName.set(block.id, toolName)
-            if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && ctx) {
+            if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
               const input = block.input as AskUserQuestionInput | undefined
-              if (!input || !Array.isArray(input.questions)) return
-              const isPending = ctx.pendingToolUseId === block.id
-              const answered = ctx.answeredMap.get(block.id)
-              items.push({
-                key,
-                role: 'system',
-                content: isPending ? (
-                  <AskUserQuestionCard
-                    input={input}
-                    mode='active'
-                    onSubmit={(output) => ctx.onActiveSubmit?.(block.id, output)}
-                  />
-                ) : (
-                  <AskUserQuestionCard
-                    input={input}
-                    mode='historical'
-                    answeredValues={answered?.values}
-                    answeredByFreeText={answered?.byFreeText}
-                  />
-                ),
-              })
+              if (input && Array.isArray(input.questions)) {
+                items.push({ kind: 'ask_user_question', key, toolUseId: block.id, input })
+              }
               return
             }
-            if (ctx) {
-              const isPendingPerm = ctx.pendingToolPermissionToolUseId === block.id
-              const answeredPerm = ctx.answeredToolPermissions?.[block.id]
-              if (isPendingPerm || answeredPerm) {
-                items.push({
-                  key,
-                  role: 'system',
-                  content: (
-                    <ToolPermissionCard
-                      toolName={toolName}
-                      input={block.input}
-                      mode={isPendingPerm ? 'active' : 'historical'}
-                      answered={answeredPerm}
-                      onAllow={() => ctx.onToolPermissionAllow?.(block.id)}
-                      onDeny={() => ctx.onToolPermissionDeny?.(block.id)}
-                    />
-                  ),
-                })
-                return
-              }
-            }
-            const summary = getToolSummary(toolName, block.input)
             const result = toolUseIdToResult.get(block.id)
             items.push({
+              kind: 'tool_use',
               key,
-              role: 'ai',
-              content: (
-                <details className='text-[11px] text-[#a6adc8]'>
-                  <summary className='cursor-pointer'>
-                    {result ? (
-                      result.isError ? (
-                        <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
-                      ) : (
-                        <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
-                      )
-                    ) : (
-                      <Spin
-                        size='small'
-                        indicator={<LoadingOutlined className='text-[10px]!' />}
-                        className='mr-1'
-                      />
-                    )}
-                    {summary}
-                  </summary>
-                  {block.input &&
-                  typeof block.input === 'object' &&
-                  Object.keys(block.input as object).length > 0 ? (
-                    <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-                      {JSON.stringify(block.input, null, 2)}
-                    </pre>
-                  ) : null}
-                  {result && (
-                    <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-                      {result.text}
-                    </pre>
-                  )}
-                </details>
-              ),
+              toolUseId: block.id,
+              toolName,
+              input: block.input,
+              result,
             })
             return
           }
-          if ((block as any).type === 'mcp_tool_result') {
-            // 结果已合并到对应 tool_use 展示中，跳过独立渲染
-            return
+          // 其他 block（含 mcp_tool_result）：结果已合并到对应 tool_use，跳过
+        })
+        return
+      }
+
+      if (message.type === 'result') {
+        const isError = 'error' in message && !!message.error
+        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError })
+        return
+      }
+
+      if (message.type === 'stream_event') {
+        // 仅在 message_start 位置插入未完成 partial（按时序自然出现，
+        // 后续 content_block_* 事件不再产生新 item）
+        const event = message.event as any
+        if (event?.type !== 'message_start') return
+        const id = event.message?.id
+        if (typeof id !== 'string') return
+        if (completedMessageIds.has(id)) return // 已有完整 assistant，丢弃 partial
+        const partial = partialsByMessageId.get(id)
+        if (!partial) return
+        const sortedIndices = [...partial.blocks.keys()].sort((a, b) => a - b)
+        sortedIndices.forEach((blockIdx) => {
+          const block = partial.blocks.get(blockIdx)!
+          if (!block.content) return
+          const key = `${mIdx}-streaming-${blockIdx}`
+          if (block.type === 'text') {
+            items.push({ kind: 'text', key, text: block.content, streaming: true })
+          } else {
+            items.push({ kind: 'thinking', key, text: block.content, streaming: true })
           }
         })
         return
       }
-      if (message.type === 'result') {
-        const isError = 'error' in message && message.error
-        items.push({
-          key: `${mIdx}-result`,
-          role: 'divider',
-          content: (
-            <span className='text-[10px] text-[#6c7086]'>
-              <CheckCircleOutlined className={isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-              <span className='ml-1'>{isError ? '执行出错' : '回合结束'}</span>
-            </span>
-          ),
-        })
-        return
-      }
-      // stream_event / system / other — 流式内容在末尾统一渲染
       return
     }
 
     if (msg.type === 'flow.signal.agentComplete') {
-      // 如果 content 已在前面的 assistant 消息中渲染过，则不重复展示
-      const contentAlreadyShown = !!(
-        msg.data.content && renderedAssistantTexts.has(msg.data.content)
-      )
-      const displayContent = contentAlreadyShown ? undefined : msg.data.content
-      const completionText = [
-        msg.data.output ? `完成 → ${msg.data.output.name}` : '完成',
+      const data = msg.data
+      const contentAlreadyShown = !!(data.content && renderedAssistantTexts.has(data.content))
+      const displayContent = contentAlreadyShown ? undefined : data.content
+      items.push({
+        kind: 'agent_complete',
+        key: `${mIdx}-complete`,
+        outputName: data.output?.name,
         displayContent,
+      })
+    }
+  })
+
+  return items
+}
+
+// ── 渲染层 ───────────────────────────────────────────────────────────────
+// 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
+
+function renderToolUseDetails(
+  toolName: string,
+  input: unknown,
+  result: ToolResult | undefined,
+): ReactNode {
+  const summary = getToolSummary(toolName, input)
+  const hasInput =
+    !!input && typeof input === 'object' && Object.keys(input as object).length > 0
+  return (
+    <details className='text-[11px] text-[#a6adc8]'>
+      <summary className='cursor-pointer'>
+        {result ? (
+          result.isError ? (
+            <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+          ) : (
+            <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+          )
+        ) : (
+          <Spin
+            size='small'
+            indicator={<LoadingOutlined className='text-[10px]!' />}
+            className='mr-1'
+          />
+        )}
+        {summary}
+      </summary>
+      {hasInput ? (
+        <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      ) : null}
+      {result && (
+        <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
+          {result.text}
+        </pre>
+      )}
+    </details>
+  )
+}
+
+function renderItemToBubble(item: RenderItem, ctx?: BubbleCtx): RenderedBubble | null {
+  switch (item.kind) {
+    case 'user': {
+      const { copyText, node } = renderUserContent(item.rawContent)
+      return {
+        key: item.key,
+        role: 'user',
+        content: <Copyable text={copyText}>{node}</Copyable>,
+      }
+    }
+    case 'text': {
+      const md = <Md content={item.text} />
+      return {
+        key: item.key,
+        role: 'ai',
+        content: item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>,
+      }
+    }
+    case 'thinking': {
+      const inner = (
+        <Think title='思考中' defaultExpanded={item.streaming}>
+          <Md content={item.text} />
+        </Think>
+      )
+      return {
+        key: item.key,
+        role: 'ai',
+        content: item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>,
+      }
+    }
+    case 'ask_user_question': {
+      if (!ctx) {
+        // 无 ctx（单气泡调试场景）：降级为静态历史卡片
+        return {
+          key: item.key,
+          role: 'system',
+          content: <AskUserQuestionCard input={item.input} mode='historical' />,
+        }
+      }
+      const isPending = ctx.pendingToolUseId === item.toolUseId
+      const answered = ctx.answeredMap.get(item.toolUseId)
+      return {
+        key: item.key,
+        role: 'system',
+        content: isPending ? (
+          <AskUserQuestionCard
+            input={item.input}
+            mode='active'
+            onSubmit={(output) => ctx.onActiveSubmit?.(item.toolUseId, output)}
+          />
+        ) : (
+          <AskUserQuestionCard
+            input={item.input}
+            mode='historical'
+            answeredValues={answered?.values}
+            freeTextQuestionIndices={answered?.freeTextQuestionIndices}
+          />
+        ),
+      }
+    }
+    case 'tool_use': {
+      if (ctx) {
+        const isPendingPerm = ctx.pendingToolPermissionToolUseId === item.toolUseId
+        const answeredPerm = ctx.answeredToolPermissions?.[item.toolUseId]
+        if (isPendingPerm || answeredPerm) {
+          return {
+            key: item.key,
+            role: 'system',
+            content: (
+              <ToolPermissionCard
+                toolName={item.toolName}
+                input={item.input}
+                mode={isPendingPerm ? 'active' : 'historical'}
+                answered={answeredPerm}
+                onAllow={() => ctx.onToolPermissionAllow?.(item.toolUseId)}
+                onDeny={() => ctx.onToolPermissionDeny?.(item.toolUseId)}
+              />
+            ),
+          }
+        }
+      }
+      return {
+        key: item.key,
+        role: 'ai',
+        content: renderToolUseDetails(item.toolName, item.input, item.result),
+      }
+    }
+    case 'turn_end': {
+      return {
+        key: item.key,
+        role: 'divider',
+        content: (
+          <span className='text-[10px] text-[#6c7086]'>
+            <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
+            <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+          </span>
+        ),
+      }
+    }
+    case 'agent_complete': {
+      const completionText = [
+        item.outputName ? `完成 → ${item.outputName}` : '完成',
+        item.displayContent,
       ]
         .filter(Boolean)
         .join('\n')
-      items.push({
-        key: `${mIdx}-complete`,
+      return {
+        key: item.key,
         role: 'ai',
         content: (
           <Copyable text={completionText}>
             <div>
               <Tag color='green' className='m-0 text-[10px]'>
-                完成{msg.data.output ? ` → ${msg.data.output.name}` : ''}
+                完成{item.outputName ? ` → ${item.outputName}` : ''}
               </Tag>
-              {displayContent && (
+              {item.displayContent && (
                 <div className='mt-2'>
-                  <Md content={displayContent} />
+                  <Md content={item.displayContent} />
                 </div>
               )}
             </div>
           </Copyable>
         ),
-      })
-    }
-  })
-
-  // 渲染正在流式生成中的内容（来自 streamCutoff 之后、尚未产生完整 assistant 消息的当前回合）
-  const sortedIndices = [...streamingBlocks.keys()].sort((a, b) => a - b)
-  for (const index of sortedIndices) {
-    const block = streamingBlocks.get(index)!
-    if (!block.content) continue
-    const key = `streaming-${index}`
-    if (block.type === 'text') {
-      items.push({
-        key,
-        role: 'ai',
-        content: <Md content={block.content} />,
-      })
-    } else if (block.type === 'thinking') {
-      items.push({
-        key,
-        role: 'ai',
-        content: (
-          <Think title='思考中' defaultExpanded>
-            <Md content={block.content} />
-          </Think>
-        ),
-      })
+      }
     }
   }
+}
 
-  return items
+export function toBubbleItems(
+  msgs: ExtensionToWebviewMessage[],
+  ctx?: BubbleCtx,
+  seenToolUseIds = new Set<string>(),
+): RenderedBubble[] {
+  const renderItems = buildRenderItems(msgs, seenToolUseIds)
+  const out: RenderedBubble[] = []
+  for (const item of renderItems) {
+    const bubble = renderItemToBubble(item, ctx)
+    if (bubble) out.push(bubble)
+  }
+  return out
 }
 
 /**

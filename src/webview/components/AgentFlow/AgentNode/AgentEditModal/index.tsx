@@ -67,6 +67,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
         auto_complete: agent.auto_complete ?? true,
+        auto_start: agent.auto_start ?? false,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -180,15 +181,25 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           />
         </Form.Item>
 
-        <Form.Item
-          name='auto_complete'
-          label='自动完成'
-          tooltip='开启后 Agent 完成任务时直接调用 AgentComplete，无需先向用户确认'
-          valuePropName='checked'
-        >
-          <Switch />
-        </Form.Item>
+        <div className='flex gap-4'>
+          <Form.Item
+            name='auto_complete'
+            label='自动完成'
+            tooltip='开启后 Agent 完成任务时直接调用 AgentComplete，无需先向用户确认'
+            valuePropName='checked'
+          >
+            <Switch />
+          </Form.Item>
 
+          <Form.Item
+            name='auto_start'
+            label='允许直接启动'
+            tooltip='开启后节点操作区显示启动按钮，点击以"开始"为初始消息自动运行该 Agent'
+            valuePropName='checked'
+          >
+            <Switch />
+          </Form.Item>
+        </div>
         <Form.Item
           label={
             <span className='flex items-center gap-1 whitespace-nowrap'>

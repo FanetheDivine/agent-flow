@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react'
 import type { FC } from 'react'
 import { App, Badge, Tag, Tooltip, Typography } from 'antd'
-import { EditOutlined, MessageOutlined, RobotOutlined } from '@ant-design/icons'
+import { EditOutlined, MessageOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent } from '@/common'
 import { useFlowStore, selectAgentPhase, flowIsDestructiveReadOnly } from '@/webview/store/flow'
@@ -110,6 +110,28 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               <MessageOutlined className='text-xs text-[#a6adc8]' />
             </Badge>
           </span>
+          {agent?.auto_start && (
+            <Tooltip title='直接启动'>
+              <span
+                className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#52c41a]'
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const { runFlow, openChatDrawer } = useFlowStore.getState()
+                  openChatDrawer(flowId, agentId, agentName)
+                  runFlow(flowId, agentId, {
+                    type: 'user',
+                    message: {
+                      role: 'user',
+                      content: '开始',
+                    },
+                    parent_tool_use_id: null,
+                  })
+                }}
+              >
+                <PlayCircleOutlined />
+              </span>
+            </Tooltip>
+          )}
           <span
             className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
             onClick={(e) => {
