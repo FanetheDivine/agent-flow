@@ -311,7 +311,10 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             .with({ type: 'flow.signal.aiMessage' }, (m) => {
               const { message } = m.data
               if (message.type === 'result') {
-                fs.phase = 'awaiting'
+                // 不要在终态（completed / stopped / error）之后退回 awaiting
+                if (fs.phase !== 'completed' && fs.phase !== 'stopped' && fs.phase !== 'error') {
+                  fs.phase = 'awaiting'
+                }
                 return
               }
               if (fs.currentSessionId) {
@@ -348,6 +351,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                   fs.currentAgentId = nextAgentId
                   fs.currentAgentName = nextAgent?.agent_name
                   fs.phase = 'awaiting'
+                  // 智能打开 ChatDrawer：无打开时自动打开；目标 agent 已打开时保持；否则不改变（靠通知引导）
+                  if (!draft.chatDrawer) {
+                    draft.chatDrawer = {
+                      flowId,
+                      agentId: nextAgentId,
+                      agentName: nextAgent?.agent_name ?? '',
+                    }
+                  }
                   fs.sessions.push({
                     sessionId: data.output.newSessionId,
                     agentId: nextAgentId,
@@ -420,6 +431,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const { flows } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
+      const agent = flow.agents?.find((a) => a.id === agentId)
+      if (agent?.no_input) {
+        initMessage = {
+          type: 'user',
+          message: { role: 'user', content: '开始' },
+          parent_tool_use_id: null,
+        }
+      }
       const runKey = crypto.randomUUID()
       immerSet((draft) => {
         draft.flowStates[flowId] = {

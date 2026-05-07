@@ -17,6 +17,7 @@ import {
   type AgentPhase,
   type AgentSession,
 } from '@/webview/store/flow'
+import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ChatInput } from './ChatInput'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
@@ -248,6 +249,17 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
             loading={phase === 'running' || phase === 'starting'}
           />
         ))}
+
+      {/* Pending AskUserQuestion — 固定在输入框上方，不随消息滚动 */}
+      {showCard && pending && (
+        <div className='max-h-100 shrink-0 overflow-auto border-t border-[#45475a] px-3 py-2'>
+          <AskUserQuestionCard
+            input={pending.input}
+            mode='active'
+            onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
+          />
+        </div>
+      )}
 
       {/* Input (always shown; send button becomes cancel button during chatting) */}
       <ChatInput

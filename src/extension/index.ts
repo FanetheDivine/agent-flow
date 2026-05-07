@@ -192,11 +192,6 @@ export function activate(context: vscode.ExtensionContext) {
             // 文件不存在或无法打开时静默忽略
           }
         })
-        .with({ type: 'insertSelectionFailed' }, () => {
-          vscode.window.showInformationMessage(
-            '请先打开一个 Agent 的对话面板，再使用此快捷键插入代码片段。',
-          )
-        })
         .with({ type: P.string.startsWith('flow.command.') }, ({ type, data }) => {
           // 对 flowStart 特殊处理：注入 flow 定义
           if (type === 'flow.command.flowStart') {

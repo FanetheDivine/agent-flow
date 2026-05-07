@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { FC } from 'react'
 import { Divider } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons'
 import { Bubble } from '@ant-design/x'
-import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
+import type { BubbleItemType, BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import type { AgentSession } from '@/webview/store/flow'
 import { toBubbleItems, type BubbleCtx } from './MessageBubble'
 
@@ -29,6 +29,14 @@ const roleMap = {
 }
 
 export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
+  const bubbleRef = useRef<BubbleListRef>(null)
+  useEffect(() => {
+    const dom = bubbleRef.current?.nativeElement
+    if (!dom) return
+    dom.scroll({
+      top: dom.scrollHeight,
+    })
+  }, [])
   const items = useMemo<BubbleItemType[]>(() => {
     const result: BubbleItemType[] = []
     const seenToolUseIds = new Set<string>()
@@ -53,8 +61,10 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
     return result
   }, [sessions, ctx])
 
+  const hasAnySessionCompleted = sessions.some((s) => s.completed)
+
   const finalItems = useMemo<BubbleItemType[]>(() => {
-    if (!loading) return items
+    if (!loading || hasAnySessionCompleted) return items
     return [
       ...items,
       {
@@ -64,11 +74,12 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
         loading: true,
       },
     ]
-  }, [items, loading])
+  }, [items, loading, hasAnySessionCompleted])
 
   return (
     <Bubble.List
       autoScroll
+      ref={bubbleRef}
       role={roleMap}
       items={finalItems}
       className='chat-bubble-compact min-h-0 flex-1 overflow-y-auto px-3 py-2'

@@ -110,7 +110,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               <MessageOutlined className='text-xs text-[#a6adc8]' />
             </Badge>
           </span>
-          {agent?.auto_start && (
+          {agent?.no_input && (
             <Tooltip title='直接启动'>
               <span
                 className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#52c41a]'

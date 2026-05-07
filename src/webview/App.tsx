@@ -109,7 +109,14 @@ const useInsertSelection = () => {
         line,
       })
       if (!ok) {
-        postMessageToExtension({ type: 'insertSelectionFailed', data: undefined })
+        postMessageToExtension({
+          type: 'openFile',
+          data: { filename: filename ?? '', line },
+        })
+        notification.warning({
+          message: '请先打开一个 Agent 的对话面板，再使用此快捷键插入代码片段。',
+          duration: 3,
+        })
       }
     })
   }, [])

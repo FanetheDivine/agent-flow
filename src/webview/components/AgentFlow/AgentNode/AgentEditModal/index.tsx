@@ -67,7 +67,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
         auto_complete: agent.auto_complete ?? true,
-        auto_start: agent.auto_start ?? false,
+        no_input: agent.no_input ?? false,
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -95,7 +95,17 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       destroyOnHidden
       modalRender={(node) => <div onPaste={(e) => e.stopPropagation()}>{node}</div>}
     >
-      <Form form={form} layout='vertical' autoComplete='off'>
+      <Form
+        form={form}
+        layout='vertical'
+        autoComplete='off'
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key !== 'Escape') {
+            e.stopPropagation()
+          }
+        }}
+      >
         <Form.Item
           name='agent_name'
           label='Agent 名称'
@@ -136,7 +146,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                 { label: 'sonnet', value: 'sonnet' },
                 { label: 'haiku', value: 'haiku' },
                 { label: 'gpt-5.4', value: 'gpt-5.4' },
-                { label: 'Minimax-M2.7', value: 'Minimax-M2.7' },
+                { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
                 { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
               ]}
               filterOption={(inputValue, option) =>
@@ -192,9 +202,9 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           </Form.Item>
 
           <Form.Item
-            name='auto_start'
+            name='no_input'
             label='允许直接启动'
-            tooltip='开启后节点操作区显示启动按钮，点击以"开始"为初始消息自动运行该 Agent'
+            tooltip='开启后节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）'
             valuePropName='checked'
           >
             <Switch />
