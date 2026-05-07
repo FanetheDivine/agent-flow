@@ -309,6 +309,19 @@ export class FlowRunner {
   }
 
   private onAgentComplete(agent: Agent, result: ExecutorResult): void {
+    try {
+      this.doOnAgentComplete(agent, result)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logError(`[FlowRunner] onAgentComplete failed (agent=${agent.id}):`, err)
+      this.fire('flow.signal.error', { msg: `agent complete failed: ${msg}` })
+      this.updateAgentStatus('completed')
+      // 继续向上抛，让 MCP withErrorBoundary 也能把 isError 反馈给 AI
+      throw err
+    }
+  }
+
+  private doOnAgentComplete(agent: Agent, result: ExecutorResult): void {
     const { outputName, content } = result
     const runId = this.currentRunId!
     const sessionId = this.currentSessionId!

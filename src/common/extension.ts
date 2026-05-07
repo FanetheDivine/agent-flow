@@ -12,6 +12,29 @@ export type AgentMcpServerOptions = {
   onComplete: (output: { content: string; outputName?: string }) => void
 }
 
+type ToolContent = { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
+
+/**
+ * 统一兜底：handler 内部任何抛错都转成 isError 工具结果，
+ * 让 AI 收到明确的失败信号而不是把异常静默掉。
+ */
+function withErrorBoundary<TArgs>(
+  toolName: string,
+  handler: (args: TArgs) => Promise<ToolContent>,
+): (args: TArgs) => Promise<ToolContent> {
+  return async (args) => {
+    try {
+      return await handler(args)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return {
+        content: [{ type: 'text', text: `[${toolName}] 执行失败：${msg}` }],
+        isError: true,
+      }
+    }
+  }
+}
+
 /**
  * 构建 Agent 控制用 MCP Server
  *
@@ -46,12 +69,12 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
           output_name: z.enum(outputNames as [string, ...string[]]).describe('选择的输出分支名'),
           content: z.string().describe('输出任务结果，将传递给下一个 Agent 或作为最终结果'),
         },
-        async ({ output_name, content }) => {
+        withErrorBoundary('AgentComplete', async ({ output_name, content }) => {
           onComplete({ outputName: output_name, content })
           return {
             content: [{ type: 'text', text: `任务完成，输出分支：${output_name}` }],
           }
-        },
+        }),
       )
     : tool(
         'AgentComplete',
@@ -59,12 +82,12 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
         {
           content: z.string().describe('任务结果'),
         },
-        async ({ content }) => {
+        withErrorBoundary('AgentComplete', async ({ content }) => {
           onComplete({ content })
           return {
             content: [{ type: 'text', text: '任务完成，无后续输出。' }],
           }
-        },
+        }),
       )
 
   const setShareValuesTool = tool(
@@ -75,12 +98,12 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
         .record(z.string(), z.string())
         .describe('要写入的键值对，例如：{ "result": "foo", "status": "done" }'),
     },
-    async ({ values }) => {
+    withErrorBoundary('setShareValues', async ({ values }) => {
       Object.assign(shareValues, values)
       return {
         content: [{ type: 'text', text: '写入成功' }],
       }
-    },
+    }),
   )
 
   const getShareValuesTool = tool(
@@ -89,7 +112,7 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
     {
       keys: z.array(z.string()).describe('要读取的键名数组，例如：["result", "status"]'),
     },
-    async ({ keys }) => {
+    withErrorBoundary('getShareValues', async ({ keys }) => {
       const result: Record<string, string | null> = {}
       for (const key of keys) {
         result[key] = shareValues[key] ?? null
@@ -97,18 +120,18 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
       }
-    },
+    }),
   )
 
   const getAllShareValuesTool = tool(
     'getAllShareValues',
     '读取 Flow 全局共享上下文的全部键值对',
     {},
-    async () => {
+    withErrorBoundary('getAllShareValues', async () => {
       return {
         content: [{ type: 'text', text: JSON.stringify(shareValues) }],
       }
-    },
+    }),
   )
 
   const validateFlowTool = tool(
@@ -117,20 +140,8 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
     {
       flow: z.string().describe('工作流定义的 JSON 字符串，需符合 Flow 类型'),
     },
-    async ({ flow }) => {
-      let parsed
-      try {
-        parsed = FlowSchema.parse(JSON.parse(flow))
-      } catch (e) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `JSON 解析或格式校验失败：${e instanceof Error ? e.message : String(e)}`,
-            },
-          ],
-        }
-      }
+    withErrorBoundary('validateFlow', async ({ flow }) => {
+      const parsed = FlowSchema.parse(JSON.parse(flow))
       const result = validateFlow(parsed)
       const hasErrors = Object.keys(result).length > 0
       return {
@@ -143,7 +154,7 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
           },
         ],
       }
-    },
+    }),
   )
 
   return createSdkMcpServer({

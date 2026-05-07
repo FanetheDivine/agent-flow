@@ -16,6 +16,7 @@ import {
   UserMessageType,
 } from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
+import { logError } from '../../logger'
 
 export type ExecutorResult = {
   outputName?: string
@@ -94,9 +95,11 @@ export class ClaudeExecutor {
       onComplete: (result) => {
         // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
         // 旧 query 残存事件再次触发 onAgentComplete。
+        // 注意顺序：先调 events.onComplete，成功后才设 completed —— 否则
+        // 上层抛错时 completed 已为 true，AI 重试会被直接 return 静默吞掉。
         if (this.completed || this.disposed) return
-        this.completed = true
         events.onComplete(result)
+        this.completed = true
       },
     })
     this.createQuery(initMessage)
@@ -134,8 +137,8 @@ export class ClaudeExecutor {
     this.disposed = true
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
-    this.mcpServer.instance.close().catch(() => {
-      // close 失败通常是因为 executor 已被 dispose，忽略
+    this.mcpServer.instance.close().catch((err) => {
+      logError('[ClaudeExecutor] mcp server close failed:', err)
     })
   }
 
