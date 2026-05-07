@@ -1,5 +1,5 @@
 import { useEffect, type FC } from 'react'
-import { notification, Spin } from 'antd'
+import { App as AntdApp, Spin } from 'antd'
 import { useEventListener } from 'ahooks'
 import { z } from 'zod'
 import { FlowSchema } from '@/common'
@@ -11,9 +11,10 @@ import { postMessageToExtension, subscribeExtensionMessage } from './utils/Exten
 import { addReferenceToActiveInput } from './utils/activeInputRegistry'
 
 export const App: FC = () => {
+  const { notification } = AntdApp.useApp()
   const { loading, flows, init } = useFlowStore()
   const globalError = useFlowStore((s) => s.globalError)
-  useEffect(() => init(), [init])
+  useEffect(() => init({ notification }), [init, notification])
 
   useEffect(() => {
     if (!globalError) return
@@ -23,7 +24,7 @@ export const App: FC = () => {
       message: '拓展出现未知错误 请保存数据后重新打开页面',
       description: globalError,
     })
-  }, [globalError])
+  }, [globalError, notification])
   usePasteFlow()
   useInsertSelection()
 
@@ -97,6 +98,7 @@ const usePasteFlow = () => {
 }
 
 const useInsertSelection = () => {
+  const { notification } = AntdApp.useApp()
   useEffect(() => {
     return subscribeExtensionMessage((msg) => {
       if (msg.type !== 'insertSelection') return
@@ -119,5 +121,5 @@ const useInsertSelection = () => {
         })
       }
     })
-  }, [])
+  }, [notification])
 }

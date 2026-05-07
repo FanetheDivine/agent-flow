@@ -6,6 +6,7 @@ import type {
   PersistedData,
 } from '@/common'
 import { FlowRunnerManager } from './FlowRunnerManager'
+import type { NotifyUserHandler } from './FlowRunnerManager/FlowRunner'
 import { PersistedDataController } from './PersistedDataController'
 import { initLogger, log, logError } from './logger'
 
@@ -69,14 +70,6 @@ export function activate(context: vscode.ExtensionContext) {
   initLogger(context)
   let currentPanel: vscode.WebviewPanel | undefined
   let panelVisible = false
-  let windowFocused = vscode.window.state.focused
-
-  // 监听 VSCode 窗口焦点变化
-  context.subscriptions.push(
-    vscode.window.onDidChangeWindowState((state) => {
-      windowFocused = state.focused
-    }),
-  )
 
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     if (currentPanel) {
@@ -111,22 +104,20 @@ export function activate(context: vscode.ExtensionContext) {
       panel.webview.postMessage(msg)
     }
 
-    // notifyUser 回调：判断面板可见性，决定是否展示 VSCode 通知
-    const handleNotifyUser = (data: {
-      agentId: string
-      agentName: string
-      flowId: string
-      flowName: string
-      reason: string
-    }) => {
+    // notifyUser 回调：面板不可见或窗口失焦时弹 VSCode 通知
+    const handleNotifyUser: NotifyUserHandler = (data) => {
       const { agentId, agentName, flowId, flowName, reason } = data
 
       // 面板不存在 或 不可见（或 VSCode 窗口失去焦点）→ 弹出 VSCode 通知
-      if (!currentPanel || !panelVisible || !windowFocused) {
-        const msg =
-          reason === 'flow-completed'
-            ? `工作流「${flowName}」已完成`
-            : `Agent「${agentName}」正在等待你的回复`
+      if (!currentPanel || !panelVisible) {
+        const msg = match(reason)
+          .with('flow-completed', () => `工作流「${flowName}」已完成`)
+          .with('agent-error', () => `Agent「${agentName}」运行出错`)
+          .with(
+            P.union('awaiting-message', 'awaiting-question'),
+            () => `Agent「${agentName}」正在等待回复`,
+          )
+          .exhaustive()
         vscode.window.showInformationMessage(msg, '查看').then((choice) => {
           if (choice === '查看' && currentPanel) {
             currentPanel.reveal(undefined, true)
@@ -137,7 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
         })
       }
-      // 面板可见 → 不做任何事，由 Webview 端根据 ChatPanel 可见性决定是否通知
+      // 面板可见且窗口聚焦 → 不做任何事，由 Webview 端根据 ChatPanel 可见性决定是否通知
     }
 
     const runnerManager = new FlowRunnerManager(postMessageToWebview, handleNotifyUser)

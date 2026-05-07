@@ -1,7 +1,10 @@
-import { useCallback, useMemo, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import type { WheelEventHandler } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
+import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
+import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
 import {
@@ -93,7 +96,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   )
   const answeredQuestions = useFlowStore((s) => s.flowStates[flowId]?.answeredQuestions)
 
-  const canSend = agentCanSendMessage(phase)
   const canInterrupt = agentCanInterrupt(phase)
   const canInterruptFlow = flowCanInterrupt(flowPhase)
 
@@ -101,6 +103,9 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const [freeTextQuestionIndicesMap, setFreeTextQuestionIndicesMap] = useState<
     Record<string, number[]>
   >({})
+  // AskUserQuestionCard 容器高度,用户可上下拖动调整
+  const [cardHeight, setCardHeight] = useState(240)
+  const [dragging, setDragging] = useState(false)
   const answeredMap = useMemo(
     () => buildAnsweredMap(answeredQuestions ?? {}, freeTextQuestionIndicesMap),
     [answeredQuestions, freeTextQuestionIndicesMap],
@@ -145,6 +150,33 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     ],
   )
 
+  // 消息列表自动滚动控制：默认贴底,用户向上滚 >10px 后停止跟随
+  const messageListRef = useRef<BubbleListRef>(null)
+  const shouldScrollRef = useRef(true)
+
+  const handleListWheel = useCallback<WheelEventHandler<HTMLDivElement>>((e) => {
+    if (e.deltaY < -10) shouldScrollRef.current = false
+  }, [])
+
+  // 切换 agent 时
+  useEffect(() => {
+    shouldScrollRef.current = true
+    // const id = requestAnimationFrame(() => conso
+  }, [flowId, agentId])
+
+  // 新消息到达时按需滚到底
+  useEffect(() => {
+    setTimeout(() => {
+      const dom = messageListRef.current?.scrollBoxNativeElement
+      if (shouldScrollRef.current && dom) {
+        dom.scroll({
+          top: dom.scrollHeight,
+          behavior: 'smooth',
+        })
+      }
+    }, 0)
+  }, [sessions])
+
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
     { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }
@@ -165,6 +197,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const handleSend = (
     content: UserMessageType['message']['content'],
   ): boolean | Promise<boolean> => {
+    shouldScrollRef.current = true
     if (pending) {
       const text = contentToPlainText(content)
       const { output, questionIndices } = freeTextToOutput(pending.input.questions, text)
@@ -216,6 +249,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
           type='text'
           icon={<CloseOutlined />}
           onClick={onClose}
+          className='ml-auto'
           style={{ color: '#6c7086' }}
         />
       </div>
@@ -244,22 +278,53 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
         .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
         .otherwise(() => (
           <MessageList
+            ref={messageListRef}
             sessions={sessions}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
+            onWheel={handleListWheel}
           />
         ))}
 
-      {/* Pending AskUserQuestion — 固定在输入框上方，不随消息滚动 */}
-      {showCard && pending && (
-        <div className='max-h-100 shrink-0 overflow-auto border-t border-[#45475a] px-3 py-2'>
-          <AskUserQuestionCard
-            input={pending.input}
-            mode='active'
-            onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
-          />
-        </div>
-      )}
+      {/* Pending AskUserQuestion — 固定在输入框上方,不随消息滚动;顶部 handle 可上下拖动调整高度 */}
+      <AnimatePresence>
+        {showCard && pending && (
+          <motion.div
+            key='ask-card'
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: cardHeight, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={
+              dragging ? { duration: 0 } : { type: 'spring', damping: 24, stiffness: 240 }
+            }
+            className='flex shrink-0 flex-col overflow-hidden border-t border-[#45475a]'
+          >
+            <motion.div
+              drag='y'
+              dragMomentum={false}
+              dragElastic={0}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              onDragStart={() => setDragging(true)}
+              onDrag={(_, info) => {
+                setCardHeight((h) => Math.max(80, Math.min(600, h - info.delta.y)))
+              }}
+              onDragEnd={() => setDragging(false)}
+              whileHover={{ backgroundColor: '#585b70' }}
+              whileDrag={{ backgroundColor: '#74758a' }}
+              className='flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-[#313244]'
+            >
+              <div className='h-0.5 w-8 rounded-full bg-[#6c7086]' />
+            </motion.div>
+            <div className='flex-1 overflow-auto px-3 py-2'>
+              <AskUserQuestionCard
+                input={pending.input}
+                mode='active'
+                onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Input (always shown; send button becomes cancel button during chatting) */}
       <ChatInput

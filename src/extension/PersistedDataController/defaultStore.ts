@@ -72,6 +72,7 @@ const PresetFlows: Flow[] = [
         model: 'opus',
         effort: 'high',
         agent_name: '工作流设计',
+        enable_share_values: true,
         agent_prompt: [
           '【你的产物】一份严格符合 FlowSchema 的 Flow JSON 字符串。其中的每个Agent都默认允许所有工具，允许自动完成。',
           '',
@@ -98,7 +99,8 @@ const PresetFlows: Flow[] = [
           '     * 覆盖主要结果路径（成功/失败/异常）；失败时按语义决定回退、重试或终止',
           '',
           '【跨 Agent 数据传递】',
-          ' - 用 shareValues（getShareValues / setShareValues）传递中间状态',
+          ' - enable_share_values :true 的Agent可以使用shareValues（getShareValues / setShareValues）传递中间状态',
+          ' - 不要滥用 shareValues。大部分数据都是在相邻Agent间直接传递的，只有数据产出和使用的位置不相邻时才使用shareValuse',
           ' - **不要**把用户数据硬编码进 prompt',
           '',
           '【设计原则】',
@@ -261,6 +263,7 @@ const PresetFlows: Flow[] = [
         effort: 'low',
         auto_allowed_tools: true,
         auto_complete: true,
+        enable_share_values: true,
         agent_prompt: [
           '职责：清理临时资源。',
           '',

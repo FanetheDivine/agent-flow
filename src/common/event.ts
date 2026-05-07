@@ -126,16 +126,6 @@ type FlowSignalPayload = {
     toolName: string
     input: unknown
   }
-  /** 通知用户：Agent 进入 awaiting 状态或 Flow 完成时触发，用于 Webview 和 Extension 端展示通知 */
-  notifyUser: {
-    runId: string
-    agentId: string
-    agentName: string
-    flowId: string
-    flowName: string
-    /** 触发原因 */
-    reason: 'awaiting-message' | 'awaiting-question' | 'flow-completed'
-  }
   /** 从 VSCode 通知栏点击后，聚焦到指定 Flow 和 ChatPanel */
   focusFlow: { flowId: string; agentId: string }
 }

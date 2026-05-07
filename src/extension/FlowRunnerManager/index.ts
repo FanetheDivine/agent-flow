@@ -1,15 +1,8 @@
 import { match } from 'ts-pattern'
 import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from '@/common'
-import { FlowRunner } from './FlowRunner'
+import { FlowRunner, type NotifyUserHandler } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
-type NotifyUserHandler = (data: {
-  agentId: string
-  agentName: string
-  flowId: string
-  flowName: string
-  reason: string
-}) => void
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
@@ -27,11 +20,8 @@ export class FlowRunnerManager {
         const { flowId, runKey, agentId, flow, initMessage } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
-        const runner = new FlowRunner(flow)
+        const runner = new FlowRunner(flow, this.notifyUser)
         runner.listenAllSignals((eventType, signalData) => {
-          if (eventType === 'flow.signal.notifyUser') {
-            this.notifyUser(signalData as Parameters<NotifyUserHandler>[0])
-          }
           this.postMessage({
             type: eventType,
             data: { ...signalData, flowId },

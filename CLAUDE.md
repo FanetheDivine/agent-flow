@@ -101,6 +101,8 @@ pnpm format         # prettier --write .
 
 其他高频依赖：`ts-pattern`（穷尽匹配）、`zod`（schema 同时产出 TS 类型）、`immer` + `zustand`（webview 状态）、`ahooks`（React hooks）。
 
+**优先用 `ts-pattern` 的 `match` / `P` 代替嵌套三元、冗长 `if/else` / `switch`**：对判别联合、枚举字面量、多值共享分支（`P.union(...)`）等场景，用 `.with(...)` + `.exhaustive()` 写，让新增分支时编译器强制补全。不要为了"少一层调用"保留 `a === 'x' ? ... : a === 'y' ? ... : ...` 这种嵌套三元。
+
 ## 易踩坑
 
 - **next_agent 是 id 不是 name**：复制 Agent 节点时（[useFlowStore.copyAgents](src/webview/store/flow.ts#L556)）必须重新生成 id 并通过 `idMap` 重映射 `next_agent` 引用
