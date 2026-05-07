@@ -203,7 +203,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
 
           <Form.Item
             name='no_input'
-            label='允许直接启动'
+            label='无输入'
             tooltip='开启后节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）'
             valuePropName='checked'
           >
