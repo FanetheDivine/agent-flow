@@ -311,7 +311,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             .with({ type: 'flow.signal.aiMessage' }, (m) => {
               const { message } = m.data
               if (message.type === 'result') {
-                fs.phase = 'awaiting'
+                // 不要在终态（completed / stopped / error）之后退回 awaiting
+                if (
+                  fs.phase !== 'completed' &&
+                  fs.phase !== 'stopped' &&
+                  fs.phase !== 'error'
+                ) {
+                  fs.phase = 'awaiting'
+                }
                 return
               }
               if (fs.currentSessionId) {
