@@ -292,8 +292,6 @@ function getToolSummary(toolName: string, input: any): string {
   }
 }
 
-
-
 // ── 数据归一化层 ─────────────────────────────────────────────────────────
 // 把流式 + 完整消息混合的原始事件流，整理为按时序排列的"已完成数据项"。
 // 流式 partial 与完整 assistant 通过 message.id 配对：
@@ -337,7 +335,10 @@ function buildRenderItems(
 ): RenderItem[] {
   // ── 第一遍：辅助索引 ───────────────────────────────────────────────────
   const toolUseIdToResult = new Map<string, ToolResult>()
-  const completedMessageIds = new Set<string>()
+  // 同一条 message.id 可能被分多条 assistant 消息发出（OpenAI 兼容代理常见，
+  // 每个 content_block 单独打一条 assistant），所以不能整 mid 丢 partial，
+  // 改为按 type 计数：每出现一份完整 assistant 中的 thinking/text，就消耗一份 partial。
+  const completedBlockCounts = new Map<string, { thinking: number; text: number }>()
   const renderedAssistantTexts = new Set<string>()
   const partialsByMessageId = new Map<string, PartialMessage>()
   let currentPartialMsgId: string | null = null
@@ -361,12 +362,17 @@ function buildRenderItems(
     }
 
     if (message.type === 'assistant') {
-      completedMessageIds.add(message.message.id)
+      const mid = message.message.id
       const blocks = message.message.content
       if (!Array.isArray(blocks)) return
+      const counts = completedBlockCounts.get(mid) ?? { thinking: 0, text: 0 }
       blocks.forEach((block: any) => {
         if (block?.type === 'text' && typeof block.text === 'string') {
           renderedAssistantTexts.add(block.text)
+          counts.text += 1
+        }
+        if (block?.type === 'thinking') {
+          counts.thinking += 1
         }
         if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
           const text = extractToolResultText(block.content)
@@ -375,6 +381,7 @@ function buildRenderItems(
           }
         }
       })
+      completedBlockCounts.set(mid, counts)
       return
     }
 
@@ -413,6 +420,11 @@ function buildRenderItems(
 
   // ── 第二遍：按时序生成 RenderItem ──────────────────────────────────────
   const items: RenderItem[] = []
+  // 跟踪当前流式所属的 message.id，以便在 content_block_start 位置就地渲染
+  let currentRenderingPartialMsgId: string | null = null
+  // 每个 mid 已经"看到"过的 partial block 计数，按 type 累加。配合 completedBlockCounts
+  // 决定当前 content_block_start 是否对应一个尚未被完整 assistant 渲染的流式块。
+  const partialBlockSeen = new Map<string, { thinking: number; text: number }>()
 
   msgs.forEach((msg, mIdx) => {
     if (msg.type === 'flow.signal.aiMessage') {
@@ -483,26 +495,46 @@ function buildRenderItems(
       }
 
       if (message.type === 'stream_event') {
-        // 仅在 message_start 位置插入未完成 partial（按时序自然出现，
-        // 后续 content_block_* 事件不再产生新 item）
+        // 在每个 content_block_start 位置就地渲染流式 partial（按时序自然出现）。
+        // OpenAI 兼容代理把每个 block 单独打成完整 assistant，必须按时序插入，
+        // 否则流式中的下一个 block 会跑到已完整 block 之前。
         const event = message.event as any
-        if (event?.type !== 'message_start') return
-        const id = event.message?.id
-        if (typeof id !== 'string') return
-        if (completedMessageIds.has(id)) return // 已有完整 assistant，丢弃 partial
-        const partial = partialsByMessageId.get(id)
+        if (event?.type === 'message_start') {
+          const id = event.message?.id
+          if (typeof id === 'string') currentRenderingPartialMsgId = id
+          return
+        }
+        if (event?.type === 'message_stop') {
+          currentRenderingPartialMsgId = null
+          return
+        }
+        if (event?.type !== 'content_block_start') return
+        if (!currentRenderingPartialMsgId) return
+        const partial = partialsByMessageId.get(currentRenderingPartialMsgId)
         if (!partial) return
-        const sortedIndices = [...partial.blocks.keys()].sort((a, b) => a - b)
-        sortedIndices.forEach((blockIdx) => {
-          const block = partial.blocks.get(blockIdx)!
-          if (!block.content) return
-          const key = `${mIdx}-streaming-${blockIdx}`
-          if (block.type === 'text') {
-            items.push({ kind: 'text', key, text: block.content, streaming: true })
-          } else {
-            items.push({ kind: 'thinking', key, text: block.content, streaming: true })
-          }
-        })
+        const cbType = event.content_block?.type
+        const blockType: 'text' | 'thinking' | null =
+          cbType === 'text' ? 'text' : cbType === 'thinking' ? 'thinking' : null
+        if (!blockType) return
+        const seen = partialBlockSeen.get(currentRenderingPartialMsgId) ?? {
+          thinking: 0,
+          text: 0,
+        }
+        seen[blockType] += 1
+        partialBlockSeen.set(currentRenderingPartialMsgId, seen)
+        // 当前 partial block 是该 mid 第几个该 type 的 block；如果完整 assistant
+        // 已经发过对应序号的 block，则跳过流式版本（让完整版本独立渲染）。
+        const completed =
+          completedBlockCounts.get(currentRenderingPartialMsgId) ?? { thinking: 0, text: 0 }
+        if (seen[blockType] <= completed[blockType]) return
+        const block = partial.blocks.get(event.index)
+        if (!block || !block.content) return
+        const key = `${mIdx}-streaming-${event.index}`
+        if (block.type === 'text') {
+          items.push({ kind: 'text', key, text: block.content, streaming: true })
+        } else {
+          items.push({ kind: 'thinking', key, text: block.content, streaming: true })
+        }
         return
       }
       return
@@ -536,8 +568,7 @@ function renderToolUseDetails(
   treatNoResultAsSuccess = false,
 ): ReactNode {
   const summary = getToolSummary(toolName, input)
-  const hasInput =
-    !!input && typeof input === 'object' && Object.keys(input as object).length > 0
+  const hasInput = !!input && typeof input === 'object' && Object.keys(input as object).length > 0
   return (
     <details className='text-[11px] text-[#a6adc8]'>
       <summary className='cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap'>
