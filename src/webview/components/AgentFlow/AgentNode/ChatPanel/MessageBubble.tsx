@@ -427,6 +427,9 @@ function buildRenderItems(
           return
         }
         if (message.isSynthetic) return
+        // parent_tool_use_id 非空 = 嵌套在某个 tool_use 内部（子 Agent 调用、工具结果等），
+        // 不是用户的真实输入，跳过独立渲染
+        if (message.parent_tool_use_id) return
         items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
         return
       }
