@@ -1,5 +1,27 @@
 # Change Log
 
+## [0.0.5] - 2026-05-07
+
+### 新增
+
+- Agent 新增 `auto_start`（允许直接启动）配置：开启后节点操作区显示启动按钮，点击以"开始"为初始消息自动运行该 Agent，无需打开聊天面板手动输入。
+- Agent 等待用户回复（awaiting-message / awaiting-question）或 Flow 完成时，若插件面板不可见或窗口失焦，自动弹出 VSCode 系统通知；点击通知可跳转回对应 Agent 的聊天面板。
+- 新增 `flow.signal.notifyUser` 和 `flow.signal.focusFlow` 事件契约，支持 Extension ↔ Webview 双端通知联动。
+- 默认 `AI 对话` 工作流拆分为三个独立 Agent（glm-5.1 / opus / sonnet），方便按需选择模型。
+- AntD `ConfigProvider` 启用 `darkAlgorithm`，与插件整体暗色风格统一。
+
+### 优化
+
+- 消息气泡渲染逻辑重构：`toBubbleItems` 拆分为数据归一化层（`buildRenderItems`）与渲染层（`renderItemToBubble`），流式 partial 与完整 assistant 消息通过 `message.id` 精确配对，消除位置过滤带来的时序问题。
+- `AskUserQuestion` 自由文本作答改为按 question 索引追踪，历史态可精确区分哪些问题通过选项回答、哪些通过自由文本回答，标签显示"含自由文本回答"并正确展示内容。
+- `maxTurns` 从 100 提升到 1000，支持更长的 Agent 交互。
+- 聊天输入框在 `awaiting-question` 状态下显示 loading 动画，提示用户 AI 正在等待回答。
+- 画布 `hidden` 时禁止 Delete 键删除节点，避免在不可见状态下误操作。
+
+### 修复
+
+- 修复 Agent 中断后 `result` 消息仍触发 `onAwaitingUser` 的问题：新增 `interrupted` 标记，中断后跳过随之而来的 result 消息。
+
 ## [0.0.4] - 2026-05-05
 
 ### 新增
