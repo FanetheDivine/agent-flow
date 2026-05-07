@@ -216,6 +216,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
           type='text'
           icon={<CloseOutlined />}
           onClick={onClose}
+          className='ml-auto'
           style={{ color: '#6c7086' }}
         />
       </div>
