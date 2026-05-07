@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type FC } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
+import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
 import {
@@ -101,6 +102,9 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const [freeTextQuestionIndicesMap, setFreeTextQuestionIndicesMap] = useState<
     Record<string, number[]>
   >({})
+  // AskUserQuestionCard 容器高度,用户可上下拖动调整
+  const [cardHeight, setCardHeight] = useState(240)
+  const [dragging, setDragging] = useState(false)
   const answeredMap = useMemo(
     () => buildAnsweredMap(answeredQuestions ?? {}, freeTextQuestionIndicesMap),
     [answeredQuestions, freeTextQuestionIndicesMap],
@@ -251,16 +255,45 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
           />
         ))}
 
-      {/* Pending AskUserQuestion — 固定在输入框上方，不随消息滚动 */}
-      {showCard && pending && (
-        <div className='max-h-100 shrink-0 overflow-auto border-t border-[#45475a] px-3 py-2'>
-          <AskUserQuestionCard
-            input={pending.input}
-            mode='active'
-            onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
-          />
-        </div>
-      )}
+      {/* Pending AskUserQuestion — 固定在输入框上方,不随消息滚动;顶部 handle 可上下拖动调整高度 */}
+      <AnimatePresence>
+        {showCard && pending && (
+          <motion.div
+            key='ask-card'
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: cardHeight, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={
+              dragging ? { duration: 0 } : { type: 'spring', damping: 24, stiffness: 240 }
+            }
+            className='flex shrink-0 flex-col overflow-hidden border-t border-[#45475a]'
+          >
+            <motion.div
+              drag='y'
+              dragMomentum={false}
+              dragElastic={0}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              onDragStart={() => setDragging(true)}
+              onDrag={(_, info) => {
+                setCardHeight((h) => Math.max(80, Math.min(600, h - info.delta.y)))
+              }}
+              onDragEnd={() => setDragging(false)}
+              whileHover={{ backgroundColor: '#585b70' }}
+              whileDrag={{ backgroundColor: '#74758a' }}
+              className='flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-[#313244]'
+            >
+              <div className='h-0.5 w-8 rounded-full bg-[#6c7086]' />
+            </motion.div>
+            <div className='flex-1 overflow-auto px-3 py-2'>
+              <AskUserQuestionCard
+                input={pending.input}
+                mode='active'
+                onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Input (always shown; send button becomes cancel button during chatting) */}
       <ChatInput
