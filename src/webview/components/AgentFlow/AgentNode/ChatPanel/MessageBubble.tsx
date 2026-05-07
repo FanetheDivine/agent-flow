@@ -267,40 +267,31 @@ function getToolSummary(toolName: string, input: any): string {
   const name = toolName.replace(/^mcp__\w+__/, '')
   switch (name) {
     case 'Read':
-      return input.file_path ? `读取 ${shortenPath(input.file_path)}` : name
+      return input.file_path ? `${name} ${input.file_path}` : name
     case 'Write':
-      return input.file_path ? `写入 ${shortenPath(input.file_path)}` : name
+      return input.file_path ? `${name} ${input.file_path}` : name
     case 'Edit':
-      return input.file_path ? `编辑 ${shortenPath(input.file_path)}` : name
+      return input.file_path ? `${name} ${input.file_path}` : name
     case 'Bash':
-      return input.command ? `执行 ${truncate(input.command, 60)}` : name
+      return input.command ? `${name} ${input.command}` : name
     case 'Grep':
-      return input.pattern ? `搜索 ${truncate(input.pattern, 40)}` : name
+      return input.pattern ? `${name} ${input.pattern}` : name
     case 'Glob':
-      return input.pattern ? `查找 ${truncate(input.pattern, 40)}` : name
+      return input.pattern ? `${name} ${input.pattern}` : name
     case 'WebFetch':
-      return input.url ? `获取 ${truncate(input.url, 50)}` : name
+      return input.url ? `${name} ${input.url}` : name
     case 'WebSearch':
-      return input.query ? `搜索 ${truncate(input.query, 40)}` : name
+      return input.query ? `${name} ${input.query}` : name
     case 'Agent':
-      return input.description ? `子任务: ${truncate(input.description, 40)}` : name
+      return input.description ? `${name} ${input.description}` : name
     case 'TodoWrite':
-      return '更新任务列表'
+      return name
     default:
       return name
   }
 }
 
-function shortenPath(p: string): string {
-  const parts = p.replace(/\\/g, '/').split('/')
-  if (parts.length <= 3) return parts.join('/')
-  return `.../${parts.slice(-2).join('/')}`
-}
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s
-  return s.slice(0, max) + '...'
-}
 
 // ── 数据归一化层 ─────────────────────────────────────────────────────────
 // 把流式 + 完整消息混合的原始事件流，整理为按时序排列的"已完成数据项"。
@@ -542,7 +533,7 @@ function renderToolUseDetails(
     !!input && typeof input === 'object' && Object.keys(input as object).length > 0
   return (
     <details className='text-[11px] text-[#a6adc8]'>
-      <summary className='cursor-pointer'>
+      <summary className='cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap'>
         {result ? (
           result.isError ? (
             <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
