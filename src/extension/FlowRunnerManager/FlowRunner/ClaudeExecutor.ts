@@ -52,8 +52,9 @@ export type ExecutorEvents = {
  */
 export class ClaudeExecutor {
   private readonly agent: Agent
+  private readonly shareValues: Record<string, string>
   private readonly prompt: string
-  private readonly mcpServer: ReturnType<typeof buildAgentMcpServer>
+  private mcpServer: ReturnType<typeof buildAgentMcpServer> | null = null
   private readonly userInputStream: ReturnType<typeof createMessageChannel<SDKUserMessage>>
 
   private queryInstance: Query | null = null
@@ -86,22 +87,10 @@ export class ClaudeExecutor {
     events: ExecutorEvents,
   ) {
     this.agent = agent
+    this.shareValues = shareValues
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     this.prompt = buildAgentSystemPrompt(agent)
-    this.mcpServer = buildAgentMcpServer({
-      agent,
-      shareValues,
-      onComplete: (result) => {
-        // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
-        // 旧 query 残存事件再次触发 onAgentComplete。
-        // 注意顺序：先调 events.onComplete，成功后才设 completed —— 否则
-        // 上层抛错时 completed 已为 true，AI 重试会被直接 return 静默吞掉。
-        if (this.completed || this.disposed) return
-        events.onComplete(result)
-        this.completed = true
-      },
-    })
     this.createQuery(initMessage)
   }
 
@@ -137,9 +126,10 @@ export class ClaudeExecutor {
     this.disposed = true
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
-    this.mcpServer.instance.close().catch((err) => {
+    this.mcpServer?.instance.close().catch((err) => {
       logError('[ClaudeExecutor] mcp server close failed:', err)
     })
+    this.mcpServer = null
   }
 
   /**
@@ -225,6 +215,31 @@ export class ClaudeExecutor {
 
   private async createQuery(message: UserMessageType) {
     this.interrupted = false
+    // 同一个 MCP Server 实例不能被 connect 两次（@modelcontextprotocol/sdk
+    // Protocol.connect 在 _transport 已存在时直接 throw 'Already connected
+    // to a transport'，SDK 把异常吞进 .catch 后只打日志，导致 system message
+    // 中 MCP status=failed、AgentControllerMcp 工具集体失效）。
+    // 所以每次 createQuery 都释放旧 server 并 build 新的。
+    if (this.mcpServer) {
+      try {
+        await this.mcpServer.instance.close()
+      } catch (err) {
+        logError('[ClaudeExecutor] previous mcp server close failed:', err)
+      }
+    }
+    this.mcpServer = buildAgentMcpServer({
+      agent: this.agent,
+      shareValues: this.shareValues,
+      onComplete: (result) => {
+        // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
+        // 旧 query 残存事件再次触发 onAgentComplete。
+        // 注意顺序：先调 events.onComplete，成功后才设 completed —— 否则
+        // 上层抛错时 completed 已为 true，AI 重试会被直接 return 静默吞掉。
+        if (this.completed || this.disposed) return
+        this.events.onComplete(result)
+        this.completed = true
+      },
+    })
     const options: Options = {
       maxTurns: 1000,
       model: this.agent.model,
