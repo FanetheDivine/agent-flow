@@ -31,6 +31,12 @@ export type ExecutorEvents = {
   onComplete: (result: ExecutorResult) => void
   /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
   onToolPermissionRequest: (req: { toolUseId: string; toolName: string; input: unknown }) => void
+  /**
+   * Agent 进入等待用户状态（非 interrupt 触发）：
+   * - awaiting-question: 调用了 AskUserQuestion 工具
+   * - awaiting-message: turn 结束（result 消息）但未 AgentComplete
+   */
+  onAwaitingUser: (reason: 'awaiting-question' | 'awaiting-message') => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -52,6 +58,8 @@ export class ClaudeExecutor {
   private queryInstance: Query | null = null
   private completed = false
   private disposed = false
+  /** 标记当前 turn 是由中断结束的，跳过随之而来的 result 消息对 onAwaitingUser 的触发 */
+  private interrupted = false
 
   private sessionId: string | null = null
   private events: ExecutorEvents
@@ -115,6 +123,7 @@ export class ClaudeExecutor {
    */
   async interrupt() {
     if (!this.queryInstance) return
+    this.interrupted = true
     this.rejectAllPendingPermissions('interrupted')
     await this.queryInstance.interrupt()
     this.queryInstance = null
@@ -173,6 +182,7 @@ export class ClaudeExecutor {
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
     if (toolName === 'AskUserQuestion') {
+      this.events.onAwaitingUser('awaiting-question')
       // 挂起，等待 answerQuestion() 被调用
       return new Promise<PermissionResult>((resolve) => {
         this.pendingPermissions.set(toolUseID, resolve)
@@ -208,6 +218,7 @@ export class ClaudeExecutor {
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private async createQuery(message: UserMessageType) {
+    this.interrupted = false
     const options: Options = {
       maxTurns: 1000,
       model: this.agent.model,
@@ -240,6 +251,10 @@ export class ClaudeExecutor {
           this.events.onMessage(message)
         }
         this.events?.onMessage(msg)
+        // turn 结束且未完成、未中断 → 进入 awaiting-message
+        if (msg.type === 'result' && !this.completed && !this.interrupted && !this.disposed) {
+          this.events.onAwaitingUser('awaiting-message')
+        }
       }
     } catch (err) {
       if (!this.disposed) {

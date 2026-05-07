@@ -215,6 +215,39 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
     set(produce(updateFn))
   }
+
+  /** 展示 awaiting / completed 通知（webview 端逻辑：检查 ChatPanel 可见性） */
+  const showAwaitingNotification = (opts: {
+    flowId: string
+    flowName: string
+    agentId: string
+    agentName: string
+    reason: 'awaiting-message' | 'awaiting-question' | 'flow-completed'
+  }) => {
+    const { flowId, flowName, agentId, agentName, reason } = opts
+    const { chatDrawer } = get()
+    // 用户正在打开对应的 ChatPanel → 不需要通知
+    if (chatDrawer?.flowId === flowId && chatDrawer?.agentId === agentId) return
+
+    const key = `flow-notify-${flowId}-${agentId}`
+    notification.info({
+      key,
+      duration: 0,
+      message:
+        reason === 'flow-completed'
+          ? `工作流「${flowName}」已完成`
+          : `Agent「${agentName}」有新的活跃 Agent`,
+      onClick: () => {
+        notification.destroy(key)
+        immerSet((draft) => {
+          draft.activeFlowId = flowId
+          draft.chatDrawer = { flowId, agentId, agentName }
+          draft.editingAgent = undefined
+        })
+      },
+    })
+  }
+
   return {
     loading: true,
     flows: [],
@@ -226,12 +259,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     init: () => {
       postMessageToExtension({ type: 'load', data: undefined })
       const onMessage = (msg: ExtensionToWebviewMessage) => {
-        let notifySwitch: {
-          flowId: string
-          agentId: string
-          agentName: string
-          flowName: string
-        } | null = null
         immerSet((draft) => {
           if (msg.type === 'error') {
             console.error(msg)
@@ -249,7 +276,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             // 由 App 层订阅处理，store 不参与
             return
           }
-          const runId = msg.data.runId
+          const runId = 'runId' in msg.data ? msg.data.runId : undefined
           const flowId = msg.data.flowId
           const fs = draft.flowStates[flowId]
           if (!fs) return
@@ -272,20 +299,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
               messages: [],
               completed: false,
             })
-            const agentName = agent?.agent_name ?? ''
-            if (draft.activeFlowId === flowId) {
-              draft.chatDrawer = { flowId, agentId: msg.data.agentId, agentName }
-            } else if (!draft.chatDrawer && !draft.editingAgent) {
-              draft.activeFlowId = flowId
-              draft.chatDrawer = { flowId, agentId: msg.data.agentId, agentName }
-            } else {
-              notifySwitch = {
-                flowId,
-                agentId: msg.data.agentId,
-                agentName,
-                flowName: flow?.name ?? '',
-              }
-            }
             return
           }
           if (fs.runId !== runId) return
@@ -341,20 +354,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                     messages: [],
                     completed: false,
                   })
-                  const nextAgentName = nextAgent?.agent_name ?? ''
-                  if (draft.activeFlowId === flowId) {
-                    draft.chatDrawer = { flowId, agentId: nextAgentId, agentName: nextAgentName }
-                  } else if (!draft.chatDrawer && !draft.editingAgent) {
-                    draft.activeFlowId = flowId
-                    draft.chatDrawer = { flowId, agentId: nextAgentId, agentName: nextAgentName }
-                  } else {
-                    notifySwitch = {
-                      flowId,
-                      agentId: nextAgentId,
-                      agentName: nextAgentName,
-                      flowName: flow?.name ?? '',
-                    }
-                  }
                 } else {
                   fs.phase = 'completed'
                   fs.currentAgentId = undefined
@@ -390,26 +389,28 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
               fs.pendingQuestion = undefined
               fs.pendingToolPermission = undefined
             })
+            .with({ type: 'flow.signal.notifyUser' }, () => {
+              // 仅触发外部通知，不更新 store 状态
+            })
+            .with({ type: 'flow.signal.focusFlow' }, ({ data }) => {
+              const flow = draft.flows.find((f) => f.id === data.flowId)
+              const agent = flow?.agents?.find((a) => a.id === data.agentId)
+              draft.activeFlowId = data.flowId
+              draft.chatDrawer = {
+                flowId: data.flowId,
+                agentId: data.agentId,
+                agentName: agent?.agent_name ?? '',
+              }
+              draft.editingAgent = undefined
+            })
             .exhaustive()
         })
 
-        if (notifySwitch) {
-          const { flowId, agentId, agentName, flowName } = notifySwitch
-          const key = `flow-switch-${flowId}`
-          notification.info({
-            key,
-            duration: 0,
-            message: `工作流「${flowName}」有新的活跃 Agent`,
-            description: `Agent「${agentName}」正在运行，点击切换`,
-            onClick: () => {
-              notification.destroy(key)
-              immerSet((draft) => {
-                draft.activeFlowId = flowId
-                draft.chatDrawer = { flowId, agentId, agentName }
-                draft.editingAgent = undefined
-              })
-            },
-          })
+        // notifyUser：检查用户是否正在打开触发通知的 agent 的 ChatPanel，
+        // 如果不在则弹出 webview 通知（Extension 端同样会在面板不可见时弹 VSCode 通知）
+        if (msg.type === 'flow.signal.notifyUser') {
+          const { flowId, agentId, agentName, flowName, reason } = msg.data
+          showAwaitingNotification({ flowId, flowName, agentId, agentName, reason })
         }
       }
 
@@ -435,7 +436,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     setActiveFlowId: (id) => {
-      notification.destroy(`flow-switch-${id}`)
+      notification.destroy(`flow-notify-${id}`)
       immerSet((draft) => {
         draft.activeFlowId = id
         const fs = draft.flowStates[id]

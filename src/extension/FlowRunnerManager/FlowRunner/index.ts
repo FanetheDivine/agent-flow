@@ -282,6 +282,17 @@ export class FlowRunner {
           input,
         })
       },
+      onAwaitingUser: (reason) => {
+        if (this.currentAgentId !== agent.id) return
+        this.fire('flow.signal.notifyUser', {
+          runId,
+          agentId: agent.id,
+          agentName: agent.agent_name,
+          flowId: this.flow.id,
+          flowName: this.flow.name,
+          reason,
+        })
+      },
       onError: (err) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)
         this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
@@ -352,6 +363,15 @@ export class FlowRunner {
       this.updateAgentStatus('completed')
       this.currentSessionId = null
       this.currentAgentId = null
+      // Flow 完成通知
+      this.fire('flow.signal.notifyUser', {
+        runId,
+        agentId: agent.id,
+        agentName: agent.agent_name,
+        flowId: this.flow.id,
+        flowName: this.flow.name,
+        reason: 'flow-completed',
+      })
     }
   }
 
