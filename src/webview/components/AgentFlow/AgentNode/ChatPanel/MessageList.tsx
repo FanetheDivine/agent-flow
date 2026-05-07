@@ -53,13 +53,10 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
     return result
   }, [sessions, ctx])
 
-  const hasAgentComplete = sessions.some((s) => {
-    const last = s.messages[s.messages.length - 1]
-    return last?.type === 'flow.signal.agentComplete'
-  })
+  const hasAnySessionCompleted = sessions.some((s) => s.completed)
 
   const finalItems = useMemo<BubbleItemType[]>(() => {
-    if (!loading || hasAgentComplete) return items
+    if (!loading || hasAnySessionCompleted) return items
     return [
       ...items,
       {
@@ -69,7 +66,7 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
         loading: true,
       },
     ]
-  }, [items, loading, hasAgentComplete])
+  }, [items, loading, hasAnySessionCompleted])
 
   return (
     <Bubble.List
