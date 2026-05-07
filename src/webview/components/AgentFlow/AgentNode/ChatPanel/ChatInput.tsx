@@ -680,7 +680,7 @@ export const ChatInput: FC<Props> = ({
             onChange={() => setEmpty(isEmptyEditor(editor.children))}
           >
             <Editable
-              className='max-h-[12em] overflow-x-hidden overflow-y-auto rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[13px] leading-normal text-[#cdd6f4] outline-none focus:border-[#585b70]'
+              className='max-h-[14em] overflow-x-hidden overflow-y-auto rounded border border-[#313244] bg-[#181825] px-3 py-2 text-[14px] leading-relaxed text-[#cdd6f4] outline-none focus:border-[#585b70]'
               placeholder={placeholder}
               readOnly={disabled}
               renderElement={renderElement}

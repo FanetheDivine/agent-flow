@@ -43,29 +43,29 @@
   }
 
   .chat-bubble-compact .ant-bubble-content {
-    padding: 4px 8px;
-    font-size: 12px;
-    line-height: 1.5;
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1.6;
     max-width: 92%;
   }
 
   .chat-bubble-compact .ant-bubble-content .x-markdown-dark {
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   .chat-bubble-compact .ant-bubble-content .x-markdown-dark p {
-    margin-block: 0.25em;
+    margin-block: 0.3em;
   }
 
   .chat-bubble-compact .ant-bubble-content .x-markdown-dark pre {
     margin-block: 0.3em;
-    padding: 4px 6px;
-    font-size: 11px;
+    padding: 6px 8px;
+    font-size: 12px;
   }
 
   .chat-bubble-compact .ant-bubble-content .x-markdown-dark code {
-    font-size: 11px;
+    font-size: 12px;
     padding: 0 3px;
   }
 
