@@ -1,9 +1,10 @@
 import { memo, useState, type FC, type ReactNode } from 'react'
 import { Spin, Tag } from 'antd'
 import {
+  CheckCircleFilled,
   CheckCircleOutlined,
   CheckOutlined,
-  CloseCircleOutlined,
+  CloseCircleFilled,
   CopyOutlined,
   LoadingOutlined,
 } from '@ant-design/icons'
@@ -530,6 +531,9 @@ function renderToolUseDetails(
   toolName: string,
   input: unknown,
   result: ToolResult | undefined,
+  /** 无 result 时是否视为成功——仅用于 AgentComplete：调用后 executor 立刻 kill，
+   *  正常情况下永远收不到 mcp_tool_result，需结合 session.completed 判断 */
+  treatNoResultAsSuccess = false,
 ): ReactNode {
   const summary = getToolSummary(toolName, input)
   const hasInput =
@@ -539,10 +543,12 @@ function renderToolUseDetails(
       <summary className='cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap'>
         {result ? (
           result.isError ? (
-            <CloseCircleOutlined className='mr-1 text-[#f38ba8]' />
+            <CloseCircleFilled className='mr-1 text-[#f38ba8]' />
           ) : (
-            <CheckCircleOutlined className='mr-1 text-[#a6e3a1]' />
+            <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
           )
+        ) : treatNoResultAsSuccess ? (
+          <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
         ) : (
           <Spin
             size='small'
@@ -566,7 +572,11 @@ function renderToolUseDetails(
   )
 }
 
-function renderItemToBubble(item: RenderItem, ctx?: BubbleCtx): RenderedBubble | null {
+function renderItemToBubble(
+  item: RenderItem,
+  ctx?: BubbleCtx,
+  sessionCompleted = false,
+): RenderedBubble | null {
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
@@ -646,7 +656,12 @@ function renderItemToBubble(item: RenderItem, ctx?: BubbleCtx): RenderedBubble |
       return {
         key: item.key,
         role: 'ai',
-        content: renderToolUseDetails(item.toolName, item.input, item.result),
+        content: renderToolUseDetails(
+          item.toolName,
+          item.input,
+          item.result,
+          sessionCompleted && item.toolName.includes('AgentComplete'),
+        ),
       }
     }
     case 'turn_end': {
@@ -694,11 +709,12 @@ export function toBubbleItems(
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
   seenToolUseIds = new Set<string>(),
+  sessionCompleted = false,
 ): RenderedBubble[] {
   const renderItems = buildRenderItems(msgs, seenToolUseIds)
   const out: RenderedBubble[] = []
   for (const item of renderItems) {
-    const bubble = renderItemToBubble(item, ctx)
+    const bubble = renderItemToBubble(item, ctx, sessionCompleted)
     if (bubble) out.push(bubble)
   }
   return out
