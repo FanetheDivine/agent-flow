@@ -17,8 +17,8 @@ import {
   type AgentPhase,
   type AgentSession,
 } from '@/webview/store/flow'
-import { ChatInput } from './ChatInput'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
+import { ChatInput } from './ChatInput'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
 
@@ -252,7 +252,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
 
       {/* Pending AskUserQuestion — 固定在输入框上方，不随消息滚动 */}
       {showCard && pending && (
-        <div className='shrink-0 border-t border-[#45475a] px-3 py-2'>
+        <div className='max-h-100 shrink-0 overflow-auto border-t border-[#45475a] px-3 py-2'>
           <AskUserQuestionCard
             input={pending.input}
             mode='active'
