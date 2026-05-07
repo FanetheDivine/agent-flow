@@ -134,6 +134,9 @@ export class ClaudeExecutor {
     this.disposed = true
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
+    this.mcpServer.instance.close().catch(() => {
+      // close 失败通常是因为 executor 已被 dispose，忽略
+    })
   }
 
   /**
