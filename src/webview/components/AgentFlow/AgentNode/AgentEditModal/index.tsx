@@ -95,7 +95,17 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
       destroyOnHidden
       modalRender={(node) => <div onPaste={(e) => e.stopPropagation()}>{node}</div>}
     >
-      <Form form={form} layout='vertical' autoComplete='off'>
+      <Form
+        form={form}
+        layout='vertical'
+        autoComplete='off'
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key !== 'Escape') {
+            e.stopPropagation()
+          }
+        }}
+      >
         <Form.Item
           name='agent_name'
           label='Agent 名称'
