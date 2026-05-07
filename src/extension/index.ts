@@ -126,7 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
         const msg =
           reason === 'flow-completed'
             ? `工作流「${flowName}」已完成`
-            : `Agent「${agentName}」正在等待你的回复`
+            : `Agent「${agentName}」正在等待回复`
         vscode.window.showInformationMessage(msg, '查看').then((choice) => {
           if (choice === '查看' && currentPanel) {
             currentPanel.reveal(undefined, true)

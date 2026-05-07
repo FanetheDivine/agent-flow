@@ -236,7 +236,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       message:
         reason === 'flow-completed'
           ? `工作流「${flowName}」已完成`
-          : `Agent「${agentName}」有新的活跃 Agent`,
+          : `Agent「${agentName}」正在等待回复`,
       onClick: () => {
         notification.destroy(key)
         immerSet((draft) => {
