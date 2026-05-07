@@ -53,6 +53,21 @@ type WildcardSignalHandler = (
   data: FlowRunnerSignalEvents[keyof FlowRunnerSignalEvents],
 ) => void
 
+/** Agent 停止（AI 停止流式）的原因，用于触发通知 */
+export type NotifyReason =
+  | 'awaiting-message'
+  | 'awaiting-question'
+  | 'flow-completed'
+  | 'agent-error'
+
+export type NotifyUserHandler = (data: {
+  agentId: string
+  agentName: string
+  flowId: string
+  flowName: string
+  reason: NotifyReason
+}) => void
+
 export class FlowRunner {
   readonly flow: Flow
 
@@ -63,9 +78,11 @@ export class FlowRunner {
   private currentAgentId: string | null = null
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
+  private notifyUser: NotifyUserHandler
 
-  constructor(flow: Flow) {
+  constructor(flow: Flow, notifyUser: NotifyUserHandler) {
     this.flow = flow
+    this.notifyUser = notifyUser
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -291,8 +308,7 @@ export class FlowRunner {
       },
       onAwaitingUser: (reason) => {
         if (this.currentAgentId !== agent.id) return
-        this.fire('flow.signal.notifyUser', {
-          runId,
+        this.notifyUser({
           agentId: agent.id,
           agentName: agent.agent_name,
           flowId: this.flow.id,
@@ -304,6 +320,13 @@ export class FlowRunner {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)
         this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
         this.updateAgentStatus('completed')
+        this.notifyUser({
+          agentId: agent.id,
+          agentName: agent.agent_name,
+          flowId: this.flow.id,
+          flowName: this.flow.name,
+          reason: 'agent-error',
+        })
       },
     })
   }
@@ -384,8 +407,7 @@ export class FlowRunner {
       this.currentSessionId = null
       this.currentAgentId = null
       // Flow 完成通知
-      this.fire('flow.signal.notifyUser', {
-        runId,
+      this.notifyUser({
         agentId: agent.id,
         agentName: agent.agent_name,
         flowId: this.flow.id,
