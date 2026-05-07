@@ -312,11 +312,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
               const { message } = m.data
               if (message.type === 'result') {
                 // 不要在终态（completed / stopped / error）之后退回 awaiting
-                if (
-                  fs.phase !== 'completed' &&
-                  fs.phase !== 'stopped' &&
-                  fs.phase !== 'error'
-                ) {
+                if (fs.phase !== 'completed' && fs.phase !== 'stopped' && fs.phase !== 'error') {
                   fs.phase = 'awaiting'
                 }
                 return
@@ -435,6 +431,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const { flows } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
+      const agent = flow.agents?.find((a) => a.id === agentId)
+      if (agent?.no_input) {
+        initMessage = {
+          type: 'user',
+          message: { role: 'user', content: '开始' },
+          parent_tool_use_id: null,
+        }
+      }
       const runKey = crypto.randomUUID()
       immerSet((draft) => {
         draft.flowStates[flowId] = {

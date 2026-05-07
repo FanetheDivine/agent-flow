@@ -45,11 +45,11 @@ export const AgentSchema = z.object({
     .describe(
       '是否允许自动完成：true（默认）时 Agent 可直接调用 AgentComplete，无需先用 AskUserQuestion 确认',
     ),
-  auto_start: z
+  no_input: z
     .boolean()
     .optional()
     .describe(
-      '是否无需输入启动：true 时节点操作区显示启动按钮，点击以"开始"为初始消息自动运行该 Agent',
+      '无输入启动：true 时节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）',
     ),
 })
 

@@ -171,7 +171,14 @@ export class FlowRunner {
 
     // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
     const runId = this.currentRunId!
-    this.runAgent(initMessage, agent, (sessionId) => {
+    const effectiveInitMessage = agent.no_input
+      ? {
+          type: 'user' as const,
+          message: { role: 'user' as const, content: '开始' },
+          parent_tool_use_id: null,
+        }
+      : initMessage
+    this.runAgent(effectiveInitMessage, agent, (sessionId) => {
       this.currentSessionId = sessionId
       this.fire('flow.signal.flowStart', {
         runId,
@@ -336,26 +343,26 @@ export class FlowRunner {
       this.currentSessionId = null
 
       // 切换到下一个 agent
-      this.runAgent(
-        {
-          type: 'user',
-          message: {
-            role: 'user',
-            content,
-          },
-          parent_tool_use_id: null,
-        },
-        nextAgent,
-        (newSessionId) => {
-          this.currentSessionId = newSessionId
-          this.fire('flow.signal.agentComplete', {
-            runId,
-            sessionId,
-            content: result.content,
-            output: { name: result.outputName!, newSessionId },
-          })
-        },
-      )
+      const nextInitMessage = nextAgent.no_input
+        ? {
+            type: 'user' as const,
+            message: { role: 'user' as const, content: '开始' },
+            parent_tool_use_id: null,
+          }
+        : {
+            type: 'user' as const,
+            message: { role: 'user' as const, content },
+            parent_tool_use_id: null,
+          }
+      this.runAgent(nextInitMessage, nextAgent, (newSessionId) => {
+        this.currentSessionId = newSessionId
+        this.fire('flow.signal.agentComplete', {
+          runId,
+          sessionId,
+          content: result.content,
+          output: { name: result.outputName!, newSessionId },
+        })
+      })
     } else {
       // Flow 结束
       this.killCurrentExecutor()
