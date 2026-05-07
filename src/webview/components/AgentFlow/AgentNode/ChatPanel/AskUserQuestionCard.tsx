@@ -48,8 +48,10 @@ export const AskUserQuestionCard: FC<Props> = ({
   const [otherStates, setOtherStates] = useState<Record<number, OtherState>>({})
 
   const allAnswered = useMemo(() => {
-    return questions.every((_, i) => {
+    return questions.every((q, i) => {
       const sel = selections[i] ?? []
+      // 多选允许不选（视为空数组）
+      if (q.multiSelect && sel.length === 0) return true
       if (sel.length === 0) return false
       if (sel.includes(OTHER_LABEL)) {
         const o = otherStates[i]
