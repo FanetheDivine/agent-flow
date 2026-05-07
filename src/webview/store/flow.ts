@@ -1,7 +1,7 @@
-import { notification } from 'antd'
 import { produce } from 'immer'
 import { match, P } from 'ts-pattern'
 import { create } from 'zustand'
+import type { NotificationInstance } from 'antd/es/notification/interface'
 import type {
   Agent,
   Flow,
@@ -11,6 +11,9 @@ import type {
   AskUserQuestionOutput,
 } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
+
+/** init 参数 —— 从 App.useApp() 拿到的主题化 api（至少包含 notification） */
+export type AppApi = { notification: NotificationInstance }
 
 export type AgentSession = {
   sessionId: string
@@ -93,7 +96,7 @@ export type FlowState = {
 
 type FlowStoreType = FlowState & {
   /** 初始化：请求 flows 并订阅 extension 消息，返回 cleanup 函数 */
-  init: () => () => void
+  init: (app: AppApi) => () => void
   setActiveFlowId: (id: string) => void
   setFlowListCollapsed: (collapsed: boolean) => void
   runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
@@ -216,6 +219,9 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     set(produce(updateFn))
   }
 
+  /** 由 init 注入，来自 <AntdApp> 的 App.useApp()，保证 notification 继承 ConfigProvider 主题 */
+  let notificationApi: NotificationInstance | null = null
+
   type NotifyReason = 'awaiting-message' | 'awaiting-question' | 'flow-completed' | 'agent-error'
 
   /** 追踪当前所有已弹出的通知 key，便于按 flow 批量销毁 */
@@ -224,7 +230,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     const prefix = `flow-notify-${flowId}-`
     for (const key of [...activeNotificationKeys]) {
       if (key.startsWith(prefix)) {
-        notification.destroy(key)
+        notificationApi?.destroy(key)
         activeNotificationKeys.delete(key)
       }
     }
@@ -267,7 +273,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
     const key = `flow-notify-${flowId}-${agentId}-${reason}`
     activeNotificationKeys.add(key)
-    notification.info({
+    notificationApi?.info({
       key,
       duration: 0,
       message: match(reason)
@@ -282,7 +288,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         activeNotificationKeys.delete(key)
       },
       onClick: () => {
-        notification.destroy(key)
+        notificationApi?.destroy(key)
         activeNotificationKeys.delete(key)
         immerSet((d) => {
           d.activeFlowId = flowId
@@ -301,7 +307,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     flowStates: {},
     flowListCollapsed: false,
 
-    init: () => {
+    init: (app) => {
+      notificationApi = app.notification
       postMessageToExtension({ type: 'load', data: undefined })
       const onMessage = (msg: ExtensionToWebviewMessage) => {
         immerSet((draft) => {
