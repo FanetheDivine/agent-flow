@@ -348,6 +348,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
                   fs.currentAgentId = nextAgentId
                   fs.currentAgentName = nextAgent?.agent_name
                   fs.phase = 'awaiting'
+                  // 自动打开新 agent 的 ChatDrawer
+                  draft.chatDrawer = {
+                    flowId,
+                    agentId: nextAgentId,
+                    agentName: nextAgent?.agent_name ?? '',
+                  }
                   fs.sessions.push({
                     sessionId: data.output.newSessionId,
                     agentId: nextAgentId,
