@@ -1,7 +1,9 @@
-import { useCallback, useMemo, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import type { WheelEventHandler } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
+import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
@@ -94,7 +96,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   )
   const answeredQuestions = useFlowStore((s) => s.flowStates[flowId]?.answeredQuestions)
 
-  const canSend = agentCanSendMessage(phase)
   const canInterrupt = agentCanInterrupt(phase)
   const canInterruptFlow = flowCanInterrupt(flowPhase)
 
@@ -149,6 +150,33 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     ],
   )
 
+  // 消息列表自动滚动控制：默认贴底,用户向上滚 >10px 后停止跟随
+  const messageListRef = useRef<BubbleListRef>(null)
+  const shouldScrollRef = useRef(true)
+
+  const handleListWheel = useCallback<WheelEventHandler<HTMLDivElement>>((e) => {
+    if (e.deltaY < -10) shouldScrollRef.current = false
+  }, [])
+
+  // 切换 agent 时
+  useEffect(() => {
+    shouldScrollRef.current = true
+    // const id = requestAnimationFrame(() => conso
+  }, [flowId, agentId])
+
+  // 新消息到达时按需滚到底
+  useEffect(() => {
+    setTimeout(() => {
+      const dom = messageListRef.current?.scrollBoxNativeElement
+      if (shouldScrollRef.current && dom) {
+        dom.scroll({
+          top: dom.scrollHeight,
+          behavior: 'smooth',
+        })
+      }
+    }, 0)
+  }, [sessions])
+
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
     { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }
@@ -169,6 +197,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const handleSend = (
     content: UserMessageType['message']['content'],
   ): boolean | Promise<boolean> => {
+    shouldScrollRef.current = true
     if (pending) {
       const text = contentToPlainText(content)
       const { output, questionIndices } = freeTextToOutput(pending.input.questions, text)
@@ -249,9 +278,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
         .with({ length: 0 }, () => <Skeleton active className='flex-1 p-4' />)
         .otherwise(() => (
           <MessageList
+            ref={messageListRef}
             sessions={sessions}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
+            onWheel={handleListWheel}
           />
         ))}
 

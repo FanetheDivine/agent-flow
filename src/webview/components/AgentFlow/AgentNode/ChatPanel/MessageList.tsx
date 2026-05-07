@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react'
-import type { FC } from 'react'
+import { forwardRef, useMemo } from 'react'
+import type { WheelEventHandler } from 'react'
 import { Divider } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons'
 import { Bubble } from '@ant-design/x'
@@ -11,6 +11,7 @@ type Props = {
   sessions: AgentSession[]
   ctx?: BubbleCtx
   loading?: boolean
+  onWheel?: WheelEventHandler<HTMLDivElement>
 }
 
 const roleMap = {
@@ -28,15 +29,10 @@ const roleMap = {
   },
 }
 
-export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
-  const bubbleRef = useRef<BubbleListRef>(null)
-  useEffect(() => {
-    const dom = bubbleRef.current?.nativeElement
-    if (!dom) return
-    dom.scroll({
-      top: dom.scrollHeight,
-    })
-  }, [])
+export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList(
+  { sessions, ctx, loading, onWheel },
+  ref,
+) {
   const items = useMemo<BubbleItemType[]>(() => {
     const result: BubbleItemType[] = []
     const seenToolUseIds = new Set<string>()
@@ -77,12 +73,14 @@ export const MessageList: FC<Props> = ({ sessions, ctx, loading }) => {
   }, [items, loading, hasAnySessionCompleted])
 
   return (
-    <Bubble.List
-      autoScroll
-      ref={bubbleRef}
-      role={roleMap}
-      items={finalItems}
-      className='chat-bubble-compact min-h-0 flex-1 overflow-y-auto px-3 py-2'
-    />
+    <div className='flex min-h-0 flex-1 flex-col' onWheel={onWheel}>
+      <Bubble.List
+        ref={ref}
+        autoScroll={false}
+        role={roleMap}
+        items={finalItems}
+        className='chat-bubble-compact min-h-0 flex-1 overflow-y-auto px-3 py-2'
+      />
+    </div>
   )
-}
+})
