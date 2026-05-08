@@ -229,7 +229,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           label={
             <span className='flex items-center gap-1 whitespace-nowrap'>
               提示词
-              {currentAgent ? (
+              {currentAgent?.agent_prompt ? (
                 <Tooltip
                   title={`完整提示词：\n\n${buildAgentSystemPrompt(currentAgent)}`}
                   styles={{
