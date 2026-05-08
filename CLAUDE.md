@@ -91,7 +91,7 @@ pnpm format         # prettier --write .
 
 ## Agent System Prompt 规则（[buildAgentSystemPrompt](src/common/index.ts#L216)）
 
-`buildAgentSystemPrompt` 处理**所有通用规则**（用户消息是材料不是任务、AskUserQuestion 用法、AgentComplete 语义、shareValues 工具），写 `agent_prompt` 时**只需聚焦本 Agent 的产物形态**。别在 `agent_prompt` 里重写通用规则。
+`buildAgentSystemPrompt` 处理**所有通用规则**（AskUserQuestion 用法、AgentComplete 语义、shareValues 工具；用户消息相关规则仅在 `no_input` 为 false 时注入），写 `agent_prompt` 时**只需聚焦本 Agent 的产物形态**。别在 `agent_prompt` 里重写通用规则。
 
 ## 代码风格
 
