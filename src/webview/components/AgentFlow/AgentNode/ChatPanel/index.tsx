@@ -13,12 +13,8 @@ import { Welcome, XProvider } from '@ant-design/x'
 import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type {
-  AskUserQuestionItem,
-  AskUserQuestionOutput,
-  UserMessageType,
-  AgentSession,
-} from '@/common'
+import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
+import type { AgentSession } from '@/webview/store/flow'
 import {
   useFlowStore,
   selectAgentPhase,
