@@ -38,11 +38,11 @@ pnpm format         # prettier --write .
 ## 核心领域模型（[src/common/index.ts](src/common/index.ts)）
 
 - **`Flow`** = `{ id, name, agents? }`
-- **`Agent`** = `{ id, agent_name, model, effort?, agent_prompt[], outputs?, auto_allowed_tools?, must_confirm_tools?, auto_complete? }`
+- **`Agent`** = `{ id, agent_name, model, effort?, agent_prompt[], outputs?, auto_allowed_tools?, must_confirm_tools?, complete_mode }`
   - `agent_name` flow 内唯一（仅展示 / 便于区分），`id` 才是引用的主键
   - `auto_allowed_tools: true | string[]` —— `true` 放行全部；数组中的 `"MCP"` 通配所有 `mcp__*` 工具
   - `must_confirm_tools: string[]` —— 优先级高于 auto_allowed；同样支持 `"MCP"` 通配
-  - `auto_complete: false` —— 调用 `AgentComplete` 前必须先 `AskUserQuestion` 确认
+  - `complete_mode: 'auto' | 'confirm' | 'never'` —— `auto` 直接调用 AgentComplete；`confirm` 调用前必须先 `AskUserQuestion` 确认；`never` 禁止调用 AgentComplete（MCP 不注册该工具）
 - **`Output`** = `{ output_name, output_desc?, next_agent? }`
   - `next_agent` 存的是 **agent.id**，不是 `agent_name`；查找时用 `flow.agents.find(a => a.id === ...)`
   - `next_agent === agent.id` 合法（自环），省略 = 工作流终点

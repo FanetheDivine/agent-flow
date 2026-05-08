@@ -200,6 +200,7 @@ export function reactFlowToFlow(
         agent_name: node.data.agentName,
         model: '',
         agent_prompt: '',
+        complete_mode: 'auto' as const,
       }),
       agent_name: node.data.agentName,
       outputs: originalAgent?.outputs?.map((o) => ({ ...o, next_agent: undefined })) ?? [],

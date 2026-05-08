@@ -39,11 +39,10 @@ export const AgentSchema = z.object({
     .describe(
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
     ),
-  auto_complete: z
-    .boolean()
-    .optional()
+  complete_mode: z
+    .enum(['auto', 'confirm', 'never'])
     .describe(
-      '是否允许自动完成：true（默认）时 Agent 可直接调用 AgentComplete，无需先用 AskUserQuestion 确认',
+      '完成方式：auto（自动完成）直接调用 AgentComplete；confirm（用户确认后完成）调用前必须先用 AskUserQuestion 确认；never（永不完成）禁止调用 AgentComplete',
     ),
   no_input: z
     .boolean()
@@ -228,9 +227,9 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  * 构建 Agent 系统提示词
  */
 export function buildAgentSystemPrompt(
-  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'auto_complete' | 'enable_share_values'>,
+  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'complete_mode' | 'enable_share_values'>,
 ): string {
-  const { agent_prompt, outputs = [], auto_complete = true, enable_share_values = false } = agent
+  const { agent_prompt, outputs = [], complete_mode, enable_share_values = false } = agent
   // 提示词前置部分
   const prefix = [
     '**始终使用中文进行思考和回复**。',
@@ -252,13 +251,19 @@ export function buildAgentSystemPrompt(
         ]
       : []),
     '',
-    '## 完成任务',
-    '完成后调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。提交的应当是「任务描述」规定的产物。',
-    ...(auto_complete
-      ? []
-      : [
-          '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
-        ]),
+    ...match(complete_mode)
+      .with('auto', () => [
+        '## 完成任务',
+        '完成后调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。提交的应当是「任务描述」规定的产物。',
+        '直接调用AgentComplete，不向用户确认',
+      ])
+      .with('confirm', () => [
+        '## 完成任务',
+        '完成后调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。提交的应当是「任务描述」规定的产物。',
+        '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
+      ])
+      .with('never', () => [])
+      .exhaustive(),
     '',
     '## 任务描述（你的固定职责）',
     '',

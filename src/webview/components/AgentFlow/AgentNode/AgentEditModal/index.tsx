@@ -66,7 +66,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         agent_prompt: agent.agent_prompt,
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
-        auto_complete: agent.auto_complete ?? true,
+        complete_mode: agent.complete_mode ?? 'auto',
         no_input: agent.no_input ?? false,
         enable_share_values: agent.enable_share_values ?? false,
         outputs: (agent.outputs ?? []).map((o) => ({
@@ -194,12 +194,17 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
 
         <div className='flex gap-4'>
           <Form.Item
-            name='auto_complete'
-            label='自动完成'
-            tooltip='开启后 Agent 完成任务时直接调用 AgentComplete，无需先向用户确认'
-            valuePropName='checked'
+            name='complete_mode'
+            label='完成方式'
+            tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
           >
-            <Switch />
+            <Select
+              options={[
+                { value: 'auto', label: '自动完成' },
+                { value: 'confirm', label: '用户确认后完成' },
+                { value: 'never', label: '永不完成' },
+              ]}
+            />
           </Form.Item>
 
           <Form.Item
