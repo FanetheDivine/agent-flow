@@ -1,11 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type UIEventHandler } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type UIEventHandler,
+} from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome, XProvider } from '@ant-design/x'
 import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType, AgentSession } from '@/common'
+import type {
+  AskUserQuestionItem,
+  AskUserQuestionOutput,
+  UserMessageType,
+  AgentSession,
+} from '@/common'
 import {
   useFlowStore,
   selectAgentPhase,
@@ -153,9 +166,10 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const shouldScrollRef = useRef(true)
 
   const handleListScroll = useCallback<UIEventHandler<HTMLDivElement>>((e) => {
-    const dom = (e.target as HTMLDivElement).scrollTop !== undefined
-      ? (e.target as HTMLDivElement)
-      : messageListRef.current?.scrollBoxNativeElement
+    const dom =
+      (e.target as HTMLDivElement).scrollTop !== undefined
+        ? (e.target as HTMLDivElement)
+        : messageListRef.current?.scrollBoxNativeElement
     if (!dom) return
     const atBottom = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 10
     shouldScrollRef.current = atBottom
@@ -174,7 +188,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
       if (shouldScrollRef.current && dom) {
         dom.scroll({
           top: dom.scrollHeight,
-          behavior: 'smooth',
+          behavior: 'instant',
         })
       }
     }, 0)
