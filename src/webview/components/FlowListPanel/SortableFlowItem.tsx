@@ -1,10 +1,11 @@
 import { useState, type FC } from 'react'
 import { App, Button, Typography } from 'antd'
-import { HolderOutlined, DeleteOutlined } from '@ant-design/icons'
+import { HolderOutlined, DeleteOutlined, BlockOutlined } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Flow } from '@/common'
 import type { FlowRunState } from '@/webview/store/flow'
+import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 
 const PHASE_CONFIG: Record<
@@ -30,6 +31,7 @@ export type SortableFlowItemProps = {
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const { flow, isActive, phase, onClick, onDelete, onRename } = props
+  const { save, setActiveFlowId, setFlowListCollapsed } = useFlowStore()
   const { message } = App.useApp()
   const { id, name } = flow
   const [editing, setEditing] = useState(false)
@@ -92,6 +94,22 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             {name}
           </Typography.Text>
         </div>
+        <Button
+          title='克隆'
+          type='text'
+          size='small'
+          icon={<BlockOutlined />}
+          onClick={(e) => {
+            e.stopPropagation()
+            const newId = crypto.randomUUID()
+            const cloned = structuredClone(flow)
+            cloned.id = newId
+            save((flows) => flows.push(cloned))
+            setActiveFlowId(newId)
+            setFlowListCollapsed(false)
+          }}
+          className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#45475a]! hover:text-[#89b4fa]!'
+        />
         <span
           className='flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'
           onClick={(e) => e.stopPropagation()}
@@ -105,6 +123,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
               tooltips: false,
             }}
           />
+
           <Button
             type='text'
             size='small'
