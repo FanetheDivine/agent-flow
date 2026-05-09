@@ -7,9 +7,8 @@ import type {
   ExtensionToWebviewMessage,
   PersistedData,
 } from '@/common'
+import { FlowRunStateManager } from './FlowRunStateManager'
 import { FlowRunnerManager } from './FlowRunnerManager'
-import type { NotifyUserHandler } from './FlowRunnerManager/FlowRunner'
-import { FlowStateManager } from './FlowStateManager'
 import { PersistedDataController } from './PersistedDataController'
 import { initLogger, log, logError } from './logger'
 
@@ -80,13 +79,13 @@ export function activate(context: vscode.ExtensionContext) {
   // 把 runner / 持久化 / 状态镜像 提到 activate 作用域：webview 关闭后这些对象继续存活，
   // 等下次开 panel 重连。
   const flowStore = new PersistedDataController()
-  const flowStateManager = new FlowStateManager()
+  const flowRunStateManager = new FlowRunStateManager()
   let currentFlows: PersistedData = { flows: [] }
 
   const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
     // signal 进入前先喂给状态镜像，确保 webview 不在时 extension 这边状态依然完整
     if (msg.type.startsWith('flow.signal.')) {
-      flowStateManager.applySignal(msg as ExtensionFlowSignalMessage)
+      flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
     }
     log('[Extension → Webview]', msg.type, msg.data)
     currentPanel?.webview.postMessage(msg)
@@ -104,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (currentPanel && webviewReady) {
       // signal 也要让镜像消费一次，保持与 postMessageToWebview 行为一致
       if (msg.type.startsWith('flow.signal.')) {
-        flowStateManager.applySignal(msg as ExtensionFlowSignalMessage)
+        flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
       }
       log('[Extension → Webview]', msg.type, msg.data)
       currentPanel.webview.postMessage(msg)
@@ -120,7 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
     while (pendingMessages.length > 0) {
       const m = pendingMessages.shift()!
       if (m.type.startsWith('flow.signal.')) {
-        flowStateManager.applySignal(m as ExtensionFlowSignalMessage)
+        flowRunStateManager.applySignal(m as ExtensionFlowSignalMessage)
       }
       log('[Extension → Webview]', m.type, m.data)
       currentPanel?.webview.postMessage(m)
@@ -128,8 +127,9 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // notifyUser webPanel不存在或不可见 弹 VSCode 通知。
-  const handleNotifyUser: NotifyUserHandler = (data) => {
-    const { agentId, agentName, flowId, flowName, reason } = data
+  // notifyUser: 当 panel 不存在或不可见时弹 VSCode 通知。
+  flowRunStateManager.setNotifyHandler((data) => {
+    const { agentName, flowId, flowName, reason } = data
 
     if (currentPanel && currentPanel.visible) return
 
@@ -143,16 +143,15 @@ export function activate(context: vscode.ExtensionContext) {
       .exhaustive()
     vscode.window.showInformationMessage(msg, '查看').then((choice) => {
       if (choice !== '查看') return
-      // panel 不存在时 postMessageWhenReady 会触发 openPanel；存在但不可见时显式 reveal
       postMessageWhenReady({
         type: 'flow.signal.focusFlow',
         data: { flowId },
       })
       currentPanel?.reveal(undefined, true)
     })
-  }
+  })
 
-  const runnerManager = new FlowRunnerManager(postMessageToWebview, handleNotifyUser)
+  const runnerManager = new FlowRunnerManager(postMessageToWebview)
 
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     if (currentPanel) {
@@ -181,14 +180,14 @@ export function activate(context: vscode.ExtensionContext) {
       match(e)
         .with({ type: 'load' }, async () => {
           currentFlows = await flowStore.load()
-          flowStateManager.applyFlows(currentFlows.flows, (flowId) =>
+          flowRunStateManager.applyFlows(currentFlows.flows, (flowId) =>
             runnerManager.disposeRunner(flowId),
           )
           postMessageToWebview({
             type: 'load',
             data: {
               flows: currentFlows.flows,
-              flowStates: flowStateManager.getFlowStates(),
+              flowRunStates: flowRunStateManager.getFlowRunStates(),
             },
           })
           // load 抵达即视为 webview 已就绪：把之前排队的消息一次性发出
@@ -198,7 +197,7 @@ export function activate(context: vscode.ExtensionContext) {
         .with({ type: 'save' }, async ({ data }) => {
           const storeData: PersistedData = { flows: data }
           currentFlows = storeData
-          flowStateManager.applyFlows(currentFlows.flows, (flowId) =>
+          flowRunStateManager.applyFlows(currentFlows.flows, (flowId) =>
             runnerManager.disposeRunner(flowId),
           )
           await flowStore.save(storeData)
@@ -245,7 +244,7 @@ export function activate(context: vscode.ExtensionContext) {
             const { flowId, runKey } = data as ExtensionFlowCommandEvents['flow.command.flowStart']
             const flow = currentFlows.flows.find((f) => f.id === flowId)
             if (!flow) return
-            flowStateManager.initFlowStart(flowId, runKey)
+            flowRunStateManager.initFlowStart(flowId, runKey)
             runnerManager.handleCommand(type, { ...data, flow })
           } else {
             runnerManager.handleCommand(type, data)

@@ -26,7 +26,7 @@ export const ChatDrawer: FC = () => {
   })
   const isActiveAgent = useFlowStore((s) => {
     if (!s.chatDrawer) return false
-    const fs = s.flowStates[s.chatDrawer.flowId]
+    const fs = s.flowRunStates[s.chatDrawer.flowId]
     return fs?.sessions[fs.sessions.length - 1]?.agentId === s.chatDrawer.agentId
   })
 

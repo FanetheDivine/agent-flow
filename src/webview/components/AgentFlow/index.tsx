@@ -54,7 +54,7 @@ export const AgentFlow: FC<{ flowId: string }> = ({ flowId }) => {
 const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId, hidden }) => {
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))!
   const activeFlowId = useFlowStore((s) => s.activeFlowId)
-  const state = useFlowStore((s) => s.flowStates[flowId])
+  const state = useFlowStore((s) => s.flowRunStates[flowId])
   const save = useFlowStore((s) => s.save)
   const openChatDrawer = useFlowStore((s) => s.openChatDrawer)
   const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
@@ -66,7 +66,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   // 切换到该 flow 时，根据运行状态决定是否打开 ChatPanel
   useEffect(() => {
     if (activeFlowId !== flowId) return
-    const fs = useFlowStore.getState().flowStates[flowId]
+    const fs = useFlowStore.getState().flowRunStates[flowId]
     const currentAgentId = fs?.sessions[fs.sessions.length - 1]?.agentId
     if (currentAgentId) {
       const agent = flow.agents?.find((a) => a.id === currentAgentId)

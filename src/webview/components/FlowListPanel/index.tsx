@@ -21,7 +21,7 @@ export const FlowListPanel: FC = () => {
   const {
     flows,
     activeFlowId,
-    flowStates,
+    flowRunStates,
     save,
     setActiveFlowId,
     flowListCollapsed,
@@ -170,7 +170,7 @@ export const FlowListPanel: FC = () => {
                       key={flow.id}
                       flow={flow}
                       isActive={flow.id === activeFlowId}
-                      phase={flowStates[flow.id]?.phase}
+                      phase={flowRunStates[flow.id]?.phase}
                       onClick={() => setActiveFlowId(flow.id)}
                       onDelete={() => onDelete(flow.id)}
                       onRename={(name) => onRename(flow.id, name)}

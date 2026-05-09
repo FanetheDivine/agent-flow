@@ -103,6 +103,39 @@ pnpm format         # prettier --write .
 
 **优先用 `ts-pattern` 的 `match` / `P` 代替嵌套三元、冗长 `if/else` / `switch`**：对判别联合、枚举字面量、多值共享分支（`P.union(...)`）等场景，用 `.with(...)` + `.exhaustive()` 写，让新增分支时编译器强制补全。不要为了"少一层调用"保留 `a === 'x' ? ... : a === 'y' ? ... : ...` 这种嵌套三元。
 
+## 通知与自动打开 ChatPanel
+
+### 触发通知的信号
+
+仅当收到以下 signal 时触发通知：`awaiting-message`、`awaiting-question`、`flow-completed`、`agent-error`。这些 signal 在 [updateFlowRunState](src/common/flowState.ts) 中产出为 `NotifyEffect[]`。
+
+### VSCode 通知（extension 端，[FlowRunStateManager](src/extension/FlowRunStateManager.ts) + [extension/index.ts](src/extension/index.ts#L131)）
+
+- 如果 webPanel **存在且 visible**：不发 VSCode 通知
+- 否则：通过 `vscode.window.showInformationMessage` 弹出通知
+
+### Webview 通知（[fireNotifications](src/webview/store/flow.ts)）
+
+以下任一条件满足时，发出 antd notification：
+
+a. `document.hidden === true`（页面不可见）——始终通知
+b. `activeFlowId` 与消息来源的 `flowId` 不一致——通知（用户在别的 Flow 上）
+c. `chatDrawer` 已打开且其 `agentId` 与消息来源的 `agentId` 不一致——通知（用户在别的 Agent 对话上）
+
+### 自动打开 ChatPanel
+
+当收到 `awaiting-message` / `awaiting-question` / `flow-completed` 信号时：
+
+- 如果当前 `activeFlowId` 与消息的 `flowId` 相同，**且** `chatDrawer` 未打开 → 自动调用 `openChatDrawer(flowId, agentId, agentName)` 打开对话面板
+
+此逻辑在 `fireNotifications` 之前执行，自动打开 ChatPanel 与通知判定互不影响。
+
+### agentComplete 自动切换 ChatPanel
+
+当收到 `agentComplete` 信号时：
+
+- 如果 `chatDrawer` 的 `flowId` 与该消息的 `flowId` 相同，**且** `agentId` 与刚完成的 agent 相同 → 自动切换到下一个 agent 的 ChatPanel（取新 session 的 agentId）
+
 ## 易踩坑
 
 - **next_agent 是 id 不是 name**：复制 Agent 节点时（[useFlowStore.copyAgents](src/webview/store/flow.ts#L556)）必须重新生成 id 并通过 `idMap` 重映射 `next_agent` 引用

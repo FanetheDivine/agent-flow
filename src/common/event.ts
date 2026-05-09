@@ -57,10 +57,10 @@ export type ExtensionFromWebviewEvents = {
   previewAttachment: { name: string; content: string }
 } & ExtensionFlowCommandEvents
 
-/** extension发出 webview接受的事件 */
+/** extension发出 webview接受的消息 */
 export type ExtensionToWebviewEvents = {
   /** 返回所有 flows，以及 extension 端维护的运行态 */
-  load: { flows: Flow[]; flowStates: Record<string, FlowRunState> }
+  load: { flows: Flow[]; flowRunStates: Record<string, FlowRunState> }
   /** extension异常 */
   error: string
   /** 向当前 active 的输入框注入文本（由 VSCode 编辑器侧快捷键触发） */

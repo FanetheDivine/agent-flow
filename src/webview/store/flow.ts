@@ -2,48 +2,121 @@ import type { NotificationInstance } from 'antd/es/notification/interface'
 import { produce } from 'immer'
 import { match, P } from 'ts-pattern'
 import { create } from 'zustand'
+import type { Flow } from '@/common'
 import {
-  type Agent,
-  type AskUserQuestionOutput,
-  type ExtensionToWebviewMessage,
-  type Flow,
-  type FlowState,
+  type AgentPhase,
+  type AgentSession,
+  type FlowPhase,
+  type FlowRunState,
+  type PendingQuestion,
+  type PendingToolPermission,
   type NotifyEffect,
   type UserMessageType,
-  updateState,
-} from '@/common'
-import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
-
-// 选择器、phase helper、state 类型已迁移至 @/common/flowState；此处 re-export，保持现有引用兼容
-export type {
-  AgentPhase,
-  AgentSession,
-  ChatDrawerState,
-  FlowPhase,
-  FlowRunState,
-  FlowState,
-  PendingQuestion,
-  PendingToolPermission,
-} from '@/common'
-export {
+  type AskUserQuestionOutput,
+  type ExtensionToWebviewMessage,
+  updateFlowRunState,
   agentCanInterrupt,
   agentCanSendMessage,
   agentIsRunning,
   flowCanInterrupt,
   flowIsDestructiveReadOnly,
-  selectAgentPhase,
-  selectAnsweredToolPermissions,
-  selectFlowPhase,
-  selectPendingQuestionFor,
-  selectPendingToolPermissionFor,
-  selectCurrentAgentId,
-  selectCurrentSession,
+  getLastSession,
 } from '@/common'
+import type { Agent } from '@/common'
+import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
+
+// ── 选择器（webview 本地） ────────────────────────────────────────────────
+
+type StoreState = {
+  loading: boolean
+  flows: Flow[]
+  activeFlowId?: string
+  /** flow 运行态: flowId -> FlowRunState */
+  flowRunStates: Record<string, FlowRunState>
+  globalError?: string
+  chatDrawer?: ChatDrawerState
+  flowListCollapsed: boolean
+  /** 当前正在编辑的 agent */
+  editingAgent?: { flowId: string; agentId: string }
+}
+
+export type ChatDrawerState = {
+  flowId: string
+  agentId: string
+  agentName: string
+}
+
+const selectFlowRunState =
+  (flowId: string) =>
+  (s: StoreState): FlowRunState | undefined =>
+    s.flowRunStates[flowId]
+
+export const selectAgentPhase =
+  (flowId: string, agentId: string) =>
+  (s: StoreState): AgentPhase => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs) return 'idle'
+    const currentAgentId = getLastSession(fs)?.agentId
+    if (currentAgentId === agentId) {
+      if (fs.phase === 'awaiting') {
+        return fs.pendingQuestion ? 'awaiting-question' : 'awaiting-message'
+      }
+      if (fs.phase === 'idle') return 'idle'
+      return fs.phase
+    }
+    const last = [...fs.sessions].reverse().find((sess) => sess.agentId === agentId)
+    if (last?.completed) return 'completed'
+    return 'idle'
+  }
+
+export const selectPendingQuestionFor =
+  (flowId: string, agentId: string) =>
+  (s: StoreState): PendingQuestion | undefined => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
+    return fs.pendingQuestion
+  }
+
+export const selectPendingToolPermissionFor =
+  (flowId: string, agentId: string) =>
+  (s: StoreState): PendingToolPermission | undefined => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
+    return fs.pendingToolPermission
+  }
+
+export const selectAnsweredToolPermissions =
+  (flowId: string) =>
+  (s: StoreState): Record<string, { allow: boolean }> | undefined =>
+    s.flowRunStates[flowId]?.answeredToolPermissions
+
+export const selectFlowPhase =
+  (flowId: string) =>
+  (s: StoreState): FlowPhase =>
+    s.flowRunStates[flowId]?.phase ?? 'idle'
+
+export const selectCurrentSession =
+  (flowId: string) =>
+  (s: StoreState): AgentSession | undefined => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs) return undefined
+    return fs.sessions.find((s) => !s.completed)
+  }
+
+export const selectCurrentAgentId =
+  (flowId: string) =>
+  (s: StoreState): string | undefined => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs) return undefined
+    return getLastSession(fs)?.agentId
+  }
+
+// ── Store ───────────────────────────────────────────────────────────────────
 
 /** init 参数 —— 从 App.useApp() 拿到的主题化 api（至少包含 notification） */
 export type AppApi = { notification: NotificationInstance }
 
-type FlowStoreType = FlowState & {
+type FlowStoreType = StoreState & {
   /** 初始化：请求 flows 并订阅 extension 消息，返回 cleanup 函数 */
   init: (app: AppApi) => () => void
   setActiveFlowId: (id: string) => void
@@ -59,6 +132,23 @@ type FlowStoreType = FlowState & {
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
+}
+
+// Re-export 类型和工具函数，保持现有引用兼容
+export type {
+  AgentPhase,
+  AgentSession,
+  FlowPhase,
+  FlowRunState,
+  PendingQuestion,
+  PendingToolPermission,
+}
+export {
+  agentCanInterrupt,
+  agentCanSendMessage,
+  agentIsRunning,
+  flowCanInterrupt,
+  flowIsDestructiveReadOnly,
 }
 
 export const useFlowStore = create<FlowStoreType>((set, get) => {
@@ -81,9 +171,41 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     }
   }
 
-  /** 把 updateState 返回的 notifications 翻译成 antd notification.info 调用 */
+  /** 判断是否应该弹出 webview 通知 */
+  const shouldNotify = (effect: NotifyEffect): boolean => {
+    // a. 页面不可见时始终通知
+    if (document.hidden) return true
+    const { activeFlowId, chatDrawer } = get()
+    // b. activeFlowId 与消息来源不一致时通知
+    if (activeFlowId !== effect.flowId) return true
+    // c. ChatPanel 已打开且 agentId 不一致时通知
+    if (chatDrawer && chatDrawer.agentId !== effect.agentId) return true
+    return false
+  }
+
+  /** 自动打开 ChatPanel：当 activeFlowId 匹配且 ChatPanel 未打开时 */
+  const autoOpenChatDrawer = (effect: NotifyEffect) => {
+    const { activeFlowId, chatDrawer } = get()
+    if (activeFlowId === effect.flowId && !chatDrawer) {
+      immerSet((d) => {
+        d.chatDrawer = { ...effect }
+      })
+    }
+  }
+
+  /** 把 updateFlowRunState 返回的 notifications 翻译成 antd notification.info 调用 */
   const fireNotifications = (effects: NotifyEffect[]) => {
     for (const n of effects) {
+      // 自动打开 ChatPanel（awaiting-message / awaiting-question / flow-completed）
+      if (
+        n.reason === 'awaiting-message' ||
+        n.reason === 'awaiting-question' ||
+        n.reason === 'flow-completed'
+      ) {
+        autoOpenChatDrawer(n)
+      }
+      // 通知判定
+      if (!shouldNotify(n)) continue
       const key = `flow-notify-${n.flowId}-${n.agentId}-${n.reason}`
       activeNotificationKeys.add(key)
       notificationApi?.info({
@@ -118,18 +240,18 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     flows: [],
     activeFlowId: undefined,
     chatDrawer: undefined,
-    flowStates: {},
+    flowRunStates: {},
     flowListCollapsed: false,
 
     init: (app) => {
       notificationApi = app.notification
       const onMessage = (msg: ExtensionToWebviewMessage) => {
-        // 全局事件（非 flow.signal.*）不进入 updateState：直接落到 store
+        // 全局事件（非 flow.signal.*）不进入 updateFlowRunState：直接落到 store
         if (msg.type === 'load') {
           immerSet((draft) => {
             draft.loading = false
             draft.flows = msg.data.flows
-            draft.flowStates = msg.data.flowStates
+            draft.flowRunStates = msg.data.flowRunStates
             draft.activeFlowId = msg.data.flows[0]?.id
           })
           return
@@ -145,17 +267,47 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           // 由 App 层订阅处理，store 不参与
           return
         }
-        // 其余皆为 flow.signal.*：交给 updateState 这一信号驱动的 reducer
-        let pendingNotifications: NotifyEffect[] = []
-        set((prev) => {
-          const panelVisible =
-            typeof document === 'undefined' ? false : document.visibilityState === 'visible'
-          const { state, notifications } = updateState(prev, msg, { panelVisible })
-          pendingNotifications = notifications
-          // updateState 通过 immer 产出新的 state；此处把 store 的 action 方法保留下来
-          return state as FlowStoreType
+        // 其余皆为 flow.signal.*：交给 updateFlowRunState 这一信号驱动的 reducer
+        const { flows, flowRunStates, chatDrawer } = get()
+        const flowId = msg.data.flowId
+        const existing = flowRunStates[flowId]
+        if (!existing) return
+
+        // 记录 agentComplete 前的状态，用于自动切换 ChatPanel
+        const prevLastSession = existing.sessions[existing.sessions.length - 1]
+        const prevLastAgentId = prevLastSession?.agentId
+
+        const { state, notifications } = updateFlowRunState(existing, msg, { flows })
+        immerSet((draft) => {
+          draft.flowRunStates[flowId] = state
+
+          // focusFlow 是纯 UI 导航信号
+          if (msg.type === 'flow.signal.focusFlow') {
+            draft.activeFlowId = msg.data.flowId
+            draft.editingAgent = undefined
+          }
+
+          // agentComplete 时：如果 ChatPanel 正打开的是已完成的 agent，切到下一个 agent
+          if (msg.type === 'flow.signal.agentComplete') {
+            const newLastSession = state.sessions[state.sessions.length - 1]
+            if (
+              chatDrawer?.flowId === flowId &&
+              chatDrawer.agentId === prevLastAgentId &&
+              newLastSession &&
+              newLastSession.agentId !== prevLastAgentId
+            ) {
+              const nextAgent = flows
+                .find((f) => f.id === flowId)
+                ?.agents?.find((a) => a.id === newLastSession.agentId)
+              draft.chatDrawer = {
+                flowId,
+                agentId: newLastSession.agentId,
+                agentName: nextAgent?.agent_name ?? chatDrawer.agentName,
+              }
+            }
+          }
         })
-        fireNotifications(pendingNotifications)
+        fireNotifications(notifications)
       }
 
       const cleanup = subscribeExtensionMessage(onMessage)
@@ -176,7 +328,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       }
       const runKey = crypto.randomUUID()
       immerSet((draft) => {
-        draft.flowStates[flowId] = {
+        draft.flowRunStates[flowId] = {
           runKey,
           phase: 'starting',
           sessions: [],
@@ -222,8 +374,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       postMessageToExtension({ type: 'save', data: get().flows })
     },
     sendUserMessage: (flowId, content) => {
-      const { flowStates } = get()
-      const fs = flowStates[flowId]
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
       postMessageToExtension({
@@ -241,12 +393,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     answerQuestion: (flowId, toolUseId, output) => {
-      const { flowStates } = get()
-      const fs = flowStates[flowId]
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
       immerSet((draft) => {
-        const s = draft.flowStates[flowId]
+        const s = draft.flowRunStates[flowId]
         if (!s) return
         s.answeredQuestions[toolUseId] = output
         if (s.pendingQuestion?.toolUseId === toolUseId) {
@@ -266,12 +418,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     answerToolPermission: (flowId, toolUseId, allow) => {
-      const { flowStates } = get()
-      const fs = flowStates[flowId]
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
       immerSet((draft) => {
-        const s = draft.flowStates[flowId]
+        const s = draft.flowRunStates[flowId]
         if (!s) return
         s.answeredToolPermissions[toolUseId] = { allow }
         if (s.pendingToolPermission?.toolUseId === toolUseId) {
@@ -291,8 +443,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     interruptAgent: (flowId) => {
-      const { flowStates } = get()
-      const fs = flowStates[flowId]
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
       postMessageToExtension({
@@ -305,8 +457,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     killFlow: (flowId) => {
-      const { flowStates } = get()
-      const fs = flowStates[flowId]
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
       postMessageToExtension({
@@ -318,7 +470,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         },
       })
       immerSet((draft) => {
-        const s = draft.flowStates[flowId]
+        const s = draft.flowRunStates[flowId]
         if (!s) return
         s.phase = 'stopped'
         s.pendingQuestion = undefined
@@ -333,7 +485,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         if (!flow) return
         const existingNames = new Set((flow.agents ?? []).map((a) => a.agent_name))
 
-        // agent可能有新名字 但是关联关系不变
         const nameMap = new Map<string, string>()
         for (const agent of newAgents) {
           const base = agent.agent_name
@@ -344,13 +495,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           existingNames.add(newName)
         }
 
-        // id 重映射：旧 id → 新 id，用于 next_agent 引用更新
         const idMap = new Map<string, string>()
         for (const agent of newAgents) {
           idMap.set(agent.id, crypto.randomUUID())
         }
 
-        // Remap names and next_agent references
         remapped = newAgents.map((agent) => ({
           ...agent,
           id: idMap.get(agent.id)!,

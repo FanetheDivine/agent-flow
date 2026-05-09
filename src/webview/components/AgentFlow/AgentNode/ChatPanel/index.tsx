@@ -96,12 +96,12 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   const pending = useFlowStore(selectPendingQuestionFor(flowId, agentId))
   const pendingToolPerm = useFlowStore(selectPendingToolPermissionFor(flowId, agentId))
   const answeredToolPermissions = useFlowStore(selectAnsweredToolPermissions(flowId))
-  const allSessions = useFlowStore((s) => s.flowStates[flowId]?.sessions)
+  const allSessions = useFlowStore((s) => s.flowRunStates[flowId]?.sessions)
   const sessions = useMemo<AgentSession[]>(
     () => allSessions?.filter((s) => s.agentId === agentId) ?? [],
     [allSessions, agentId],
   )
-  const answeredQuestions = useFlowStore((s) => s.flowStates[flowId]?.answeredQuestions)
+  const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
 
   const canInterrupt = agentCanInterrupt(phase)
   const canInterruptFlow = flowCanInterrupt(flowPhase)

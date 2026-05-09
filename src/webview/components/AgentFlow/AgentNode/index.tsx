@@ -23,7 +23,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
-  const flowPhase = useFlowStore((s) => s.flowStates[flowId]?.phase)
+  const flowPhase = useFlowStore((s) => s.flowRunStates[flowId]?.phase)
   const save = useFlowStore((s) => s.save)
 
   const { message } = App.useApp()
@@ -32,7 +32,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const destructiveReadOnly = flowPhase ? flowIsDestructiveReadOnly(flowPhase) : false
 
   const isCurrentAgent = useFlowStore((s) => {
-    const fs = s.flowStates[flowId]
+    const fs = s.flowRunStates[flowId]
     return fs?.sessions[fs.sessions.length - 1]?.agentId === agentId
   })
   const outputs = agent?.outputs ?? []
