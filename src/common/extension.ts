@@ -1,6 +1,7 @@
 import { createSdkMcpServer, SdkMcpToolDefinition, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import { type Agent, FlowSchema, validateFlow } from '.'
+import { toJSONSchema } from 'zod/v4/core'
+import { type Agent, AgentSchema, FlowSchema, OutputSchema, validateFlow } from '.'
 
 // 仅extension可用
 
@@ -44,6 +45,7 @@ function withErrorBoundary<TArgs>(
  * - `getShareValues` — 按键读取共享上下文
  * - `getAllShareValues` — 读取全部共享上下文
  * - `validateFlow` — 校验工作流定义是否合法
+ * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
 export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
@@ -150,6 +152,7 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
       const result = validateFlow(parsed)
       const hasErrors = Object.keys(result).length > 0
       return {
+        isError: hasErrors,
         content: [
           {
             type: 'text',
@@ -161,7 +164,34 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
       }
     }),
   )
-  tools.push(validateFlowTool)
+
+  const getFlowJSONSchemaTool = tool(
+    'getFlowJSONSchema',
+    '获取 Flow 数据结构的 JSON Schema 定义。在生成、修改或理解工作流结构时调用，以获取准确的字段定义与约束。',
+    {},
+    withErrorBoundary('getFlowJSONSchema', async () => {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              toJSONSchema(
+                z
+                  .registry<{ id?: string }>()
+                  .add(OutputSchema, { id: 'Output' })
+                  .add(AgentSchema, { id: 'Agent' })
+                  .add(FlowSchema, { id: 'Flow' }),
+              ).schemas,
+              null,
+              2,
+            ),
+          },
+        ],
+      }
+    }),
+  )
+  tools.push(validateFlowTool, getFlowJSONSchemaTool)
+
   return createSdkMcpServer({
     name: 'AgentControllerMcp',
     version: '1.0.0',

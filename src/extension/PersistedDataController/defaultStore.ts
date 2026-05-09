@@ -1,18 +1,4 @@
-import { z } from 'zod'
-import { toJSONSchema } from 'zod/v4/core'
-import { type Flow, FlowSchema, AgentSchema, OutputSchema, PersistedData } from '@/common'
-
-const flowSchemaJson = JSON.stringify(
-  toJSONSchema(
-    z
-      .registry<{ id?: string }>()
-      .add(OutputSchema, { id: 'Output' })
-      .add(AgentSchema, { id: 'Agent' })
-      .add(FlowSchema, { id: 'Flow' }),
-  ).schemas,
-  null,
-  2,
-)
+import { type Flow, PersistedData } from '@/common'
 
 /**
  * 内置 Flow，不可编辑/删除，始终出现在列表头部
@@ -76,8 +62,7 @@ const PresetFlows: Flow[] = [
         agent_prompt: [
           '【你的产物】一份严格符合 FlowSchema 的 Flow JSON 字符串。其中的每个Agent都默认允许所有工具，允许自动完成。',
           '',
-          'FlowSchema 定义如下：',
-          flowSchemaJson,
+          '如何获取FlowSchema：调用 getFlowJSONSchema',
           '',
           '【输入的两种形态】',
           ' 1. 一份"步骤列表"（来自需求分析 Agent）——把每一步映射为一个 Agent 节点，按顺序连接成 Flow。',
