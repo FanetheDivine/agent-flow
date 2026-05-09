@@ -3,6 +3,7 @@ import { match } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
+export * from './flowState'
 
 // ── Flow Schemas & Types ────────────────────────────────────────────────────────────────
 

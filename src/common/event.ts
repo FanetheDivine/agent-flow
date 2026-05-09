@@ -1,5 +1,6 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { AskUserQuestionOutput, Flow, PersistedData } from '.'
+import type { AskUserQuestionOutput, Flow } from '.'
+import type { FlowRunState } from './flowState'
 
 /**
  * AI消息类型 — 会话中一切事件的统一类型（判别联合），
@@ -58,8 +59,8 @@ export type ExtensionFromWebviewEvents = {
 
 /** extension发出 webview接受的事件 */
 export type ExtensionToWebviewEvents = {
-  /** 返回所有 flows */
-  load: PersistedData
+  /** 返回所有 flows，以及 extension 端维护的运行态 */
+  load: { flows: Flow[]; flowStates: Record<string, FlowRunState> }
   /** extension异常 */
   error: string
   /** 向当前 active 的输入框注入文本（由 VSCode 编辑器侧快捷键触发） */
@@ -126,8 +127,8 @@ type FlowSignalPayload = {
     toolName: string
     input: unknown
   }
-  /** 从 VSCode 通知栏点击后，聚焦到指定 Flow 和 ChatPanel */
-  focusFlow: { flowId: string; agentId: string }
+  /** 从 VSCode 通知栏点击后，聚焦到指定 Flow */
+  focusFlow: { flowId: string }
 }
 
 /** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
@@ -138,6 +139,9 @@ export type ExtensionFlowSignalEvents = TypeWithPrefix<
   WithFlowId<FlowSignalPayload>,
   'flow.signal.'
 >
+
+/** Extension 发出的Flow信号消息（ExtensionToWebviewMessage 中 flow.signal.* 的子集） */
+export type ExtensionFlowSignalMessage = EventMessageType<ExtensionFlowSignalEvents>
 
 /** Flow 指令基础 payload（不含 flowId） */
 type FlowCommandPayload = {

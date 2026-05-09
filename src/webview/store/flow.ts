@@ -2,97 +2,44 @@ import type { NotificationInstance } from 'antd/es/notification/interface'
 import { produce } from 'immer'
 import { match, P } from 'ts-pattern'
 import { create } from 'zustand'
-import type {
-  Agent,
-  Flow,
-  ExtensionToWebviewMessage,
-  UserMessageType,
-  AskUserQuestionInput,
-  AskUserQuestionOutput,
+import {
+  type Agent,
+  type AskUserQuestionOutput,
+  type ExtensionToWebviewMessage,
+  type Flow,
+  type FlowState,
+  type NotifyEffect,
+  type UserMessageType,
+  updateState,
 } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
+// 选择器、phase helper、state 类型已迁移至 @/common/flowState；此处 re-export，保持现有引用兼容
+export type {
+  AgentPhase,
+  AgentSession,
+  ChatDrawerState,
+  FlowPhase,
+  FlowRunState,
+  FlowState,
+  PendingQuestion,
+  PendingToolPermission,
+} from '@/common'
+export {
+  agentCanInterrupt,
+  agentCanSendMessage,
+  agentIsRunning,
+  flowCanInterrupt,
+  flowIsDestructiveReadOnly,
+  selectAgentPhase,
+  selectAnsweredToolPermissions,
+  selectFlowPhase,
+  selectPendingQuestionFor,
+  selectPendingToolPermissionFor,
+} from '@/common'
+
 /** init 参数 —— 从 App.useApp() 拿到的主题化 api（至少包含 notification） */
 export type AppApi = { notification: NotificationInstance }
-
-export type AgentSession = {
-  sessionId: string
-  agentId: string
-  /** 当前session的message */
-  messages: ExtensionToWebviewMessage[]
-  completed: boolean
-  outputName?: string
-}
-
-/**
- * Flow 级 phase —— 只描述整个 flow 的生命周期。
- * - idle: 未启动
- * - starting: flowStart 命令已发送，等待 signal.flowStart
- * - running: AI 在产出 / 工具在执行
- * - awaiting: 当前 agent 停下，等待用户动作（普通消息或回答 AskUserQuestion）
- * - completed: 全部 agent 完成（终态）
- * - stopped: 用户主动停止（终态）
- * - error: 出错（终态）
- */
-export type FlowPhase =
-  | 'idle'
-  | 'starting'
-  | 'running'
-  | 'awaiting'
-  | 'completed'
-  | 'stopped'
-  | 'error'
-
-export type PendingQuestion = {
-  toolUseId: string
-  input: AskUserQuestionInput
-  /** 所属 session，用于切换 agent 时自然失效 */
-  sessionId: string
-}
-
-export type PendingToolPermission = {
-  toolUseId: string
-  toolName: string
-  input: unknown
-  /** 所属 session，用于切换 agent 时自然失效 */
-  sessionId: string
-}
-
-export type FlowRunState = {
-  runKey: string
-  phase: FlowPhase
-  /** 每个flow拥有的session */
-  sessions: AgentSession[]
-  /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
-  answeredQuestions: Record<string, AskUserQuestionOutput>
-  /** 当前未回答的 AskUserQuestion，显式存储（不从消息反推） */
-  pendingQuestion?: PendingQuestion
-  /** 已回答的工具权限请求：toolUseId -> allow，用于 UI 回显历史态 */
-  answeredToolPermissions: Record<string, { allow: boolean }>
-  /** 当前未回答的工具权限请求 */
-  pendingToolPermission?: PendingToolPermission
-  runId?: string
-  currentSessionId?: string
-  currentAgentId?: string
-  currentAgentName?: string
-}
-
-export type FlowState = {
-  loading: boolean
-  flows: Flow[]
-  activeFlowId?: string
-  /** flow的state */
-  flowStates: Record<string, FlowRunState>
-  globalError?: string
-  chatDrawer?: {
-    flowId: string
-    agentId: string
-    agentName: string
-  }
-  flowListCollapsed: boolean
-  /** 当前正在编辑的 agent（全局唯一，用于判断是否有弹窗阻塞切换） */
-  editingAgent?: { flowId: string; agentId: string }
-}
 
 type FlowStoreType = FlowState & {
   /** 初始化：请求 flows 并订阅 extension 消息，返回 cleanup 函数 */
@@ -112,108 +59,6 @@ type FlowStoreType = FlowState & {
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
 
-// ── Agent 级派生状态 ──────────────────────────────────────────────────────────
-
-/**
- * Agent 级 phase —— 每个 ChatPanel 只关心自己的状态。
- * - idle: 该 agent 未参与过 / 后续 agent 已接管（也是未启动 flow 的默认）
- * - starting / running / error: 直接映射 flow phase（仅对 currentAgent 有效）
- * - awaiting-message: 等用户消息
- * - awaiting-question: 有未回答的 AskUserQuestion
- * - completed: 该 agent 的 session 已结束
- * - stopped: 用户主动停止整个 flow
- */
-export type AgentPhase =
-  | 'idle'
-  | 'starting'
-  | 'running'
-  | 'awaiting-message'
-  | 'awaiting-question'
-  | 'completed'
-  | 'stopped'
-  | 'error'
-
-export const selectAgentPhase =
-  (flowId: string, agentId: string) =>
-  (s: FlowState): AgentPhase => {
-    const fs = s.flowStates[flowId]
-    if (!fs) return 'idle'
-    if (fs.currentAgentId === agentId) {
-      if (fs.phase === 'awaiting') {
-        return fs.pendingQuestion ? 'awaiting-question' : 'awaiting-message'
-      }
-      // 'idle' 不会出现在 currentAgentId 存在的情况下；但保险起见原样返回
-      if (fs.phase === 'idle') return 'idle'
-      return fs.phase
-    }
-    // 非当前 agent：看这个 agent 的最后一个 session 是否完成
-    const last = [...fs.sessions].reverse().find((sess) => sess.agentId === agentId)
-    if (last?.completed) return 'completed'
-    return 'idle'
-  }
-
-export const selectPendingQuestionFor =
-  (flowId: string, agentId: string) =>
-  (s: FlowState): PendingQuestion | undefined => {
-    const fs = s.flowStates[flowId]
-    if (!fs || fs.currentAgentId !== agentId) return undefined
-    return fs.pendingQuestion
-  }
-
-export const selectPendingToolPermissionFor =
-  (flowId: string, agentId: string) =>
-  (s: FlowState): PendingToolPermission | undefined => {
-    const fs = s.flowStates[flowId]
-    if (!fs || fs.currentAgentId !== agentId) return undefined
-    return fs.pendingToolPermission
-  }
-
-const EMPTY_ANSWERED: Record<string, { allow: boolean }> = {}
-export const selectAnsweredToolPermissions =
-  (flowId: string) =>
-  (s: FlowState): Record<string, { allow: boolean }> =>
-    s.flowStates[flowId]?.answeredToolPermissions ?? EMPTY_ANSWERED
-
-// ── UI helper ────────────────────────────────────────────────────────────────
-
-export const agentCanSendMessage = (p: AgentPhase) =>
-  p === 'idle' || p === 'awaiting-message' || p === 'awaiting-question' || p === 'stopped'
-export const agentCanInterrupt = (p: AgentPhase) => p === 'running' || p === 'starting'
-export const agentIsRunning = (p: AgentPhase) => p === 'running' || p === 'starting'
-export const flowIsDestructiveReadOnly = (p: FlowPhase) => p === 'running' || p === 'starting'
-export const flowCanInterrupt = (p: FlowPhase) =>
-  p === 'starting' || p === 'running' || p === 'awaiting'
-
-export const selectFlowPhase =
-  (flowId: string) =>
-  (s: FlowState): FlowPhase =>
-    s.flowStates[flowId]?.phase ?? 'idle'
-
-/** 获取当前 session */
-function getCurrentSession(fs: FlowRunState): AgentSession | undefined {
-  return fs.sessions.find((s) => s.sessionId === fs.currentSessionId)
-}
-
-/** 从 assistant 消息中抽取首个未回答的 AskUserQuestion */
-function extractPendingQuestion(
-  msg: Extract<ExtensionToWebviewMessage, { type: 'flow.signal.aiMessage' }>,
-  answered: Record<string, AskUserQuestionOutput>,
-  sessionId: string,
-): PendingQuestion | undefined {
-  const m = msg.data.message
-  if (m.type !== 'assistant') return undefined
-  const blocks = m.message.content
-  if (!Array.isArray(blocks)) return undefined
-  for (const block of blocks) {
-    if (block.type !== 'tool_use' || block.name !== 'AskUserQuestion') continue
-    if (answered[block.id]) continue
-    const input = block.input as AskUserQuestionInput | undefined
-    if (!input || !Array.isArray(input.questions)) continue
-    return { toolUseId: block.id, input, sessionId }
-  }
-  return undefined
-}
-
 export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
     set(produce(updateFn))
@@ -221,8 +66,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
   /** 由 init 注入，来自 <AntdApp> 的 App.useApp()，保证 notification 继承 ConfigProvider 主题 */
   let notificationApi: NotificationInstance | null = null
-
-  type NotifyReason = 'awaiting-message' | 'awaiting-question' | 'flow-completed' | 'agent-error'
 
   /** 追踪当前所有已弹出的通知 key，便于按 flow 批量销毁 */
   const activeNotificationKeys = new Set<string>()
@@ -236,67 +79,36 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     }
   }
 
-  /**
-   * 在 reducer 内直接调用。根据规则决定是否展示通知，并在 webPanel 可见且 activeFlow 匹配但未打开 ChatDrawer 时自动打开。
-   *
-   * 规则：
-   * - webPanel 不可见（document hidden）→ 始终通知
-   * - webPanel 可见：
-   *   - activeFlowId !== flowId → 通知
-   *   - 打开了非发出 agent 的 ChatDrawer → 通知
-   *   - 未打开 ChatDrawer 且 activeFlowId === flowId → 自动打开发出 agent 的 ChatDrawer，不通知
-   *   - 已打开发出 agent 的 ChatDrawer → 不通知
-   */
-  const dispatchNotification = (
-    draft: FlowStoreType,
-    opts: {
-      flowId: string
-      flowName: string
-      agentId: string
-      agentName: string
-      reason: NotifyReason
-    },
-  ) => {
-    const { flowId, flowName, agentId, agentName, reason } = opts
-    const panelVisible =
-      typeof document === 'undefined' ? false : document.visibilityState === 'visible'
-    const { activeFlowId, chatDrawer } = draft
-
-    const shouldAutoOpen = panelVisible && activeFlowId === flowId && !chatDrawer
-    if (shouldAutoOpen) {
-      draft.chatDrawer = { flowId, agentId, agentName }
-      return
+  /** 把 updateState 返回的 notifications 翻译成 antd notification.info 调用 */
+  const fireNotifications = (effects: NotifyEffect[]) => {
+    for (const n of effects) {
+      const key = `flow-notify-${n.flowId}-${n.agentId}-${n.reason}`
+      activeNotificationKeys.add(key)
+      notificationApi?.info({
+        key,
+        duration: 0,
+        message: match(n.reason)
+          .with('flow-completed', () => `工作流「${n.flowName}」已完成`)
+          .with('agent-error', () => `Agent「${n.agentName}」运行出错`)
+          .with(
+            P.union('awaiting-message', 'awaiting-question'),
+            () => `Agent「${n.agentName}」正在等待回复`,
+          )
+          .exhaustive(),
+        onClose: () => {
+          activeNotificationKeys.delete(key)
+        },
+        onClick: () => {
+          notificationApi?.destroy(key)
+          activeNotificationKeys.delete(key)
+          immerSet((d) => {
+            d.activeFlowId = n.flowId
+            d.chatDrawer = { flowId: n.flowId, agentId: n.agentId, agentName: n.agentName }
+            d.editingAgent = undefined
+          })
+        },
+      })
     }
-
-    // 仍在对应 ChatPanel 上不通知
-    if (panelVisible && chatDrawer?.flowId === flowId && chatDrawer?.agentId === agentId) return
-
-    const key = `flow-notify-${flowId}-${agentId}-${reason}`
-    activeNotificationKeys.add(key)
-    notificationApi?.info({
-      key,
-      duration: 0,
-      message: match(reason)
-        .with('flow-completed', () => `工作流「${flowName}」已完成`)
-        .with('agent-error', () => `Agent「${agentName}」运行出错`)
-        .with(
-          P.union('awaiting-message', 'awaiting-question'),
-          () => `Agent「${agentName}」正在等待回复`,
-        )
-        .exhaustive(),
-      onClose: () => {
-        activeNotificationKeys.delete(key)
-      },
-      onClick: () => {
-        notificationApi?.destroy(key)
-        activeNotificationKeys.delete(key)
-        immerSet((d) => {
-          d.activeFlowId = flowId
-          d.chatDrawer = { flowId, agentId, agentName }
-          d.editingAgent = undefined
-        })
-      },
-    })
   }
 
   return {
@@ -309,223 +121,44 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
     init: (app) => {
       notificationApi = app.notification
-      postMessageToExtension({ type: 'load', data: undefined })
       const onMessage = (msg: ExtensionToWebviewMessage) => {
-        immerSet((draft) => {
-          if (msg.type === 'error') {
-            console.error(msg)
-            draft.globalError = (msg.data as { message?: string })?.message ?? String(msg.data)
-            return
-          }
-          if (msg.type === 'load') {
-            const { data } = msg
+        // 全局事件（非 flow.signal.*）不进入 updateState：直接落到 store
+        if (msg.type === 'load') {
+          immerSet((draft) => {
             draft.loading = false
-            draft.flows = data.flows
-            draft.activeFlowId = data.flows[0]?.id
-            return
-          }
-          if (msg.type === 'insertSelection') {
-            // 由 App 层订阅处理，store 不参与
-            return
-          }
-          const runId = 'runId' in msg.data ? msg.data.runId : undefined
-          const flowId = msg.data.flowId
-          const fs = draft.flowStates[flowId]
-          if (!fs) return
-          const flow = draft.flows.find((f) => f.id === flowId)
-
-          if (msg.type === 'flow.signal.flowStart') {
-            if (fs.runKey !== msg.data.runKey) return
-            fs.runId = runId
-            fs.phase = 'awaiting'
-            fs.currentSessionId = msg.data.sessionId
-            fs.currentAgentId = msg.data.agentId
-            fs.pendingQuestion = undefined
-            fs.pendingToolPermission = undefined
-            // 从 flow 定义中查找 agent name
-            const agent = flow?.agents?.find((a) => a.id === msg.data.agentId)
-            fs.currentAgentName = agent?.agent_name
-            fs.sessions.push({
-              sessionId: msg.data.sessionId,
-              agentId: msg.data.agentId,
-              messages: [],
-              completed: false,
-            })
-            return
-          }
-          if (fs.runId !== runId) return
-
-          // 追加消息到当前 session
-          const session = getCurrentSession(fs)
-          session?.messages.push(msg)
-
-          const prevPendingToolUseId = fs.pendingQuestion?.toolUseId
-
-          match(msg)
-            .with({ type: 'flow.signal.aiMessage' }, (m) => {
-              const { message } = m.data
-              if (message.type === 'result') {
-                // 不要在终态（completed / stopped / error）之后退回 awaiting
-                if (fs.phase !== 'completed' && fs.phase !== 'stopped' && fs.phase !== 'error') {
-                  fs.phase = 'awaiting'
-                  // result 消息 = turn 结束，若此时没有 pendingQuestion 则为 awaiting-message
-                  if (!fs.pendingQuestion && fs.currentAgentId) {
-                    const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-                    dispatchNotification(draft, {
-                      flowId,
-                      flowName: flow?.name ?? '',
-                      agentId: fs.currentAgentId,
-                      agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
-                      reason: 'awaiting-message',
-                    })
-                  }
-                }
-                return
-              }
-              if (fs.currentSessionId) {
-                const found = extractPendingQuestion(m, fs.answeredQuestions, fs.currentSessionId)
-                if (found) {
-                  fs.pendingQuestion = found
-                  fs.phase = 'awaiting'
-                  // 只在从无 pending 或换到新 toolUseId 时才通知
-                  if (found.toolUseId !== prevPendingToolUseId && fs.currentAgentId) {
-                    const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-                    dispatchNotification(draft, {
-                      flowId,
-                      flowName: flow?.name ?? '',
-                      agentId: fs.currentAgentId,
-                      agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
-                      reason: 'awaiting-question',
-                    })
-                  }
-                  return
-                }
-              }
-              // 只在没有未回答的提问/权限请求时才设为 running
-              if (!fs.pendingQuestion && !fs.pendingToolPermission) {
-                fs.phase = 'running'
-              }
-            })
-            .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
-              if (session) {
-                session.completed = true
-                session.outputName = data.output?.name
-              }
-              fs.pendingQuestion = undefined
-              fs.pendingToolPermission = undefined
-              if (data.output) {
-                fs.currentSessionId = data.output.newSessionId
-                // next_agent 存储的是 id，从 flow 定义中查找对应 agent
-                const currentAgent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-                const completedAgentId = currentAgent?.id
-                const output = currentAgent?.outputs?.find(
-                  (o) => o.output_name === data.output!.name,
-                )
-                const nextAgentId = output?.next_agent
-                if (nextAgentId) {
-                  const nextAgent = flow?.agents?.find((a) => a.id === nextAgentId)
-                  fs.currentAgentId = nextAgentId
-                  fs.currentAgentName = nextAgent?.agent_name
-                  fs.phase = 'awaiting'
-                  // 自动跟随：当前 ChatDrawer 显示的是刚完成的 agent，或用户停留在当前 flow 且未打开任何 ChatDrawer，
-                  // 切到/打开下一个 agent 的 ChatPanel；其余情况（看着别的 agent、不在当前 flow）保持不变，靠通知引导
-                  const drawerForCompleted =
-                    draft.chatDrawer?.flowId === flowId &&
-                    draft.chatDrawer.agentId === completedAgentId
-                  const inThisFlowWithoutDrawer = !draft.chatDrawer && draft.activeFlowId === flowId
-                  if (drawerForCompleted || inThisFlowWithoutDrawer) {
-                    draft.chatDrawer = {
-                      flowId,
-                      agentId: nextAgentId,
-                      agentName: nextAgent?.agent_name ?? '',
-                    }
-                  }
-                  fs.sessions.push({
-                    sessionId: data.output.newSessionId,
-                    agentId: nextAgentId,
-                    messages: [],
-                    completed: false,
-                  })
-                } else {
-                  fs.phase = 'completed'
-                  // flow 结束通知：以刚完成的 agent 作为定位点
-                  if (fs.currentAgentId) {
-                    const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-                    dispatchNotification(draft, {
-                      flowId,
-                      flowName: flow?.name ?? '',
-                      agentId: fs.currentAgentId,
-                      agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
-                      reason: 'flow-completed',
-                    })
-                  }
-                  fs.currentAgentId = undefined
-                  fs.currentAgentName = undefined
-                }
-              } else {
-                fs.phase = 'completed'
-                if (fs.currentAgentId) {
-                  const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-                  dispatchNotification(draft, {
-                    flowId,
-                    flowName: flow?.name ?? '',
-                    agentId: fs.currentAgentId,
-                    agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
-                    reason: 'flow-completed',
-                  })
-                }
-                fs.currentAgentId = undefined
-                fs.currentAgentName = undefined
-              }
-            })
-            .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {
-              fs.pendingToolPermission = {
-                toolUseId: data.toolUseId,
-                toolName: data.toolName,
-                input: data.input,
-                sessionId: data.sessionId,
-              }
-              fs.phase = 'awaiting'
-            })
-            .with({ type: 'flow.signal.agentInterrupted' }, () => {
-              fs.phase = 'awaiting'
-              fs.pendingQuestion = undefined
-              fs.pendingToolPermission = undefined
-            })
-            .with({ type: 'flow.signal.agentError' }, ({ data }) => {
-              fs.phase = 'error'
-              fs.pendingQuestion = undefined
-              fs.pendingToolPermission = undefined
-              const agent = flow?.agents?.find((a) => a.id === data.agentId)
-              dispatchNotification(draft, {
-                flowId,
-                flowName: flow?.name ?? '',
-                agentId: data.agentId,
-                agentName: agent?.agent_name ?? '',
-                reason: 'agent-error',
-              })
-            })
-            .with({ type: 'flow.signal.error' }, () => {
-              fs.phase = 'error'
-              fs.pendingQuestion = undefined
-              fs.pendingToolPermission = undefined
-            })
-            .with({ type: 'flow.signal.focusFlow' }, ({ data }) => {
-              const flow = draft.flows.find((f) => f.id === data.flowId)
-              const agent = flow?.agents?.find((a) => a.id === data.agentId)
-              draft.activeFlowId = data.flowId
-              draft.chatDrawer = {
-                flowId: data.flowId,
-                agentId: data.agentId,
-                agentName: agent?.agent_name ?? '',
-              }
-              draft.editingAgent = undefined
-            })
-            .exhaustive()
+            draft.flows = msg.data.flows
+            draft.flowStates = msg.data.flowStates
+            draft.activeFlowId = msg.data.flows[0]?.id
+          })
+          return
+        }
+        if (msg.type === 'error') {
+          console.error(msg)
+          immerSet((draft) => {
+            draft.globalError = (msg.data as { message?: string })?.message ?? String(msg.data)
+          })
+          return
+        }
+        if (msg.type === 'insertSelection') {
+          // 由 App 层订阅处理，store 不参与
+          return
+        }
+        // 其余皆为 flow.signal.*：交给 updateState 这一信号驱动的 reducer
+        let pendingNotifications: NotifyEffect[] = []
+        set((prev) => {
+          const panelVisible =
+            typeof document === 'undefined' ? false : document.visibilityState === 'visible'
+          const { state, notifications } = updateState(prev, msg, { panelVisible })
+          pendingNotifications = notifications
+          // updateState 通过 immer 产出新的 state；此处把 store 的 action 方法保留下来
+          return state as FlowStoreType
         })
+        fireNotifications(pendingNotifications)
       }
 
-      return subscribeExtensionMessage(onMessage)
+      const cleanup = subscribeExtensionMessage(onMessage)
+      postMessageToExtension({ type: 'load', data: undefined })
+      return cleanup
     },
     runFlow: (flowId, agentId, initMessage) => {
       const { flows } = get()

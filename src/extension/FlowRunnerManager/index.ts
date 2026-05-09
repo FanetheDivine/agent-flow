@@ -58,7 +58,7 @@ export class FlowRunnerManager {
     this.runners.clear()
   }
 
-  private disposeRunner(flowId: string): void {
+  disposeRunner(flowId: string): void {
     const existing = this.runners.get(flowId)
     if (existing) {
       existing.dispose()
