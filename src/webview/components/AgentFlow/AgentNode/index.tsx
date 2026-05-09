@@ -5,6 +5,7 @@ import { EditOutlined, MessageOutlined, PlayCircleOutlined, RobotOutlined } from
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent } from '@/common'
 import { useFlowStore, selectAgentPhase, flowIsDestructiveReadOnly } from '@/webview/store/flow'
+import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
@@ -27,6 +28,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const save = useFlowStore((s) => s.save)
 
   const { message } = App.useApp()
+  const startFlow = useStartFlow()
 
   const destructiveReadOnly = flowPhase ? flowIsDestructiveReadOnly(flowPhase) : false
 
@@ -116,9 +118,9 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                 className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#52c41a]'
                 onClick={(e) => {
                   e.stopPropagation()
-                  const { runFlow, openChatDrawer } = useFlowStore.getState()
+                  const { openChatDrawer } = useFlowStore.getState()
                   openChatDrawer(flowId, agentId, agentName)
-                  runFlow(flowId, agentId, {
+                  startFlow(flowId, agentId, {
                     type: 'user',
                     message: {
                       role: 'user',
