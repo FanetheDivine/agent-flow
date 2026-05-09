@@ -70,7 +70,10 @@ export type PendingToolPermission = {
 }
 
 export type FlowRunState = {
+  /** webview 生成，用于防止多次 run的竞态问题 仅在flowStart使用 */
   runKey: string
+  /** extension 生成的唯一ID 在校验runKey后生成 */
+  runId?: string
   phase: FlowPhase
   /** 每个flow拥有的session */
   sessions: AgentSession[]
@@ -82,10 +85,6 @@ export type FlowRunState = {
   answeredToolPermissions: Record<string, { allow: boolean }>
   /** 当前未回答的工具权限请求 */
   pendingToolPermission?: PendingToolPermission
-  runId?: string
-  currentSessionId?: string
-  currentAgentId?: string
-  currentAgentName?: string
 }
 
 export type ChatDrawerState = {
@@ -130,11 +129,11 @@ export const selectAgentPhase =
   (s: FlowState): AgentPhase => {
     const fs = s.flowStates[flowId]
     if (!fs) return 'idle'
-    if (fs.currentAgentId === agentId) {
+    const currentAgentId = getLastSession(fs)?.agentId
+    if (currentAgentId === agentId) {
       if (fs.phase === 'awaiting') {
         return fs.pendingQuestion ? 'awaiting-question' : 'awaiting-message'
       }
-      // 'idle' 不会出现在 currentAgentId 存在的情况下；但保险起见原样返回
       if (fs.phase === 'idle') return 'idle'
       return fs.phase
     }
@@ -148,7 +147,7 @@ export const selectPendingQuestionFor =
   (flowId: string, agentId: string) =>
   (s: FlowState): PendingQuestion | undefined => {
     const fs = s.flowStates[flowId]
-    if (!fs || fs.currentAgentId !== agentId) return undefined
+    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
     return fs.pendingQuestion
   }
 
@@ -156,7 +155,7 @@ export const selectPendingToolPermissionFor =
   (flowId: string, agentId: string) =>
   (s: FlowState): PendingToolPermission | undefined => {
     const fs = s.flowStates[flowId]
-    if (!fs || fs.currentAgentId !== agentId) return undefined
+    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
     return fs.pendingToolPermission
   }
 
@@ -171,6 +170,36 @@ export const selectFlowPhase =
   (s: FlowState): FlowPhase =>
     s.flowStates[flowId]?.phase ?? 'idle'
 
+/** 派生：当前活跃的 session（第一个未完成的） */
+export const selectCurrentSession =
+  (flowId: string) =>
+  (s: FlowState): AgentSession | undefined => {
+    const fs = s.flowStates[flowId]
+    if (!fs) return undefined
+    return getCurrentSession(fs)
+  }
+
+/** 派生：当前 agent id（取最后一个 session） */
+export const selectCurrentAgentId =
+  (flowId: string) =>
+  (s: FlowState): string | undefined => {
+    const fs = s.flowStates[flowId]
+    if (!fs) return undefined
+    return getLastSession(fs)?.agentId
+  }
+
+/** 派生：当前 agent name（通过 agentId 从 flow 定义查找） */
+export const selectCurrentAgentName =
+  (flowId: string) =>
+  (s: FlowState): string | undefined => {
+    const fs = s.flowStates[flowId]
+    if (!fs) return undefined
+    const agentId = getLastSession(fs)?.agentId
+    if (!agentId) return undefined
+    const flow = s.flows.find((f) => f.id === flowId)
+    return flow?.agents?.find((a) => a.id === agentId)?.agent_name
+  }
+
 // ── UI helper ────────────────────────────────────────────────────────────────
 
 export const agentCanSendMessage = (p: AgentPhase) =>
@@ -183,8 +212,13 @@ export const flowCanInterrupt = (p: FlowPhase) =>
 
 // ── 内部辅助 ─────────────────────────────────────────────────────────────────
 
+/** 派生：最后一个 session（最新推入的） */
+function getLastSession(fs: FlowRunState): AgentSession | undefined {
+  return fs.sessions[fs.sessions.length - 1]
+}
+
 function getCurrentSession(fs: FlowRunState): AgentSession | undefined {
-  return fs.sessions.find((s) => s.sessionId === fs.currentSessionId)
+  return fs.sessions.find((s) => !s.completed)
 }
 
 /** 从 assistant 消息中抽取首个未回答的 AskUserQuestion */
@@ -274,13 +308,8 @@ export function updateState(
       if (fs.runKey !== msg.data.runKey) return
       fs.runId = runId
       fs.phase = 'awaiting'
-      fs.currentSessionId = msg.data.sessionId
-      fs.currentAgentId = msg.data.agentId
       fs.pendingQuestion = undefined
       fs.pendingToolPermission = undefined
-      // 从 flow 定义中查找 agent name
-      const agent = flow?.agents?.find((a) => a.id === msg.data.agentId)
-      fs.currentAgentName = agent?.agent_name
       fs.sessions.push({
         sessionId: msg.data.sessionId,
         agentId: msg.data.agentId,
@@ -305,32 +334,34 @@ export function updateState(
           if (fs.phase !== 'completed' && fs.phase !== 'stopped' && fs.phase !== 'error') {
             fs.phase = 'awaiting'
             // result 消息 = turn 结束，若此时没有 pendingQuestion 则为 awaiting-message
-            if (!fs.pendingQuestion && fs.currentAgentId) {
-              const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
+            const currentAgentId = getLastSession(fs)?.agentId
+            if (!fs.pendingQuestion && currentAgentId) {
+              const agent = flow?.agents?.find((a) => a.id === currentAgentId)
               dispatchNotification(draft, {
                 flowId,
                 flowName: flow?.name ?? '',
-                agentId: fs.currentAgentId,
-                agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
+                agentId: currentAgentId,
+                agentName: agent?.agent_name ?? '',
                 reason: 'awaiting-message',
               })
             }
           }
           return
         }
-        if (fs.currentSessionId) {
-          const found = extractPendingQuestion(m, fs.answeredQuestions, fs.currentSessionId)
+        const session = getCurrentSession(fs)
+        if (session) {
+          const found = extractPendingQuestion(m, fs.answeredQuestions, session.sessionId)
           if (found) {
             fs.pendingQuestion = found
             fs.phase = 'awaiting'
             // 只在从无 pending 或换到新 toolUseId 时才通知
-            if (found.toolUseId !== prevPendingToolUseId && fs.currentAgentId) {
-              const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
+            if (found.toolUseId !== prevPendingToolUseId) {
+              const agent = flow?.agents?.find((a) => a.id === session.agentId)
               dispatchNotification(draft, {
                 flowId,
                 flowName: flow?.name ?? '',
-                agentId: fs.currentAgentId,
-                agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
+                agentId: session.agentId,
+                agentName: agent?.agent_name ?? '',
                 reason: 'awaiting-question',
               })
             }
@@ -350,22 +381,19 @@ export function updateState(
         fs.pendingQuestion = undefined
         fs.pendingToolPermission = undefined
         if (data.output) {
-          fs.currentSessionId = data.output.newSessionId
           // next_agent 存储的是 id，从 flow 定义中查找对应 agent
-          const currentAgent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-          const completedAgentId = currentAgent?.id
-          const output = currentAgent?.outputs?.find((o) => o.output_name === data.output!.name)
+          const completedAgentId = getLastSession(fs)?.agentId
+          const output = flow?.agents
+            ?.find((a) => a.id === completedAgentId)
+            ?.outputs?.find((o) => o.output_name === data.output!.name)
           const nextAgentId = output?.next_agent
           if (nextAgentId) {
             const nextAgent = flow?.agents?.find((a) => a.id === nextAgentId)
-            fs.currentAgentId = nextAgentId
-            fs.currentAgentName = nextAgent?.agent_name
             fs.phase = 'awaiting'
             // 自动跟随：当前 ChatDrawer 显示的是刚完成的 agent，或用户停留在当前 flow 且未打开任何 ChatDrawer，
             // 切到/打开下一个 agent 的 ChatPanel；其余情况（看着别的 agent、不在当前 flow）保持不变，靠通知引导
             const drawerForCompleted =
-              draft.chatDrawer?.flowId === flowId &&
-              draft.chatDrawer.agentId === completedAgentId
+              draft.chatDrawer?.flowId === flowId && draft.chatDrawer.agentId === completedAgentId
             const inThisFlowWithoutDrawer = !draft.chatDrawer && draft.activeFlowId === flowId
             if (drawerForCompleted || inThisFlowWithoutDrawer) {
               draft.chatDrawer = {
@@ -383,33 +411,31 @@ export function updateState(
           } else {
             fs.phase = 'completed'
             // flow 结束通知：以刚完成的 agent 作为定位点
-            if (fs.currentAgentId) {
-              const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
+            const agentId = getLastSession(fs)?.agentId
+            if (agentId) {
+              const agent = flow?.agents?.find((a) => a.id === agentId)
               dispatchNotification(draft, {
                 flowId,
                 flowName: flow?.name ?? '',
-                agentId: fs.currentAgentId,
-                agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
+                agentId,
+                agentName: agent?.agent_name ?? '',
                 reason: 'flow-completed',
               })
             }
-            fs.currentAgentId = undefined
-            fs.currentAgentName = undefined
           }
         } else {
           fs.phase = 'completed'
-          if (fs.currentAgentId) {
-            const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
+          const agentId = getLastSession(fs)?.agentId
+          if (agentId) {
+            const agent = flow?.agents?.find((a) => a.id === agentId)
             dispatchNotification(draft, {
               flowId,
               flowName: flow?.name ?? '',
-              agentId: fs.currentAgentId,
-              agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
+              agentId,
+              agentName: agent?.agent_name ?? '',
               reason: 'flow-completed',
             })
           }
-          fs.currentAgentId = undefined
-          fs.currentAgentName = undefined
         }
       })
       .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {

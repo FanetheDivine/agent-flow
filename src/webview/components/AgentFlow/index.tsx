@@ -53,12 +53,28 @@ export const AgentFlow: FC<{ flowId: string }> = ({ flowId }) => {
 
 const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId, hidden }) => {
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))!
+  const activeFlowId = useFlowStore((s) => s.activeFlowId)
   const state = useFlowStore((s) => s.flowStates[flowId])
   const save = useFlowStore((s) => s.save)
+  const openChatDrawer = useFlowStore((s) => s.openChatDrawer)
+  const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
   /** 破坏性编辑禁止：删除 agent / 删除或破坏连线 */
   const destructiveReadOnly = state ? flowIsDestructiveReadOnly(state.phase) : false
   const { message } = App.useApp()
   const initial = useMemo(() => flowToReactFlow(flow), [flow])
+
+  // 切换到该 flow 时，根据运行状态决定是否打开 ChatPanel
+  useEffect(() => {
+    if (activeFlowId !== flowId) return
+    const fs = useFlowStore.getState().flowStates[flowId]
+    const currentAgentId = fs?.sessions[fs.sessions.length - 1]?.agentId
+    if (currentAgentId) {
+      const agent = flow.agents?.find((a) => a.id === currentAgentId)
+      openChatDrawer(flowId, currentAgentId, agent?.agent_name ?? '')
+    } else {
+      closeChatDrawer()
+    }
+  }, [activeFlowId, flowId, flow.agents, openChatDrawer, closeChatDrawer])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentNode>(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)

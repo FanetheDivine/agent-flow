@@ -36,6 +36,8 @@ export {
   selectFlowPhase,
   selectPendingQuestionFor,
   selectPendingToolPermissionFor,
+  selectCurrentAgentId,
+  selectCurrentSession,
 } from '@/common'
 
 /** init 参数 —— 从 App.useApp() 拿到的主题化 api（至少包含 notification） */
@@ -191,18 +193,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       destroyFlowNotifications(id)
       immerSet((draft) => {
         draft.activeFlowId = id
-        const fs = draft.flowStates[id]
-        if (fs?.currentAgentId) {
-          const flow = draft.flows.find((f) => f.id === id)
-          const agent = flow?.agents?.find((a) => a.id === fs.currentAgentId)
-          draft.chatDrawer = {
-            flowId: id,
-            agentId: fs.currentAgentId,
-            agentName: agent?.agent_name ?? fs.currentAgentName ?? '',
-          }
-        } else {
-          draft.chatDrawer = undefined
-        }
       })
     },
     setFlowListCollapsed: (collapsed) => {
@@ -234,13 +224,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     sendUserMessage: (flowId, content) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
-      if (!fs?.runId || !fs.currentSessionId) return
+      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs?.runId || !sessionId) return
       postMessageToExtension({
         type: 'flow.command.userMessage',
         data: {
           flowId,
           runId: fs.runId,
-          sessionId: fs.currentSessionId,
+          sessionId,
           message: {
             type: 'user',
             message: { role: 'user', content },
@@ -252,7 +243,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     answerQuestion: (flowId, toolUseId, output) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
-      if (!fs?.runId || !fs.currentSessionId) return
+      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs?.runId || !sessionId) return
       immerSet((draft) => {
         const s = draft.flowStates[flowId]
         if (!s) return
@@ -267,7 +259,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         data: {
           flowId,
           runId: fs.runId,
-          sessionId: fs.currentSessionId,
+          sessionId,
           toolUseId,
           output,
         },
@@ -276,7 +268,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     answerToolPermission: (flowId, toolUseId, allow) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
-      if (!fs?.runId || !fs.currentSessionId) return
+      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs?.runId || !sessionId) return
       immerSet((draft) => {
         const s = draft.flowStates[flowId]
         if (!s) return
@@ -291,7 +284,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         data: {
           flowId,
           runId: fs.runId,
-          sessionId: fs.currentSessionId,
+          sessionId,
           toolUseId,
           allow,
         },
@@ -300,26 +293,28 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     interruptAgent: (flowId) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
-      if (!fs?.runId || !fs.currentSessionId) return
+      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs?.runId || !sessionId) return
       postMessageToExtension({
         type: 'flow.command.interrupt',
         data: {
           flowId,
           runId: fs.runId,
-          sessionId: fs.currentSessionId,
+          sessionId,
         },
       })
     },
     killFlow: (flowId) => {
       const { flowStates } = get()
       const fs = flowStates[flowId]
-      if (!fs?.runId || !fs.currentSessionId) return
+      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs?.runId || !sessionId) return
       postMessageToExtension({
         type: 'flow.command.interrupt',
         data: {
           flowId,
           runId: fs.runId,
-          sessionId: fs.currentSessionId,
+          sessionId,
         },
       })
       immerSet((draft) => {
