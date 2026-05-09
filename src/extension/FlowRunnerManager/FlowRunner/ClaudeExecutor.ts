@@ -109,6 +109,8 @@ export class ClaudeExecutor {
     if (!this.queryInstance) return
     this.rejectAllPendingPermissions('interrupted')
     await this.queryInstance.interrupt()
+    // 关闭进程
+    this.queryInstance.close()
     this.queryInstance = null
   }
 
