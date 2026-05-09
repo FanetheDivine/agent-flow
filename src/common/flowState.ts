@@ -257,6 +257,13 @@ export function updateState(
   }
 
   const next = produce(state, (draft) => {
+    // focusFlow 是纯 UI 导航信号，不参与 flow 状态机，无需 runId 校验和 fs 存在性检查
+    if (msg.type === 'flow.signal.focusFlow') {
+      draft.activeFlowId = msg.data.flowId
+      draft.editingAgent = undefined
+      return
+    }
+
     const runId = 'runId' in msg.data ? msg.data.runId : undefined
     const flowId = msg.data.flowId
     const fs = draft.flowStates[flowId]
@@ -436,17 +443,6 @@ export function updateState(
         fs.phase = 'error'
         fs.pendingQuestion = undefined
         fs.pendingToolPermission = undefined
-      })
-      .with({ type: 'flow.signal.focusFlow' }, ({ data }) => {
-        const targetFlow = draft.flows.find((f) => f.id === data.flowId)
-        const targetAgent = targetFlow?.agents?.find((a) => a.id === data.agentId)
-        draft.activeFlowId = data.flowId
-        draft.chatDrawer = {
-          flowId: data.flowId,
-          agentId: data.agentId,
-          agentName: targetAgent?.agent_name ?? '',
-        }
-        draft.editingAgent = undefined
       })
       .exhaustive()
   })

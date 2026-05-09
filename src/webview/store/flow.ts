@@ -127,6 +127,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           immerSet((draft) => {
             draft.loading = false
             draft.flows = msg.data.flows
+            draft.flowStates = msg.data.flowStates
             draft.activeFlowId = msg.data.flows[0]?.id
           })
           return
