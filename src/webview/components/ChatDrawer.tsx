@@ -1,5 +1,5 @@
 import { type FC } from 'react'
-import { App, Drawer } from 'antd'
+import { Drawer } from 'antd'
 import type { UserMessageType } from '@/common'
 import {
   useFlowStore,
@@ -8,13 +8,14 @@ import {
   type AgentPhase,
   type FlowPhase,
 } from '@/webview/store/flow'
+import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { ChatPanel } from './AgentFlow/AgentNode/ChatPanel'
 
 export const ChatDrawer: FC = () => {
   const chatDrawer = useFlowStore((s) => s.chatDrawer)
   const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
-  const runFlow = useFlowStore((s) => s.runFlow)
+  const startFlow = useStartFlow()
   const agentPhase = useFlowStore((s): AgentPhase => {
     if (!s.chatDrawer) return 'idle'
     return selectAgentPhase(s.chatDrawer.flowId, s.chatDrawer.agentId)(s)
@@ -29,8 +30,6 @@ export const ChatDrawer: FC = () => {
     return fs?.currentAgentId === s.chatDrawer.agentId
   })
 
-  const { modal } = App.useApp()
-
   const onSend = (content: UserMessageType['message']['content']): boolean | Promise<boolean> => {
     if (!chatDrawer) return false
 
@@ -39,12 +38,11 @@ export const ChatDrawer: FC = () => {
     if (agentPhase === 'running' || agentPhase === 'starting') return false
 
     if (flowPhase === 'idle') {
-      runFlow(flowId, agentId, {
+      return startFlow(flowId, agentId, {
         type: 'user',
         message: { role: 'user', content },
         parent_tool_use_id: null,
       })
-      return true
     }
 
     if (
@@ -56,21 +54,10 @@ export const ChatDrawer: FC = () => {
     }
 
     // completed / stopped / error / 非活跃agent → 确认清空后重新运行
-    const initMessage: UserMessageType = {
+    return startFlow(flowId, agentId, {
       type: 'user',
       message: { role: 'user', content },
       parent_tool_use_id: null,
-    }
-    return new Promise<boolean>((resolve) => {
-      modal.confirm({
-        title: '确认运行',
-        content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
-        onOk: () => {
-          runFlow(flowId, agentId, initMessage)
-          resolve(true)
-        },
-        onCancel: () => resolve(false),
-      })
     })
   }
 
