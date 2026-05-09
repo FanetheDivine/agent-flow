@@ -7,8 +7,6 @@ import { AgentFlow } from './components/AgentFlow'
 import { ChatDrawer } from './components/ChatDrawer'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
-import { postMessageToExtension, subscribeExtensionMessage } from './utils/ExtensionMessage'
-import { addReferenceToActiveInput } from './utils/activeInputRegistry'
 
 export const App: FC = () => {
   const { notification } = AntdApp.useApp()
@@ -26,7 +24,6 @@ export const App: FC = () => {
     })
   }, [globalError, notification])
   usePasteFlow()
-  useInsertSelection()
 
   if (loading) {
     return (
@@ -97,29 +94,3 @@ const usePasteFlow = () => {
   })
 }
 
-const useInsertSelection = () => {
-  const { notification } = AntdApp.useApp()
-  useEffect(() => {
-    return subscribeExtensionMessage((msg) => {
-      if (msg.type !== 'insertSelection') return
-      const { text, languageId, filename, line } = msg.data
-      const ok = addReferenceToActiveInput({
-        id: crypto.randomUUID(),
-        text,
-        languageId: languageId ?? '',
-        filename: filename ?? '',
-        line,
-      })
-      if (!ok) {
-        postMessageToExtension({
-          type: 'openFile',
-          data: { filename: filename ?? '', line },
-        })
-        notification.warning({
-          message: '请先打开一个 Agent 的对话面板，再使用此快捷键插入代码片段。',
-          duration: 3,
-        })
-      }
-    })
-  }, [notification])
-}

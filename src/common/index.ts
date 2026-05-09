@@ -3,7 +3,7 @@ import { match } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
-export * from './flowState'
+export * from './flowRunState'
 
 // ── Flow Schemas & Types ────────────────────────────────────────────────────────────────
 
@@ -228,9 +228,18 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  * 构建 Agent 系统提示词
  */
 export function buildAgentSystemPrompt(
-  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'complete_mode' | 'enable_share_values' | 'no_input'>,
+  agent: Pick<
+    Agent,
+    'agent_prompt' | 'outputs' | 'complete_mode' | 'enable_share_values' | 'no_input'
+  >,
 ): string {
-  const { agent_prompt, outputs = [], complete_mode, enable_share_values = false, no_input = false } = agent
+  const {
+    agent_prompt,
+    outputs = [],
+    complete_mode,
+    enable_share_values = false,
+    no_input = false,
+  } = agent
 
   const header = [
     '**始终使用中文进行思考和回复**。',

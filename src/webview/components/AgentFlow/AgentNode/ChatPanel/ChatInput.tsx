@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FC } from 'react'
 import { App, Button } from 'antd'
-import { ArrowUpOutlined, LoadingOutlined, StopOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, LoadingOutlined } from '@ant-design/icons'
 import {
   createEditor,
   Editor,
@@ -20,14 +20,12 @@ import {
   withReact,
   type RenderElementProps,
 } from 'slate-react'
-import type { UserMessageType } from '@/common'
+import { match, P } from 'ts-pattern'
+import type { AgentChatInputState, UserMessageType } from '@/common'
+import type { CodeRef } from '@/webview/components/CodeRefChip'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip, type FileRefData } from '@/webview/components/FileRefChip'
-import {
-  promoteActiveInput,
-  registerActiveInput,
-  type CodeRef,
-} from '@/webview/utils/activeInputRegistry'
+import { subscribeExtensionMessage } from '@/webview/utils/ExtensionMessage'
 
 // ── Slate schema ─────────────────────────────────────────────────
 //
@@ -391,8 +389,7 @@ function isEmptyEditor(nodes: Descendant[]): boolean {
 
 // ── 编辑器操作 ─────────────────────────────────────────────────
 
-function focusEnd(editor: Editor): void {
-  ReactEditor.focus(editor)
+function selectEnd(editor: Editor): void {
   Transforms.select(editor, Editor.end(editor, []))
 }
 
@@ -406,7 +403,7 @@ function insertCodeRef(editor: Editor, ref: CodeRef): void {
     languageId: ref.languageId,
     line: ref.line,
   }
-  if (!editor.selection) focusEnd(editor)
+  if (!editor.selection) selectEnd(editor)
   Transforms.insertNodes(editor, {
     type: 'code-ref',
     codeRef: meta,
@@ -435,7 +432,7 @@ function insertFileRef(
     mimeType: file.type,
     size: file.size,
   }
-  if (!editor.selection) focusEnd(editor)
+  if (!editor.selection) selectEnd(editor)
   Transforms.insertNodes(editor, {
     type: 'file-ref',
     file: meta,
@@ -478,7 +475,7 @@ const RenderCodeRef: FC<RenderElementProps> = ({ attributes, children, element }
   return (
     <span
       {...attributes}
-      className='mx-[2px] inline-flex align-middle'
+      className='mx-0.5 inline-flex align-middle'
       style={selected ? { outline: '1px solid #74c7ec', borderRadius: 4 } : undefined}
     >
       {children}
@@ -516,7 +513,7 @@ const RenderFileRef: FC<RenderElementProps> = ({ attributes, children, element }
   return (
     <span
       {...attributes}
-      className='mx-[2px] inline-flex align-middle'
+      className='mx-0.5 inline-flex align-middle'
       style={selected ? { outline: '1px solid #74c7ec', borderRadius: 4 } : undefined}
     >
       {children}
@@ -554,43 +551,35 @@ const renderElement = (props: RenderElementProps) => {
 type Props = {
   onSend: (content: UserMessageType['message']['content']) => boolean | Promise<boolean>
   placeholder?: string
-  disabled?: boolean
-  loading?: boolean
+  status: AgentChatInputState
   onCancel?: () => void
 }
 
-export const ChatInput: FC<Props> = ({
-  onSend,
-  placeholder = '输入消息...',
-  disabled,
-  loading,
-  onCancel,
-}) => {
+export const ChatInput: FC<Props> = ({ onSend, placeholder = '输入消息...', status, onCancel }) => {
   const { message } = App.useApp()
   const editor = useMemo(() => withHistory(withReact(withInlines(createEditor()))), [])
   const initialValue = useMemo<Descendant[]>(() => [emptyParagraph()], [])
   const [empty, setEmpty] = useState(true)
 
-  // 注册自身为“当前 active 输入框”栈的一员；聚焦时置顶
-  const inputRef = useRef<{ addReference: (ref: CodeRef) => void; focus: () => void } | null>(null)
+  // 监听来自 extension 的代码片段插入指令（Ctrl+Shift+L 快捷键）。
+  // 编辑器始终挂载,即使 Drawer 关闭时也接受片段;只有在可见(未 disabled)时才尝试 DOM 聚焦。
   useEffect(() => {
-    const input = {
-      addReference: (ref: CodeRef) => {
-        ReactEditor.focus(editor)
-        insertCodeRef(editor, ref)
-      },
-      focus: () => ReactEditor.focus(editor),
-    }
-    inputRef.current = input
-    const unregister = registerActiveInput(input)
-    return () => {
-      unregister()
-      if (inputRef.current === input) inputRef.current = null
-    }
+    return subscribeExtensionMessage((msg) => {
+      if (msg.type !== 'insertSelection') return
+      const { text, languageId, filename, line } = msg.data
+      insertCodeRef(editor, {
+        id: crypto.randomUUID(),
+        text,
+        languageId: languageId ?? '',
+        filename: filename ?? '',
+        line,
+      })
+      setEmpty(isEmptyEditor(editor.children))
+      ReactEditor.focus(editor)
+    })
   }, [editor])
 
   const handleSubmit = useCallback(async () => {
-    if (loading) return
     if (isEmptyEditor(editor.children)) return
     const content = await serialize(editor)
     if (content === '' || (Array.isArray(content) && content.length === 0)) return
@@ -601,7 +590,7 @@ export const ChatInput: FC<Props> = ({
       resetEditor(editor)
       setEmpty(true)
     }
-  }, [editor, onSend, loading])
+  }, [editor, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return
@@ -615,8 +604,7 @@ export const ChatInput: FC<Props> = ({
     }
     // 纯 Enter：提交
     e.preventDefault()
-    if (loading) return
-    void handleSubmit()
+    handleSubmit()
   }
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -682,34 +670,29 @@ export const ChatInput: FC<Props> = ({
             <Editable
               className='max-h-[16em] overflow-x-hidden overflow-y-auto rounded border border-[#313244] bg-[#181825] px-4 py-2.5 text-[15px] leading-relaxed text-[#cdd6f4] outline-none focus:border-[#585b70]'
               placeholder={placeholder}
-              readOnly={disabled}
               renderElement={renderElement}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              onFocus={() => {
-                if (inputRef.current) promoteActiveInput(inputRef.current)
-              }}
             />
           </Slate>
         </div>
-        {loading ? (
-          <Button
-            type='primary'
-            shape='circle'
-            icon={<LoadingOutlined />}
-            onClick={onCancel}
-            aria-label='停止'
-          />
-        ) : (
-          <Button
-            type='primary'
-            shape='circle'
-            icon={<ArrowUpOutlined />}
-            disabled={disabled || empty}
-            onClick={() => handleSubmit()}
-            aria-label='发送'
-          />
-        )}
+        {match(status)
+          .with(P.union('ready', 'confirm-required'), () => (
+            <Button
+              type='primary'
+              shape='circle'
+              icon={<ArrowUpOutlined />}
+              disabled={empty}
+              onClick={handleSubmit}
+            />
+          ))
+          .with('disabled', () => (
+            <Button type='primary' shape='circle' icon={<ArrowUpOutlined />} disabled />
+          ))
+          .with('loading', () => (
+            <Button type='primary' shape='circle' icon={<LoadingOutlined />} onClick={onCancel} />
+          ))
+          .exhaustive()}
       </div>
     </div>
   )

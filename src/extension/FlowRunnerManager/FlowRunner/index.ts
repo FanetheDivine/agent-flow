@@ -113,6 +113,9 @@ export class FlowRunner {
           data as FlowRunnerCommandEvents['flow.command.toolPermissionResult'],
         )
       })
+      .with('flow.command.killFlow', () => {
+        // killFlow 走 FlowRunnerManager.disposeRunner，不在此处处理
+      })
       .exhaustive()
   }
 
@@ -197,11 +200,8 @@ export class FlowRunner {
     if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 
-    // 直接转发完整 UserMessageType 给 executor
+    // 直接转发完整 UserMessageType 给 executor（回显由 reducer 两端就地追加，此处不再 fire aiMessage）
     this.currentExecutor.sendUserMessage(message)
-
-    // 回显
-    this.fire('flow.signal.aiMessage', { runId, sessionId, message })
   }
 
   private async handleInterrupt({
@@ -311,8 +311,7 @@ export class FlowRunner {
   }
 
   private doOnAgentComplete(agent: Agent, result: ExecutorResult): void {
-    const { outputName } = result
-    const content = agent.no_input ? '开始' : result.content
+    const { outputName, content } = result
     const runId = this.currentRunId!
     const sessionId = this.currentSessionId!
 
@@ -347,7 +346,7 @@ export class FlowRunner {
       // 切换到下一个 agent
       const nextInitMessage = {
         type: 'user' as const,
-        message: { role: 'user' as const, content },
+        message: { role: 'user' as const, content: nextAgent.no_input ? '开始' : content },
         parent_tool_use_id: null,
       }
       this.runAgent(nextInitMessage, nextAgent, (newSessionId) => {

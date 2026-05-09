@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { App } from 'antd'
 import type { UserMessageType } from '@/common'
 import { useFlowStore, selectFlowPhase, type FlowPhase } from '@/webview/store/flow'
@@ -9,32 +10,32 @@ import { useFlowStore, selectFlowPhase, type FlowPhase } from '@/webview/store/f
  */
 export function useStartFlow() {
   const { modal } = App.useApp()
-  const runFlow = useFlowStore((s) => s.runFlow)
 
-  const startFlow = (
-    flowId: string,
-    agentId: string,
-    initMessage: UserMessageType,
-  ): boolean | Promise<boolean> => {
-    const flowPhase: FlowPhase = selectFlowPhase(flowId)(useFlowStore.getState())
+  const startFlow = useCallback(
+    (flowId: string, agentId: string, initMessage: UserMessageType): boolean | Promise<boolean> => {
+      const st = useFlowStore.getState()
+      const { runFlow } = st
+      const flowPhase: FlowPhase = selectFlowPhase(flowId)(st)
 
-    if (flowPhase === 'idle') {
-      runFlow(flowId, agentId, initMessage)
-      return true
-    }
+      if (flowPhase === 'idle') {
+        runFlow(flowId, agentId, initMessage)
+        return true
+      }
 
-    return new Promise<boolean>((resolve) => {
-      modal.confirm({
-        title: '确认运行',
-        content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
-        onOk: () => {
-          runFlow(flowId, agentId, initMessage)
-          resolve(true)
-        },
-        onCancel: () => resolve(false),
+      return new Promise<boolean>((resolve) => {
+        modal.confirm({
+          title: '确认运行',
+          content: '当前工作流数据会被清空，如果想保留数据，可以复制工作流再运行',
+          onOk: () => {
+            runFlow(flowId, agentId, initMessage)
+            resolve(true)
+          },
+          onCancel: () => resolve(false),
+        })
       })
-    })
-  }
+    },
+    [modal],
+  )
 
   return startFlow
 }

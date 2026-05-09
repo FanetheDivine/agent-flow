@@ -9,11 +9,11 @@ import {
 } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
-import { Welcome, XProvider } from '@ant-design/x'
+import { Welcome } from '@ant-design/x'
 import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionItem, AskUserQuestionOutput, UserMessageType } from '@/common'
+import type { AskUserQuestionOutput } from '@/common'
 import type { AgentSession } from '@/webview/store/flow'
 import {
   useFlowStore,
@@ -22,13 +22,10 @@ import {
   selectPendingQuestionFor,
   selectPendingToolPermissionFor,
   selectAnsweredToolPermissions,
-  agentCanSendMessage,
-  agentCanInterrupt,
-  flowCanInterrupt,
+  flowCanBeKilled,
   type AgentPhase,
 } from '@/webview/store/flow'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
-import { ChatInput } from './ChatInput'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
 
@@ -36,16 +33,12 @@ type Props = {
   flowId: string
   agentId: string
   agentName: string
-  /** 普通用户消息（非 AskUserQuestion 回答）——由上层决定是启动/续跑还是追加消息。
-   *  返回 true 表示消息被接受（ChatInput 会清空输入框），false 表示未发送（保留输入）。 */
-  onSend: (content: UserMessageType['message']['content']) => boolean | Promise<boolean>
   onClose?: () => void
 }
 
 /** 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射 */
 function buildAnsweredMap(
   answeredQuestions: Record<string, AskUserQuestionOutput>,
-  freeTextQuestionIndicesMap: Record<string, number[]>,
 ): Map<string, AnsweredInfo> {
   const answeredMap = new Map<string, AnsweredInfo>()
   for (const [toolUseId, output] of Object.entries(answeredQuestions)) {
@@ -56,37 +49,12 @@ function buildAnsweredMap(
         .map((s) => s.trim())
         .filter(Boolean)
     }
-    const indices = freeTextQuestionIndicesMap[toolUseId] ?? []
-    answeredMap.set(toolUseId, { values, freeTextQuestionIndices: new Set(indices) })
+    answeredMap.set(toolUseId, { values })
   }
   return answeredMap
 }
 
-/** 自由文本 → AskUserQuestionOutput：把整段文本映射到每个 question 的答案上。
- * 同时返回被自由文本作答的 question 索引集合（用于历史展示时跳过选项匹配）。 */
-function freeTextToOutput(
-  questions: AskUserQuestionItem[],
-  text: string,
-): { output: AskUserQuestionOutput; questionIndices: Set<number> } {
-  const answers: Record<string, string> = {}
-  for (const q of questions) answers[q.question] = text
-  return {
-    output: { questions, answers },
-    questionIndices: new Set(questions.map((_, i) => i)),
-  }
-}
-
-/** 把 user message content 折叠为纯文本（非 text block 丢弃），用于自由文本作答 */
-function contentToPlainText(content: UserMessageType['message']['content']): string {
-  if (typeof content === 'string') return content
-  return content
-    .map((b) => (b.type === 'text' ? b.text : ''))
-    .filter(Boolean)
-    .join('\n')
-}
-
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClose }) => {
-  const interruptAgent = useFlowStore((s) => s.interruptAgent)
+export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
@@ -103,23 +71,14 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   )
   const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
 
-  const canInterrupt = agentCanInterrupt(phase)
-  const canInterruptFlow = flowCanInterrupt(flowPhase)
+  const canKillFlow = flowCanBeKilled(flowPhase)
 
-  // 自由文本作答标记（本地 UI 状态，按 toolUseId -> question 索引集合追踪）
-  const [freeTextQuestionIndicesMap, setFreeTextQuestionIndicesMap] = useState<
-    Record<string, number[]>
-  >({})
   // AskUserQuestionCard 容器高度,用户可上下拖动调整
   const [cardHeight, setCardHeight] = useState(240)
   const [dragging, setDragging] = useState(false)
-  const answeredMap = useMemo(
-    () => buildAnsweredMap(answeredQuestions ?? {}, freeTextQuestionIndicesMap),
-    [answeredQuestions, freeTextQuestionIndicesMap],
-  )
+  const answeredMap = useMemo(() => buildAnsweredMap(answeredQuestions ?? {}), [answeredQuestions])
 
   const showCard = !!pending
-  const inputDisabled = false
 
   const onActiveSubmit = useCallback(
     (toolUseId: string, output: AskUserQuestionOutput) => answerQuestion(flowId, toolUseId, output),
@@ -157,7 +116,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     ],
   )
 
-  // 消息列表自动滚动控制：默认贴底，用户向上滚后停止跟随，滚回底部时恢复
+  // 消息列表自动滚动控制:默认贴底,用户向上滚后停止跟随,滚回底部时恢复
   const messageListRef = useRef<BubbleListRef>(null)
   const shouldScrollRef = useRef(true)
 
@@ -174,7 +133,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
   // 切换 agent 时
   useEffect(() => {
     shouldScrollRef.current = true
-    // const id = requestAnimationFrame(() => conso
   }, [flowId, agentId])
 
   // 新消息到达时按需滚到底
@@ -194,39 +152,21 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
     AgentPhase,
     { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }
   >(phase)
-    .with('starting', () => ({ text: '启动中', color: 'default' }))
+    .with('starting', () => ({ text: '启动中', color: 'processing' }))
     .with('running', () => ({ text: '生成中', color: 'processing' }))
-    .with('awaiting-message', () => ({ text: '等待输入', color: 'warning' }))
-    .with('awaiting-question', () => ({ text: '等待回答', color: 'warning' }))
+    .with('result', () => ({ text: '生成完毕', color: 'success' }))
+    .with('interrupted', () => ({ text: '已中断', color: 'warning' }))
+    .with('awaiting-question', () => ({ text: '需要回答', color: 'warning' }))
+    .with('awaiting-tool-permission', () => ({ text: '请求授权', color: 'warning' }))
     .with('completed', () => ({ text: '已完成', color: 'success' }))
     .with('stopped', () => ({ text: '已停止', color: 'default' }))
     .with('error', () => ({ text: '出错', color: 'error' }))
     .with('idle', () => ({ text: '就绪', color: 'default' }))
     .exhaustive()
 
-  const placeholder =
-    phase === 'idle' ? '输入消息以运行...' : pending ? '输入文本自由回答...' : '输入消息...'
-
-  const handleSend = (
-    content: UserMessageType['message']['content'],
-  ): boolean | Promise<boolean> => {
-    shouldScrollRef.current = true
-    if (pending) {
-      const text = contentToPlainText(content)
-      const { output, questionIndices } = freeTextToOutput(pending.input.questions, text)
-      setFreeTextQuestionIndicesMap((prev) => ({
-        ...prev,
-        [pending.toolUseId]: [...questionIndices],
-      }))
-      answerQuestion(flowId, pending.toolUseId, output)
-      return true
-    }
-    return onSend(content)
-  }
-
   return (
     <div
-      className='flex h-full flex-col overflow-hidden bg-[#1e1e2e]'
+      className='flex h-full flex-col overflow-hidden'
       tabIndex={-1}
       onWheel={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -246,7 +186,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
             {statusText}
           </Tag>
         </div>
-        {canInterruptFlow && flowPhase !== 'starting' && (
+        {canKillFlow && (
           <Tooltip title='停止工作流'>
             <Button
               size='small'
@@ -283,7 +223,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
                 variant='borderless'
                 icon={<RobotOutlined style={{ fontSize: 28, color: '#a6adc8' }} />}
                 title={agentName}
-                description='暂无消息，发送一条消息以运行当前 Agent。'
+                description='暂无消息,发送一条消息以运行当前 Agent。'
               />
             </div>
           ),
@@ -338,15 +278,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onSend, onClo
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Input (always shown; send button becomes cancel button during chatting) */}
-      <ChatInput
-        onSend={handleSend}
-        placeholder={placeholder}
-        disabled={inputDisabled}
-        loading={canInterrupt || phase === 'awaiting-question'}
-        onCancel={() => interruptAgent(flowId)}
-      />
     </div>
   )
 }

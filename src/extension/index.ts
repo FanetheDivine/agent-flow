@@ -2,6 +2,7 @@ import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
 import type {
   ExtensionFlowCommandEvents,
+  ExtensionFlowCommandMessage,
   ExtensionFlowSignalMessage,
   ExtensionFromWebviewMessage,
   ExtensionToWebviewMessage,
@@ -96,7 +97,7 @@ export function activate(context: vscode.ExtensionContext) {
    * - panel 已存在且 webview 已就绪 → 立即发送
    * - 否则推入 pending 队列。若 panel 不存在还会触发 openPanel，
    *   webview 启动并发出 load 后由 flushPending 一次性发送。
-   * 用于 insertSelection、flow.signal.focusFlow 等 UI 引导信号 ——
+   * 用于 insertSelection、focusFlow 等 UI 引导信号 ——
    * 普通 flow.signal.* 走 postMessageToWebview 即可（webview 重开后会通过 load 拿到状态快照）。
    */
   const postMessageWhenReady = (msg: ExtensionToWebviewMessage) => {
@@ -134,17 +135,16 @@ export function activate(context: vscode.ExtensionContext) {
     if (currentPanel && currentPanel.visible) return
 
     const msg = match(reason)
+      .with('result', () => `Agent「${agentName}」生成完毕`)
+      .with('awaiting-question', () => `Agent「${agentName}」需要回答`)
+      .with('awaiting-tool-permission', () => `Agent「${agentName}」请求授权`)
       .with('flow-completed', () => `工作流「${flowName}」已完成`)
       .with('agent-error', () => `Agent「${agentName}」运行出错`)
-      .with(
-        P.union('awaiting-message', 'awaiting-question'),
-        () => `Agent「${agentName}」正在等待回复`,
-      )
       .exhaustive()
     vscode.window.showInformationMessage(msg, '查看').then((choice) => {
       if (choice !== '查看') return
       postMessageWhenReady({
-        type: 'flow.signal.focusFlow',
+        type: 'focusFlow',
         data: { flowId },
       })
       currentPanel?.reveal(undefined, true)
@@ -238,13 +238,14 @@ export function activate(context: vscode.ExtensionContext) {
             // 文件不存在或无法打开时静默忽略
           }
         })
-        .with({ type: P.string.startsWith('flow.command.') }, ({ type, data }) => {
-          // 对 flowStart 特殊处理：注入 flow 定义，并在 extension 这边初始化对应 flowState
+        .with({ type: P.string.startsWith('flow.command.') }, (e) => {
+          // 先镜像到 state（flowStart 路径的覆盖式初始化也由 reducer 完成；killFlow 会置 stopped）
+          flowRunStateManager.applyCommand(e as ExtensionFlowCommandMessage)
+          const { type, data } = e
           if (type === 'flow.command.flowStart') {
-            const { flowId, runKey } = data as ExtensionFlowCommandEvents['flow.command.flowStart']
+            const { flowId } = data as ExtensionFlowCommandEvents['flow.command.flowStart']
             const flow = currentFlows.flows.find((f) => f.id === flowId)
             if (!flow) return
-            flowRunStateManager.initFlowStart(flowId, runKey)
             runnerManager.handleCommand(type, { ...data, flow })
           } else {
             runnerManager.handleCommand(type, data)

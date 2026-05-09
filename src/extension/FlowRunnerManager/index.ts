@@ -46,6 +46,12 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.toolPermissionResult']
         this.runners.get(flowId)?.emit('flow.command.toolPermissionResult', rest)
       })
+      .with('killFlow', () => {
+        const { flowId } = data as ExtensionFlowCommandEvents['flow.command.killFlow'] & {
+          flowId: string
+        }
+        this.disposeRunner(flowId)
+      })
       .otherwise(() => {})
   }
 

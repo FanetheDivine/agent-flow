@@ -1,6 +1,6 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { AskUserQuestionOutput, Flow } from '.'
-import type { FlowRunState } from './flowState'
+import type { FlowRunState } from './flowRunState'
 
 /**
  * AI消息类型 — 会话中一切事件的统一类型（判别联合），
@@ -70,6 +70,8 @@ export type ExtensionToWebviewEvents = {
     filename?: string
     line?: [number, number]
   }
+  /** 从 VSCode 通知栏点击后，聚焦到指定 Flow（纯 UI 导航信号，不涉及具体 run） */
+  focusFlow: { flowId: string }
 } & ExtensionFlowSignalEvents
 
 /** extension接受 webview发出的消息 */
@@ -127,8 +129,6 @@ type FlowSignalPayload = {
     toolName: string
     input: unknown
   }
-  /** 从 VSCode 通知栏点击后，聚焦到指定 Flow */
-  focusFlow: { flowId: string }
 }
 
 /** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
@@ -165,6 +165,8 @@ type FlowCommandPayload = {
     toolUseId: string
     allow: boolean
   }
+  /** 彻底终止 Flow：销毁 FlowRunner，state 置终态。仅需 flowId，不要求 runId/sessionId */
+  killFlow: object
 }
 
 /** FlowRunner 内部指令（不含 flowId） */
@@ -175,3 +177,6 @@ export type ExtensionFlowCommandEvents = TypeWithPrefix<
   WithFlowId<FlowCommandPayload>,
   'flow.command.'
 >
+
+/** Extension 接收的Flow指令消息（ExtensionFromWebviewMessage 中 flow.command.* 的子集） */
+export type ExtensionFlowCommandMessage = EventMessageType<ExtensionFlowCommandEvents>

@@ -2,7 +2,14 @@ import type { FC, MouseEventHandler } from 'react'
 import { Tag } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
-import type { CodeRef } from '@/webview/utils/activeInputRegistry'
+
+export type CodeRef = {
+  id: string
+  filename: string
+  languageId: string
+  line?: [number, number]
+  text: string
+}
 
 /** 展示层只需要 filename + line，`text` 由调用方在序列化时自行补齐 */
 export type CodeRefChipData = Pick<CodeRef, 'filename' | 'line'>

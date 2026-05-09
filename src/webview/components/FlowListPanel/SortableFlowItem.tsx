@@ -14,7 +14,10 @@ const PHASE_CONFIG: Record<
 > = {
   starting: { color: 'bg-[#f9e2af]', label: '启动中', animate: true },
   running: { color: 'bg-[#a6e3a1]', label: 'AI 生成中', animate: true },
-  awaiting: { color: 'bg-[#89b4fa]', label: '等待用户', animate: true },
+  result: { color: 'bg-[#89b4fa]', label: '生成完毕', animate: true },
+  interrupted: { color: 'bg-[#f9e2af]', label: '已中断', animate: true },
+  'awaiting-question': { color: 'bg-[#cba6f7]', label: '需要回答', animate: true },
+  'awaiting-tool-permission': { color: 'bg-[#f9e2af]', label: '请求授权', animate: true },
   completed: { color: 'bg-[#a6e3a1]/60', label: '已完成', animate: false },
   stopped: { color: 'bg-[#9399b2]', label: '已停止', animate: false },
   error: { color: 'bg-[#f38ba8]', label: '出错', animate: false },

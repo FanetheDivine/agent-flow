@@ -56,12 +56,23 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 
 `shareValues` 对象在整个 Run 内**以引用**贯穿所有 Agent 的 `AgentControllerMcp`，写入即时对后续 Agent 可见。
 
+## 状态机（[src/common/flowState.ts](src/common/flowState.ts)）
+
+[updateFlowRunState](src/common/flowState.ts) 是统管 Flow 运行态的**单一 reducer**：signal 路径上 extension 发出前 / webview 收到后各 reduce 一次，command 路径上 webview 发出前 / extension 收到后各 reduce 一次，两端走同一份 reducer 保证状态推进同步。
+
+- **`FlowPhase` / `AgentPhase`**：`idle | starting | running | result | awaiting-question | awaiting-tool-permission | completed | stopped | error`。`AgentPhase` 与 `FlowPhase` 同构，仅在非活跃 agent 上根据是否完成投影为 `idle`/`completed`
+- **`FlowRunState`** 字段：`runKey`（防竞态）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission`
+- **守卫**：终态（`stopped` / `completed` / `error`）下除 `flowStart` / `killFlow` 外的消息直接忽略；非 `flowStart` 的消息要求 `state.runId === msg.data.runId`
+- **特殊入口**：`flow.command.flowStart` 覆盖式初始化（state 可为 `undefined`）；`flow.command.killFlow` 任意状态下幂等强制置 `stopped`
+- **`MessageEffect`** 的 5 个 `reason`：`result` / `awaiting-question` / `awaiting-tool-permission` / `flow-completed` / `agent-error`，由 reducer 与新 state 一并产出，调用方负责消费（见下节）
+- **UI helper**：[agentChatInputState](src/common/flowState.ts) 把 `AgentPhase` 投影为 ChatInput 的四态（`ready` / `disabled` / `loading` / `confirm-required`）；[flowIsDestructiveReadOnly](src/common/flowState.ts)（`starting` / `running` 锁定破坏性编辑）；[flowCanBeKilled](src/common/flowState.ts)（哪些 phase 允许中断）
+
 ## 与用户的特殊交互
 
-收到 AI 消息时除了写入状态机，还会触发**用户交互层面的副作用**：
+[updateFlowRunState](src/common/flowState.ts) 推进状态时一并产出的 `MessageEffect[]` 会触发**用户交互层面的副作用**：
 
-- **通知**：`awaiting-message` / `awaiting-question` / `flow-completed` / `agent-error` 四类 signal 触发通知（[updateFlowRunState](src/common/flowState.ts) 产出 `NotifyEffect[]`）。extension 端在 webPanel 不可见时弹 VSCode 通知；webview 端在页面隐藏 / 不在当前 Flow / 不在当前 Agent 对话时弹 antd notification（[fireNotifications](src/webview/store/flow.ts)）。
-- **自动打开 ChatPanel**：前三类 signal 若收消息时 `activeFlowId` 与之相同且 ChatDrawer 未开则自动打开；`agentComplete` 时 ChatDrawer 若停在已完成的 agent 上则自动跟随切到下一个。
+- **通知**：上述 5 个 `reason` 都会触发通知。extension 端在 webPanel 不可见时弹 VSCode 通知；webview 端在页面隐藏 / 不在当前 Flow / ChatPanel 已开但 `agentId` 与 effect 不一致时弹 antd notification（[fireNotifications](src/webview/store/flow.ts)）。
+- **自动打开 ChatPanel**：除 `agent-error` 外的 4 个 `reason`，若收消息时 `activeFlowId` 与之相同且 ChatDrawer 未开则自动打开；`agentComplete` 时 ChatDrawer 若停在已完成的 agent 上则自动跟随切到下一个 agent。
 
 ## 易踩坑
 

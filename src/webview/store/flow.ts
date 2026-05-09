@@ -1,26 +1,25 @@
 import type { NotificationInstance } from 'antd/es/notification/interface'
 import { produce } from 'immer'
-import { match, P } from 'ts-pattern'
+import { match } from 'ts-pattern'
 import { create } from 'zustand'
 import type { Flow } from '@/common'
 import {
   type AgentPhase,
+  type AgentChatInputState,
   type AgentSession,
+  type ExtensionFlowCommandMessage,
   type FlowPhase,
   type FlowRunState,
   type PendingQuestion,
   type PendingToolPermission,
-  type NotifyEffect,
+  type MessageEffect,
   type UserMessageType,
   type AskUserQuestionOutput,
   type ExtensionToWebviewMessage,
   updateFlowRunState,
-  agentCanInterrupt,
-  agentCanSendMessage,
-  agentIsRunning,
-  flowCanInterrupt,
+  agentChatInputState,
+  flowCanBeKilled,
   flowIsDestructiveReadOnly,
-  getLastSession,
 } from '@/common'
 import type { Agent } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
@@ -56,12 +55,9 @@ export const selectAgentPhase =
   (s: StoreState): AgentPhase => {
     const fs = selectFlowRunState(flowId)(s)
     if (!fs) return 'idle'
-    const currentAgentId = getLastSession(fs)?.agentId
+    const currentAgentId = fs.currentAgentId
     if (currentAgentId === agentId) {
-      if (fs.phase === 'awaiting') {
-        return fs.pendingQuestion ? 'awaiting-question' : 'awaiting-message'
-      }
-      if (fs.phase === 'idle') return 'idle'
+      // FlowPhase 与 AgentPhase 现已对齐，直接透传
       return fs.phase
     }
     const last = [...fs.sessions].reverse().find((sess) => sess.agentId === agentId)
@@ -73,7 +69,7 @@ export const selectPendingQuestionFor =
   (flowId: string, agentId: string) =>
   (s: StoreState): PendingQuestion | undefined => {
     const fs = selectFlowRunState(flowId)(s)
-    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
+    if (!fs || fs.currentAgentId !== agentId) return undefined
     return fs.pendingQuestion
   }
 
@@ -81,7 +77,7 @@ export const selectPendingToolPermissionFor =
   (flowId: string, agentId: string) =>
   (s: StoreState): PendingToolPermission | undefined => {
     const fs = selectFlowRunState(flowId)(s)
-    if (!fs || getLastSession(fs)?.agentId !== agentId) return undefined
+    if (!fs || fs.currentAgentId !== agentId) return undefined
     return fs.pendingToolPermission
   }
 
@@ -107,8 +103,7 @@ export const selectCurrentAgentId =
   (flowId: string) =>
   (s: StoreState): string | undefined => {
     const fs = selectFlowRunState(flowId)(s)
-    if (!fs) return undefined
-    return getLastSession(fs)?.agentId
+    return fs?.currentAgentId
   }
 
 // ── Store ───────────────────────────────────────────────────────────────────
@@ -137,19 +132,14 @@ type FlowStoreType = StoreState & {
 // Re-export 类型和工具函数，保持现有引用兼容
 export type {
   AgentPhase,
+  AgentChatInputState,
   AgentSession,
   FlowPhase,
   FlowRunState,
   PendingQuestion,
   PendingToolPermission,
 }
-export {
-  agentCanInterrupt,
-  agentCanSendMessage,
-  agentIsRunning,
-  flowCanInterrupt,
-  flowIsDestructiveReadOnly,
-}
+export { agentChatInputState, flowCanBeKilled, flowIsDestructiveReadOnly }
 
 export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
@@ -172,7 +162,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   }
 
   /** 判断是否应该弹出 webview 通知 */
-  const shouldNotify = (effect: NotifyEffect): boolean => {
+  const shouldNotify = (effect: MessageEffect): boolean => {
     // a. 页面不可见时始终通知
     if (document.hidden) return true
     const { activeFlowId, chatDrawer } = get()
@@ -184,7 +174,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   }
 
   /** 自动打开 ChatPanel：当 activeFlowId 匹配且 ChatPanel 未打开时 */
-  const autoOpenChatDrawer = (effect: NotifyEffect) => {
+  const autoOpenChatDrawer = (effect: MessageEffect) => {
     const { activeFlowId, chatDrawer } = get()
     if (activeFlowId === effect.flowId && !chatDrawer) {
       immerSet((d) => {
@@ -194,12 +184,13 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   }
 
   /** 把 updateFlowRunState 返回的 notifications 翻译成 antd notification.info 调用 */
-  const fireNotifications = (effects: NotifyEffect[]) => {
+  const fireNotifications = (effects: MessageEffect[]) => {
     for (const n of effects) {
-      // 自动打开 ChatPanel（awaiting-message / awaiting-question / flow-completed）
+      // 自动打开 ChatPanel（result / awaiting-question / awaiting-tool-permission / flow-completed）
       if (
-        n.reason === 'awaiting-message' ||
+        n.reason === 'result' ||
         n.reason === 'awaiting-question' ||
+        n.reason === 'awaiting-tool-permission' ||
         n.reason === 'flow-completed'
       ) {
         autoOpenChatDrawer(n)
@@ -212,12 +203,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         key,
         duration: 0,
         message: match(n.reason)
+          .with('result', () => `Agent「${n.agentName}」生成完毕`)
+          .with('awaiting-question', () => `Agent「${n.agentName}」需要回答`)
+          .with('awaiting-tool-permission', () => `Agent「${n.agentName}」请求授权`)
           .with('flow-completed', () => `工作流「${n.flowName}」已完成`)
           .with('agent-error', () => `Agent「${n.agentName}」运行出错`)
-          .with(
-            P.union('awaiting-message', 'awaiting-question'),
-            () => `Agent「${n.agentName}」正在等待回复`,
-          )
           .exhaustive(),
         onClose: () => {
           activeNotificationKeys.delete(key)
@@ -233,6 +223,26 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         },
       })
     }
+  }
+
+  /**
+   * 发送一条 command：先在本地 reducer 里推进 state，再 post 给 extension。
+   * 两端走同一份 reducer，保证状态推进同步。
+   */
+  const dispatchCommand = (msg: ExtensionFlowCommandMessage) => {
+    const { flows, flowRunStates } = get()
+    const flowId = msg.data.flowId
+    const existing = flowRunStates[flowId]
+    const { state, effects } = updateFlowRunState(msg, { state: existing, flows })
+    immerSet((draft) => {
+      if (state) {
+        draft.flowRunStates[flowId] = state
+      } else {
+        delete draft.flowRunStates[flowId]
+      }
+    })
+    postMessageToExtension(msg)
+    fireNotifications(effects)
   }
 
   return {
@@ -264,7 +274,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           return
         }
         if (msg.type === 'insertSelection') {
-          // 由 App 层订阅处理，store 不参与
+          // 由 ChatInput 直接订阅处理,store 不参与
+          return
+        }
+        if (msg.type === 'focusFlow') {
+          immerSet((draft) => {
+            draft.activeFlowId = msg.data.flowId
+            draft.editingAgent = undefined
+          })
           return
         }
         // 其余皆为 flow.signal.*：交给 updateFlowRunState 这一信号驱动的 reducer
@@ -277,15 +294,13 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         const prevLastSession = existing.sessions[existing.sessions.length - 1]
         const prevLastAgentId = prevLastSession?.agentId
 
-        const { state, notifications } = updateFlowRunState(existing, msg, { flows })
+        const { state, effects } = updateFlowRunState(msg, {
+          state: existing,
+          flows,
+        })
         immerSet((draft) => {
+          if (!state) return
           draft.flowRunStates[flowId] = state
-
-          // focusFlow 是纯 UI 导航信号
-          if (msg.type === 'flow.signal.focusFlow') {
-            draft.activeFlowId = msg.data.flowId
-            draft.editingAgent = undefined
-          }
 
           // agentComplete 时：如果 ChatPanel 正打开的是已完成的 agent，切到下一个 agent
           if (msg.type === 'flow.signal.agentComplete') {
@@ -307,7 +322,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             }
           }
         })
-        fireNotifications(notifications)
+        fireNotifications(effects)
       }
 
       const cleanup = subscribeExtensionMessage(onMessage)
@@ -319,26 +334,17 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
       const agent = flow.agents?.find((a) => a.id === agentId)
-      if (agent?.no_input) {
-        initMessage = {
-          type: 'user',
-          message: { role: 'user', content: '开始' },
-          parent_tool_use_id: null,
-        }
-      }
+      const effectiveInitMessage: UserMessageType = agent?.no_input
+        ? {
+            type: 'user',
+            message: { role: 'user', content: '开始' },
+            parent_tool_use_id: null,
+          }
+        : initMessage
       const runKey = crypto.randomUUID()
-      immerSet((draft) => {
-        draft.flowRunStates[flowId] = {
-          runKey,
-          phase: 'starting',
-          sessions: [],
-          answeredQuestions: {},
-          answeredToolPermissions: {},
-        }
-      })
-      postMessageToExtension({
+      dispatchCommand({
         type: 'flow.command.flowStart',
-        data: { flowId, runKey, agentId, initMessage },
+        data: { flowId, runKey, agentId, initMessage: effectiveInitMessage },
       })
     },
     setActiveFlowId: (id) => {
@@ -378,7 +384,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
-      postMessageToExtension({
+      dispatchCommand({
         type: 'flow.command.userMessage',
         data: {
           flowId,
@@ -397,24 +403,9 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
-      immerSet((draft) => {
-        const s = draft.flowRunStates[flowId]
-        if (!s) return
-        s.answeredQuestions[toolUseId] = output
-        if (s.pendingQuestion?.toolUseId === toolUseId) {
-          s.pendingQuestion = undefined
-        }
-        s.phase = 'running'
-      })
-      postMessageToExtension({
+      dispatchCommand({
         type: 'flow.command.answerQuestion',
-        data: {
-          flowId,
-          runId: fs.runId,
-          sessionId,
-          toolUseId,
-          output,
-        },
+        data: { flowId, runId: fs.runId, sessionId, toolUseId, output },
       })
     },
     answerToolPermission: (flowId, toolUseId, allow) => {
@@ -422,60 +413,29 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const fs = flowRunStates[flowId]
       const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
       if (!fs?.runId || !sessionId) return
-      immerSet((draft) => {
-        const s = draft.flowRunStates[flowId]
-        if (!s) return
-        s.answeredToolPermissions[toolUseId] = { allow }
-        if (s.pendingToolPermission?.toolUseId === toolUseId) {
-          s.pendingToolPermission = undefined
-        }
-        s.phase = 'running'
-      })
-      postMessageToExtension({
+      dispatchCommand({
         type: 'flow.command.toolPermissionResult',
-        data: {
-          flowId,
-          runId: fs.runId,
-          sessionId,
-          toolUseId,
-          allow,
-        },
+        data: { flowId, runId: fs.runId, sessionId, toolUseId, allow },
       })
     },
     interruptAgent: (flowId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs?.runId || !sessionId) return
-      postMessageToExtension({
+      if (!fs || !flowCanBeKilled(fs.phase)) return
+      const sessionId = fs.sessions.find((s) => !s.completed)?.sessionId
+      if (!fs.runId || !sessionId) return
+      dispatchCommand({
         type: 'flow.command.interrupt',
-        data: {
-          flowId,
-          runId: fs.runId,
-          sessionId,
-        },
+        data: { flowId, runId: fs.runId, sessionId },
       })
     },
     killFlow: (flowId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs?.runId || !sessionId) return
-      postMessageToExtension({
-        type: 'flow.command.interrupt',
-        data: {
-          flowId,
-          runId: fs.runId,
-          sessionId,
-        },
-      })
-      immerSet((draft) => {
-        const s = draft.flowRunStates[flowId]
-        if (!s) return
-        s.phase = 'stopped'
-        s.pendingQuestion = undefined
-        s.pendingToolPermission = undefined
-        s.runId = undefined
+      if (!fs || !flowCanBeKilled(fs.phase)) return
+      dispatchCommand({
+        type: 'flow.command.killFlow',
+        data: { flowId },
       })
     },
     copyAgents: (newAgents, flowId) => {

@@ -26,8 +26,6 @@ type Props = {
 
 export type AnsweredInfo = {
   values: Record<string, string[]>
-  /** 通过自由文本作答的 question 索引集合 */
-  freeTextQuestionIndices: Set<number>
 }
 
 export type BubbleCtx = {
@@ -660,7 +658,6 @@ function renderItemToBubble(
             input={item.input}
             mode='historical'
             answeredValues={answered?.values}
-            freeTextQuestionIndices={answered?.freeTextQuestionIndices}
           />
         ),
       }
