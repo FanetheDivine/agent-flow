@@ -139,6 +139,9 @@ export type ExtensionFlowSignalEvents = TypeWithPrefix<
   'flow.signal.'
 >
 
+/** Extension 发出的Flow信号消息（ExtensionToWebviewMessage 中 flow.signal.* 的子集） */
+export type ExtensionFlowSignalMessage = EventMessageType<ExtensionFlowSignalEvents>
+
 /** Flow 指令基础 payload（不含 flowId） */
 type FlowCommandPayload = {
   /** webview 发起启动，key 传入 flow 内部用于校验响应归属 */
