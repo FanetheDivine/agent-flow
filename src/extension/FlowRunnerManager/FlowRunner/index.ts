@@ -345,7 +345,8 @@ export class FlowRunner {
   }
 
   private doOnAgentComplete(agent: Agent, result: ExecutorResult): void {
-    const { outputName, content } = result
+    const { outputName } = result
+    const content = agent.no_input ? '开始' : result.content
     const runId = this.currentRunId!
     const sessionId = this.currentSessionId!
 
@@ -377,25 +378,18 @@ export class FlowRunner {
       // 若保留旧值会让 checkSession 放行命令，导致把 interrupt/userMessage
       // 错误地派发给已经切到下一个 agent 的 currentExecutor。
       this.currentSessionId = null
-
       // 切换到下一个 agent
-      const nextInitMessage = nextAgent.no_input
-        ? {
-            type: 'user' as const,
-            message: { role: 'user' as const, content: '开始' },
-            parent_tool_use_id: null,
-          }
-        : {
-            type: 'user' as const,
-            message: { role: 'user' as const, content },
-            parent_tool_use_id: null,
-          }
+      const nextInitMessage = {
+        type: 'user' as const,
+        message: { role: 'user' as const, content },
+        parent_tool_use_id: null,
+      }
       this.runAgent(nextInitMessage, nextAgent, (newSessionId) => {
         this.currentSessionId = newSessionId
         this.fire('flow.signal.agentComplete', {
           runId,
           sessionId,
-          content: result.content,
+          content,
           output: { name: result.outputName!, newSessionId },
         })
       })
