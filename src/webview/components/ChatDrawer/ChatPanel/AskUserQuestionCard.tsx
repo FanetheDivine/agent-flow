@@ -102,7 +102,7 @@ export const AskUserQuestionCard: FC<Props> = ({ input, mode, answeredValues, on
   }
 
   return (
-    <div className='flex flex-col gap-2 rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
+    <div className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
       <div className='flex items-center gap-2'>
         <QuestionCircleOutlined className='text-[#89b4fa]' />
         <span className='text-[11px] font-semibold text-[#cdd6f4]'>AI 提问</span>

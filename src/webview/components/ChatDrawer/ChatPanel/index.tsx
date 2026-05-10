@@ -135,18 +135,17 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
     shouldScrollRef.current = true
   }, [flowId, agentId])
 
-  // 新消息到达时按需滚到底
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
     setTimeout(() => {
       const dom = messageListRef.current?.scrollBoxNativeElement
-      if (shouldScrollRef.current && dom) {
-        dom.scroll({
-          top: dom.scrollHeight,
-          behavior: 'instant',
-        })
-      }
+      dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
     }, 0)
-  }, [sessions])
+  }, [])
+
+  // 新消息到达时按需滚到底
+  useEffect(() => {
+    if (shouldScrollRef.current) scrollToBottom()
+  }, [sessions, scrollToBottom])
 
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
@@ -272,7 +271,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
               <AskUserQuestionCard
                 input={pending.input}
                 mode='active'
-                onSubmit={(output) => answerQuestion(flowId, pending.toolUseId, output)}
+                onSubmit={(output) => {
+                  answerQuestion(flowId, pending.toolUseId, output)
+                  shouldScrollRef.current = true
+                  scrollToBottom()
+                }}
               />
             </div>
           </motion.div>

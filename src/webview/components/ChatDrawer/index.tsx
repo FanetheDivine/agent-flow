@@ -1,4 +1,4 @@
-import { useCallback, type FC } from 'react'
+import { RefObject, useCallback, useRef, type FC } from 'react'
 import { Drawer } from 'antd'
 import type { UserMessageType } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
@@ -8,8 +8,8 @@ import {
   useFlowStore,
   type AgentPhase,
 } from '@/webview/store/flow'
-import { ChatPanel } from './AgentFlow/AgentNode/ChatPanel'
-import { ChatInput } from './AgentFlow/AgentNode/ChatPanel/ChatInput'
+import { ChatInput } from './ChatInput'
+import { ChatPanel } from './ChatPanel'
 
 export const ChatDrawer: FC = () => {
   const chatDrawer = useFlowStore((s) => s.chatDrawer)
@@ -30,7 +30,6 @@ export const ChatDrawer: FC = () => {
   })
 
   const inputState = agentChatInputState(agentPhase)
-
   const onSend = useCallback(
     async (content: UserMessageType['message']['content']): Promise<boolean> => {
       if (!chatDrawer) return false
@@ -85,7 +84,9 @@ export const ChatDrawer: FC = () => {
           onSend={onSend}
           status={inputState}
           onCancel={() => {
-            if (chatDrawer) interruptAgent(chatDrawer.flowId)
+            if (chatDrawer) {
+              interruptAgent(chatDrawer.flowId)
+            }
           }}
         />
       </div>
