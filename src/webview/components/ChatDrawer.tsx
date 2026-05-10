@@ -1,6 +1,5 @@
 import { useCallback, type FC } from 'react'
 import { Drawer } from 'antd'
-import { match } from 'ts-pattern'
 import type { UserMessageType } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import {
@@ -40,8 +39,8 @@ export const ChatDrawer: FC = () => {
       // disabled / loading 状态不允许发送
       if (inputState === 'disabled' || inputState === 'loading') return false
 
-      // result 且仍是当前活跃 agent → 同会话追问，不重启 flow
-      if (isActiveAgent && agentPhase === 'result') {
+      // result/interrputed 且仍是当前活跃 agent → 同会话追问，不重启 flow
+      if (isActiveAgent && (agentPhase === 'result' || agentPhase === 'interrupted')) {
         sendUserMessage(flowId, content)
         return true
       }
