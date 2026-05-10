@@ -4,7 +4,8 @@ import { App, Badge, Tag, Tooltip, Typography } from 'antd'
 import { EditOutlined, MessageOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { Agent } from '@/common'
-import { useFlowStore, selectAgentPhase, flowIsDestructiveReadOnly } from '@/webview/store/flow'
+import { useStartFlow } from '@/webview/hooks/useStartFlow'
+import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
 import { AgentEditModal } from './AgentEditModal'
@@ -22,15 +23,18 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
-  const flowPhase = useFlowStore((s) => s.flowStates[flowId]?.phase)
-  const agentPhase = useFlowStore(selectAgentPhase(flowId, agentId))
+  const flowPhase = useFlowStore((s) => s.flowRunStates[flowId]?.phase)
   const save = useFlowStore((s) => s.save)
 
   const { message } = App.useApp()
+  const startFlow = useStartFlow()
 
   const destructiveReadOnly = flowPhase ? flowIsDestructiveReadOnly(flowPhase) : false
 
-  const isCurrentAgent = agentPhase !== 'idle' && agentPhase !== 'completed'
+  const isCurrentAgent = useFlowStore((s) => {
+    const fs = s.flowRunStates[flowId]
+    return fs?.sessions[fs.sessions.length - 1]?.agentId === agentId
+  })
   const outputs = agent?.outputs ?? []
   const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
 
@@ -116,9 +120,9 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                 className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#52c41a]'
                 onClick={(e) => {
                   e.stopPropagation()
-                  const { runFlow, openChatDrawer } = useFlowStore.getState()
+                  const { openChatDrawer } = useFlowStore.getState()
                   openChatDrawer(flowId, agentId, agentName)
-                  runFlow(flowId, agentId, {
+                  startFlow(flowId, agentId, {
                     type: 'user',
                     message: {
                       role: 'user',

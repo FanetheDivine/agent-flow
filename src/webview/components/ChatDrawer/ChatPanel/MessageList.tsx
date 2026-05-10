@@ -1,7 +1,5 @@
-import { forwardRef, useMemo } from 'react'
-import type { WheelEventHandler } from 'react'
+import { forwardRef, useMemo, type WheelEventHandler } from 'react'
 import { Divider } from 'antd'
-import { LoadingOutlined } from '@ant-design/icons'
 import { Bubble } from '@ant-design/x'
 import type { BubbleItemType, BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import type { AgentSession } from '@/webview/store/flow'

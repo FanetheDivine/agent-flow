@@ -53,21 +53,6 @@ type WildcardSignalHandler = (
   data: FlowRunnerSignalEvents[keyof FlowRunnerSignalEvents],
 ) => void
 
-/** Agent 停止（AI 停止流式）的原因，用于触发通知 */
-export type NotifyReason =
-  | 'awaiting-message'
-  | 'awaiting-question'
-  | 'flow-completed'
-  | 'agent-error'
-
-export type NotifyUserHandler = (data: {
-  agentId: string
-  agentName: string
-  flowId: string
-  flowName: string
-  reason: NotifyReason
-}) => void
-
 export class FlowRunner {
   readonly flow: Flow
 
@@ -78,11 +63,9 @@ export class FlowRunner {
   private currentAgentId: string | null = null
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
-  private notifyUser: NotifyUserHandler
 
-  constructor(flow: Flow, notifyUser: NotifyUserHandler) {
+  constructor(flow: Flow) {
     this.flow = flow
-    this.notifyUser = notifyUser
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -129,6 +112,9 @@ export class FlowRunner {
         this.handleToolPermissionResult(
           data as FlowRunnerCommandEvents['flow.command.toolPermissionResult'],
         )
+      })
+      .with('flow.command.killFlow', () => {
+        // killFlow 走 FlowRunnerManager.disposeRunner，不在此处处理
       })
       .exhaustive()
   }
@@ -214,11 +200,8 @@ export class FlowRunner {
     if (!this.checkSession(runId, sessionId)) return
     if (!this.currentExecutor) return
 
-    // 直接转发完整 UserMessageType 给 executor
+    // 直接转发完整 UserMessageType 给 executor（回显由 reducer 两端就地追加，此处不再 fire aiMessage）
     this.currentExecutor.sendUserMessage(message)
-
-    // 回显
-    this.fire('flow.signal.aiMessage', { runId, sessionId, message })
   }
 
   private async handleInterrupt({
@@ -306,27 +289,10 @@ export class FlowRunner {
           input,
         })
       },
-      onAwaitingUser: (reason) => {
-        if (this.currentAgentId !== agent.id) return
-        this.notifyUser({
-          agentId: agent.id,
-          agentName: agent.agent_name,
-          flowId: this.flow.id,
-          flowName: this.flow.name,
-          reason,
-        })
-      },
       onError: (err) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)
         this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
         this.updateAgentStatus('completed')
-        this.notifyUser({
-          agentId: agent.id,
-          agentName: agent.agent_name,
-          flowId: this.flow.id,
-          flowName: this.flow.name,
-          reason: 'agent-error',
-        })
       },
     })
   }
@@ -377,25 +343,18 @@ export class FlowRunner {
       // 若保留旧值会让 checkSession 放行命令，导致把 interrupt/userMessage
       // 错误地派发给已经切到下一个 agent 的 currentExecutor。
       this.currentSessionId = null
-
       // 切换到下一个 agent
-      const nextInitMessage = nextAgent.no_input
-        ? {
-            type: 'user' as const,
-            message: { role: 'user' as const, content: '开始' },
-            parent_tool_use_id: null,
-          }
-        : {
-            type: 'user' as const,
-            message: { role: 'user' as const, content },
-            parent_tool_use_id: null,
-          }
+      const nextInitMessage = {
+        type: 'user' as const,
+        message: { role: 'user' as const, content: nextAgent.no_input ? '开始' : content },
+        parent_tool_use_id: null,
+      }
       this.runAgent(nextInitMessage, nextAgent, (newSessionId) => {
         this.currentSessionId = newSessionId
         this.fire('flow.signal.agentComplete', {
           runId,
           sessionId,
-          content: result.content,
+          content,
           output: { name: result.outputName!, newSessionId },
         })
       })
@@ -406,14 +365,6 @@ export class FlowRunner {
       this.updateAgentStatus('completed')
       this.currentSessionId = null
       this.currentAgentId = null
-      // Flow 完成通知
-      this.notifyUser({
-        agentId: agent.id,
-        agentName: agent.agent_name,
-        flowId: this.flow.id,
-        flowName: this.flow.name,
-        reason: 'flow-completed',
-      })
     }
   }
 

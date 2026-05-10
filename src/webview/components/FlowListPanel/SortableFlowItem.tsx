@@ -1,10 +1,11 @@
 import { useState, type FC } from 'react'
 import { App, Button, Typography } from 'antd'
-import { HolderOutlined, DeleteOutlined } from '@ant-design/icons'
+import { HolderOutlined, DeleteOutlined, BlockOutlined } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Flow } from '@/common'
 import type { FlowRunState } from '@/webview/store/flow'
+import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 
 const PHASE_CONFIG: Record<
@@ -13,7 +14,10 @@ const PHASE_CONFIG: Record<
 > = {
   starting: { color: 'bg-[#f9e2af]', label: '启动中', animate: true },
   running: { color: 'bg-[#a6e3a1]', label: 'AI 生成中', animate: true },
-  awaiting: { color: 'bg-[#89b4fa]', label: '等待用户', animate: true },
+  result: { color: 'bg-[#89b4fa]', label: '生成完毕', animate: true },
+  interrupted: { color: 'bg-[#f9e2af]', label: '已中断', animate: true },
+  'awaiting-question': { color: 'bg-[#cba6f7]', label: '需要回答', animate: true },
+  'awaiting-tool-permission': { color: 'bg-[#f9e2af]', label: '请求授权', animate: true },
   completed: { color: 'bg-[#a6e3a1]/60', label: '已完成', animate: false },
   stopped: { color: 'bg-[#9399b2]', label: '已停止', animate: false },
   error: { color: 'bg-[#f38ba8]', label: '出错', animate: false },
@@ -30,6 +34,7 @@ export type SortableFlowItemProps = {
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const { flow, isActive, phase, onClick, onDelete, onRename } = props
+  const { save, setActiveFlowId, setFlowListCollapsed } = useFlowStore()
   const { message } = App.useApp()
   const { id, name } = flow
   const [editing, setEditing] = useState(false)
@@ -92,6 +97,22 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             {name}
           </Typography.Text>
         </div>
+        <Button
+          title='克隆'
+          type='text'
+          size='small'
+          icon={<BlockOutlined />}
+          onClick={(e) => {
+            e.stopPropagation()
+            const newId = crypto.randomUUID()
+            const cloned = structuredClone(flow)
+            cloned.id = newId
+            save((flows) => flows.push(cloned))
+            setActiveFlowId(newId)
+            setFlowListCollapsed(false)
+          }}
+          className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#45475a]! hover:text-[#89b4fa]!'
+        />
         <span
           className='flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'
           onClick={(e) => e.stopPropagation()}
@@ -105,6 +126,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
               tooltips: false,
             }}
           />
+
           <Button
             type='text'
             size='small'

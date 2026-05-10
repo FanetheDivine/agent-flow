@@ -1,17 +1,15 @@
 import { match } from 'ts-pattern'
 import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from '@/common'
-import { FlowRunner, type NotifyUserHandler } from './FlowRunner'
+import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
   private postMessage: PostMessage
-  private notifyUser: NotifyUserHandler
 
-  constructor(postMessage: PostMessage, notifyUser: NotifyUserHandler) {
+  constructor(postMessage: PostMessage) {
     this.postMessage = postMessage
-    this.notifyUser = notifyUser
   }
 
   handleCommand(type: string, data: any): void {
@@ -20,7 +18,7 @@ export class FlowRunnerManager {
         const { flowId, runKey, agentId, flow, initMessage } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
-        const runner = new FlowRunner(flow, this.notifyUser)
+        const runner = new FlowRunner(flow)
         runner.listenAllSignals((eventType, signalData) => {
           this.postMessage({
             type: eventType,
@@ -48,6 +46,12 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.toolPermissionResult']
         this.runners.get(flowId)?.emit('flow.command.toolPermissionResult', rest)
       })
+      .with('killFlow', () => {
+        const { flowId } = data as ExtensionFlowCommandEvents['flow.command.killFlow'] & {
+          flowId: string
+        }
+        this.disposeRunner(flowId)
+      })
       .otherwise(() => {})
   }
 
@@ -58,7 +62,7 @@ export class FlowRunnerManager {
     this.runners.clear()
   }
 
-  private disposeRunner(flowId: string): void {
+  disposeRunner(flowId: string): void {
     const existing = this.runners.get(flowId)
     if (existing) {
       existing.dispose()

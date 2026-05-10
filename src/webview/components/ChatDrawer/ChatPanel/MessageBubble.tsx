@@ -1,4 +1,4 @@
-import { memo, useState, type FC, type ReactNode } from 'react'
+import { isValidElement, memo, useState, type FC, type ReactNode } from 'react'
 import { Spin, Tag } from 'antd'
 import {
   CheckCircleFilled,
@@ -9,7 +9,7 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
-import { XMarkdown } from '@ant-design/x-markdown'
+import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
 import type {
   AskUserQuestionInput,
   AskUserQuestionOutput,
@@ -26,8 +26,6 @@ type Props = {
 
 export type AnsweredInfo = {
   values: Record<string, string[]>
-  /** 通过自由文本作答的 question 索引集合 */
-  freeTextQuestionIndices: Set<number>
 }
 
 export type BubbleCtx = {
@@ -48,17 +46,40 @@ type RenderedBubble = {
   content: ReactNode
 }
 
-const EMPTY_COMPONENTS: Record<string, never> = {}
+const getTextContent = (node: ReactNode): string => {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(getTextContent).join('')
+  if (isValidElement(node)) {
+    const children = (node.props as { children?: ReactNode }).children
+    return getTextContent(children)
+  }
+  return ''
+}
 
-const Md: FC<{ content: string }> = ({ content }) => (
+const PreBlock: FC<XMarkdownComponentProps> = ({ children, className }) => {
+  const text = getTextContent(children)
+  return (
+    <div className='group relative'>
+      <div className='absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity group-hover:opacity-100'>
+        <CopyButton text={text} />
+      </div>
+      <pre className={className}>{children}</pre>
+    </div>
+  )
+}
+
+const MD_COMPONENTS = { pre: PreBlock }
+
+const Md: FC<{ content: string }> = memo(({ content }) => (
   <XMarkdown
     className='x-markdown-dark'
     content={content}
-    components={EMPTY_COMPONENTS}
+    components={MD_COMPONENTS}
     openLinksInNewTab
     escapeRawHtml
   />
-)
+))
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = useState(false)
@@ -660,7 +681,6 @@ function renderItemToBubble(
             input={item.input}
             mode='historical'
             answeredValues={answered?.values}
-            freeTextQuestionIndices={answered?.freeTextQuestionIndices}
           />
         ),
       }

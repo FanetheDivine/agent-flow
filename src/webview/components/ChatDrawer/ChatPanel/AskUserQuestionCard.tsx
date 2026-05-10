@@ -1,6 +1,6 @@
 import { useMemo, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
-import { CheckOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { CheckOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type { AskUserQuestionInput, AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
 
@@ -9,8 +9,6 @@ type Props = {
   mode: 'active' | 'historical'
   /** 历史态时展示用户之前选中的 label 列表（按 question 映射） */
   answeredValues?: Record<string, string[]>
-  /** 历史态时按 question 索引标记哪些是通过自由文本作答的 */
-  freeTextQuestionIndices?: Set<number>
   onSubmit?: (output: AskUserQuestionOutput) => void
 }
 
@@ -35,13 +33,7 @@ function buildOutput(
   return { questions, answers }
 }
 
-export const AskUserQuestionCard: FC<Props> = ({
-  input,
-  mode,
-  answeredValues,
-  freeTextQuestionIndices,
-  onSubmit,
-}) => {
+export const AskUserQuestionCard: FC<Props> = ({ input, mode, answeredValues, onSubmit }) => {
   const questions = useMemo(() => input.questions ?? [], [input.questions])
   const isActive = mode === 'active'
   const [selections, setSelections] = useState<Selections>({})
@@ -60,7 +52,6 @@ export const AskUserQuestionCard: FC<Props> = ({
       return true
     })
   }, [questions, selections, otherStates])
-
   const handleRadioChange = (qIdx: number, value: string) => {
     if (!isActive) return
     setSelections((prev) => ({ ...prev, [qIdx]: [value] }))
@@ -111,28 +102,25 @@ export const AskUserQuestionCard: FC<Props> = ({
   }
 
   return (
-    <div className='flex flex-col gap-2 rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
+    <div className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
       <div className='flex items-center gap-2'>
         <QuestionCircleOutlined className='text-[#89b4fa]' />
         <span className='text-[11px] font-semibold text-[#cdd6f4]'>AI 提问</span>
-        {mode === 'historical' && (
-          <Tag
-            color={freeTextQuestionIndices?.size ? 'blue' : 'success'}
-            className='m-0 text-[10px]'
-            icon={freeTextQuestionIndices?.size ? <EditOutlined /> : <CheckOutlined />}
-          >
-            {freeTextQuestionIndices?.size ? '含自由文本回答' : '已回答'}
-          </Tag>
-        )}
+        {mode === 'historical' &&
+          (answeredValues ? (
+            <Tag color={'success'} className='m-0 text-[10px]' icon={<CheckOutlined />}>
+              已回答
+            </Tag>
+          ) : (
+            <Tag color={'warning'} className='m-0 text-[10px]'>
+              已中断
+            </Tag>
+          ))}
       </div>
 
       {questions.map((q, qIdx) => {
         const multi = !!q.multiSelect
-        const isFreeTextAnswer = !isActive && freeTextQuestionIndices?.has(qIdx)
-        const freeTextValue = isFreeTextAnswer
-          ? (answeredValues?.[q.question] ?? []).join(', ')
-          : ''
-        const historical = !isFreeTextAnswer && !isActive ? getHistoricalDisplay(q) : null
+        const historical = !isActive ? getHistoricalDisplay(q) : null
         const value = isActive ? (selections[qIdx] ?? []) : historical!.values
         const otherSelected = value.includes(OTHER_LABEL)
         const otherText = isActive
@@ -155,11 +143,7 @@ export const AskUserQuestionCard: FC<Props> = ({
                 </Tag>
               )}
             </div>
-            {isFreeTextAnswer ? (
-              <div className='rounded bg-[#1e1e2e] px-3 py-2 text-[12px] whitespace-pre-wrap text-[#cdd6f4]'>
-                {freeTextValue}
-              </div>
-            ) : multi ? (
+            {multi ? (
               <Checkbox.Group
                 value={value}
                 disabled={!isActive}
