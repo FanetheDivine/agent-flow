@@ -37,14 +37,39 @@ function getMessagesBySession(sessionId: string): readonly ExtensionToWebviewMes
   return messagesMap.get(sessionId) ?? []
 }
 
+// 流式 delta 期间一秒可达数十条消息;每条都新建 Map + emitChange 会让所有
+// 订阅者(尤其是 markdown 渲染)在一帧内重算多次。把多个消息
+// 合批,只在flush做一次 Map 克隆 + emit。
+const pendingBySession = new Map<string, ExtensionToWebviewMessage[]>()
+let flushScheduled = false
+
+function flushPending() {
+  flushScheduled = false
+  if (pendingBySession.size === 0) return
+  const next = new Map(messagesMap)
+  pendingBySession.forEach((msgs, sessionId) => {
+    const prev = next.get(sessionId) ?? []
+    next.set(sessionId, prev.concat(msgs))
+  })
+  pendingBySession.clear()
+  messagesMap = next
+  emitChange()
+}
+
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data as ExtensionToWebviewMessage
   const sessionId = getSessionId(msg)
-  if (sessionId) {
-    const prev = messagesMap.get(sessionId) ?? []
-    messagesMap = new Map(messagesMap).set(sessionId, [...prev, msg])
+  if (!sessionId) return
+  const queue = pendingBySession.get(sessionId)
+  if (queue) {
+    queue.push(msg)
+  } else {
+    pendingBySession.set(sessionId, [msg])
   }
-  emitChange()
+  if (!flushScheduled) {
+    flushScheduled = true
+    requestIdleCallback(flushPending)
+  }
 })
 
 // ── Session ID 提取 ──────────────────────────────────────────────────────

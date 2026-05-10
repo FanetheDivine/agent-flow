@@ -48,7 +48,7 @@ type RenderedBubble = {
 
 const EMPTY_COMPONENTS: Record<string, never> = {}
 
-const Md: FC<{ content: string }> = ({ content }) => (
+const Md: FC<{ content: string }> = memo(({ content }) => (
   <XMarkdown
     className='x-markdown-dark'
     content={content}
@@ -56,7 +56,7 @@ const Md: FC<{ content: string }> = ({ content }) => (
     openLinksInNewTab
     escapeRawHtml
   />
-)
+))
 
 const CopyButton: FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = useState(false)
