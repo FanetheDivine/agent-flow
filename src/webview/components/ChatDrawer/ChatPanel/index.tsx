@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
   type FC,
-  type UIEventHandler,
+  type WheelEventHandler,
 } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
@@ -120,13 +120,15 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
   const messageListRef = useRef<BubbleListRef>(null)
   const shouldScrollRef = useRef(true)
 
-  const handleListScroll = useCallback<UIEventHandler<HTMLDivElement>>((e) => {
-    const dom =
-      (e.target as HTMLDivElement).scrollTop !== undefined
-        ? (e.target as HTMLDivElement)
-        : messageListRef.current?.scrollBoxNativeElement
+  const handleListWheel = useCallback<WheelEventHandler<HTMLDivElement>>((e) => {
+    const dom = messageListRef.current?.scrollBoxNativeElement
     if (!dom) return
-    const atBottom = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 30
+    // wheel 事件触发时 scrollTop 尚未更新,叠加 deltaY 预测滚动后位置
+    const projectedScrollTop = Math.max(
+      0,
+      Math.min(dom.scrollHeight - dom.clientHeight, dom.scrollTop + e.deltaY),
+    )
+    const atBottom = dom.scrollHeight - projectedScrollTop - dom.clientHeight < 30
     shouldScrollRef.current = atBottom
   }, [])
 
@@ -234,7 +236,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
             sessions={sessions}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
-            onScroll={handleListScroll}
+            onWheel={handleListWheel}
           />
         ))}
 

@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, type UIEventHandler } from 'react'
+import { forwardRef, useMemo, type WheelEventHandler } from 'react'
 import { Divider } from 'antd'
 import { Bubble } from '@ant-design/x'
 import type { BubbleItemType, BubbleListRef } from '@ant-design/x/es/bubble/interface'
@@ -9,7 +9,7 @@ type Props = {
   sessions: AgentSession[]
   ctx?: BubbleCtx
   loading?: boolean
-  onScroll?: UIEventHandler<HTMLDivElement>
+  onWheel?: WheelEventHandler<HTMLDivElement>
 }
 
 const roleMap = {
@@ -28,7 +28,7 @@ const roleMap = {
 }
 
 export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList(
-  { sessions, ctx, loading, onScroll },
+  { sessions, ctx, loading, onWheel },
   ref,
 ) {
   const items = useMemo<BubbleItemType[]>(() => {
@@ -71,14 +71,13 @@ export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList
   }, [items, loading, hasAnySessionCompleted])
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col'>
+    <div className='flex min-h-0 flex-1 flex-col' onWheel={onWheel}>
       <Bubble.List
         ref={ref}
         autoScroll={false}
         role={roleMap}
         items={finalItems}
         className='chat-bubble-compact min-h-0 flex-1 overflow-y-auto px-3 py-2'
-        onScroll={onScroll}
       />
     </div>
   )
