@@ -126,7 +126,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
         ? (e.target as HTMLDivElement)
         : messageListRef.current?.scrollBoxNativeElement
     if (!dom) return
-    const atBottom = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 10
+    const atBottom = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 30
     shouldScrollRef.current = atBottom
   }, [])
 

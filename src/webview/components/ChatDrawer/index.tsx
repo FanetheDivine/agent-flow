@@ -1,4 +1,4 @@
-import { RefObject, useCallback, useRef, type FC } from 'react'
+import { useCallback, type FC } from 'react'
 import { Drawer } from 'antd'
 import type { UserMessageType } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
