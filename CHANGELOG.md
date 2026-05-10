@@ -1,5 +1,33 @@
 # Change Log
 
+## [0.0.8] - 2026-05-11
+
+### 新增
+
+- **关闭 Webview 不再中断后台 Agent**：运行态 `FlowRunState` 在 extension 端镜像存储，关闭面板后 Agent 继续在后台运行；重新打开 Webview 时通过 `load` 事件同步全部历史消息与状态，等待用户回复 / 工作流完成等通知照常触达。
+- Agent 配置 `auto_complete`（boolean）重命名并扩展为 `complete_mode`（三值枚举）：`auto`（自动完成）/ `confirm`（用户确认后完成）/ `never`（永不完成，MCP 不注册 `AgentComplete` 工具，系统提示词不生成"完成任务"模块）。
+- Flow 列表新增**克隆**操作，可一键复制整条工作流。
+- 抽取 `useStartFlow` hook 统一启动确认逻辑：`ChatDrawer` 与 `AgentNode` 直接启动按钮共用，非 idle 状态下统一弹 modal 确认（不再静默清空运行数据）。
+- `Ctrl+Shift+L`（macOS：`Cmd+Shift+L`）无论是否打开 WebPanel 或 ChatPanel 都可注入代码片段。
+- 聊天消息中的代码块支持复制按钮。
+
+### 优化
+
+- **状态机重构**：webview 与 extension 端采用同一份 `updateFlowRunState` reducer 推进 `FlowRunState`，两端状态严格同步；移除字符串类型的可派生值，状态语义更细分。
+- **消息副作用统一**：reducer 产出的 `MessageEffect` 集中处理通知 / 自动打开 ChatPanel 等用户交互副作用。
+- **Agent 系统提示词**：「任务描述」前置于通用规则，先明确核心职责再补充约束；`no_input=true` 时省略「如何对待用户消息」段落；去除提示词中的"Agent"术语（改用"步骤"），降低元认知负担。
+- **聊天面板滚动**：`onWheel` 改为 `onScroll` 监听实际滚动位置（底部阈值 <10px 恢复自动滚动）；回答问题后滚动到最底端；初始定位/切换 Agent 改为直接滚动而非 smooth。
+- **消息渲染性能**：消息组件 `memo` 化；流式消息在浏览器空闲时（`requestIdleCallback`）批量提交至 store，避免高频触发重渲染。
+- **默认工作流**：动态获取 Flow 的类型而非写死。
+- **中断处理**：中断 Agent 时关闭子进程释放内存；`interrupted` 状态下用户输入发为新消息而非重启 query。
+- **粘贴 Agent**：不再自动追加重命名后缀，保持原 name。
+
+### 修复
+
+- 修复切换到无输入 Agent（`no_input=true`）时起始消息展示错误。
+- 修复 `useForm` 在 AgentEditModal 中的使用方式。
+- 修复多处 TypeScript 类型问题。
+
 ## [0.0.7] - 2026-05-08
 
 ### 新增
