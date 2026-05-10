@@ -443,17 +443,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       get().save((flows) => {
         const flow = flows.find((f) => f.id === flowId)
         if (!flow) return
-        const existingNames = new Set((flow.agents ?? []).map((a) => a.agent_name))
-
-        const nameMap = new Map<string, string>()
-        for (const agent of newAgents) {
-          const base = agent.agent_name
-          let newName = base
-          let i = 2
-          while (existingNames.has(newName)) newName = `${base}-${i++}`
-          nameMap.set(base, newName)
-          existingNames.add(newName)
-        }
 
         const idMap = new Map<string, string>()
         for (const agent of newAgents) {
@@ -463,7 +452,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         remapped = newAgents.map((agent) => ({
           ...agent,
           id: idMap.get(agent.id)!,
-          agent_name: nameMap.get(agent.agent_name)!,
           outputs: agent.outputs?.map((output) => ({
             ...output,
             next_agent: output.next_agent !== undefined ? idMap.get(output.next_agent) : undefined,
