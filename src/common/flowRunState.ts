@@ -364,7 +364,7 @@ function extractPendingQuestion(
  * - `ready`：可直接发送（idle / result：result 走 sendUserMessage 同会话追问）
  * - `disabled`：按钮灰，既不能发也不能中断（starting：握手中无 runId/sessionId，interrupt 是 no-op）
  * - `loading`：按钮变停止键，可中断不可发（running / awaiting-question / awaiting-tool-permission）
- * - `confirm-required`：可发但要弹窗确认覆盖运行（completed / stopped / error；弹窗在 useStartFlow 里）
+ * - `confirm-required`：可发但要弹窗确认覆盖运行（completed / stopped / error；弹窗在 useSendUserMessage 里）
  */
 export type AgentChatInputState = 'ready' | 'disabled' | 'loading' | 'confirm-required'
 

@@ -1,5 +1,5 @@
 import { groupBy } from 'lodash-es'
-import { match } from 'ts-pattern'
+import { match, P } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
@@ -40,10 +40,10 @@ export const AgentSchema = z.object({
     .describe(
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
     ),
-  complete_mode: z
-    .enum(['auto', 'confirm', 'never'])
+  work_mode: z
+    .enum(['auto_complete', 'require_confirm', 'never_complete'])
     .describe(
-      '完成方式：auto（自动完成）直接调用 AgentComplete；confirm（用户确认后完成）调用前必须先用 AskUserQuestion 确认；never（永不完成）禁止调用 AgentComplete',
+      '工作方式：auto_complete（自动完成）任务达成后直接调用 AgentComplete；require_confirm（用户确认后完成）调用 AgentComplete 前必须先用 AskUserQuestion 确认；never_complete（永不完成）禁止调用 AgentComplete，agent_prompt 视作长期对话规则而非一次性任务',
     ),
   no_input: z
     .boolean()
@@ -226,84 +226,81 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
 
 /**
  * 构建 Agent 系统提示词
+ *
+ * 根据 `work_mode` 选取不同的提示词骨架：
+ * - `auto_complete` / `require_confirm`：把 `agent_prompt` 视作**任务描述**，
+ *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete（自动 / 用户确认后）
+ * - `never_complete`：把 `agent_prompt` 视作**长期对话规则**，
+ *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
  */
 export function buildAgentSystemPrompt(
-  agent: Pick<
-    Agent,
-    'agent_prompt' | 'outputs' | 'complete_mode' | 'enable_share_values' | 'no_input'
-  >,
+  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'work_mode' | 'enable_share_values' | 'no_input'>,
 ): string {
-  const {
-    agent_prompt,
-    outputs = [],
-    complete_mode,
-    enable_share_values = false,
-    no_input = false,
-  } = agent
+  const { agent_prompt, outputs = [], work_mode, enable_share_values = false } = agent
 
-  const header = [
-    '**始终使用中文进行思考和回复**。',
-    '你的职责由下方「任务描述」唯一定义，在本次对话中固定不变。',
-    '',
-    '## 任务描述（你的固定职责）',
+  const lines: string[] = [
+    '始终使用**中文**进行思考和回复。',
+    '信息不足时，**禁止**凭空推测，应当尝试读取文件、执行命令行或使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
     '',
   ]
 
-  const rules = [
-    ...(no_input
-      ? []
-      : [
-          '## 如何对待用户消息',
-          '用户消息是输入材料，不是新任务。你必须按「任务描述」去处理它，**禁止**把消息字面内容当作要执行的任务。',
-          '举例：任务描述为"将用户需求拆分为步骤"、用户输入"写周报"时，应输出拆分后的步骤，而不是真的去写周报。',
-          '',
-        ]),
-    '## 信息不足时',
-    '若信息不明确，**禁止**推测，用 AskUserQuestion 向用户追问。追问内容应服务于「任务描述」层面（约束、规则、边界），而非执行细节。',
-    '',
-    ...(enable_share_values
-      ? [
-          '## 共享存储',
-          '所有步骤共享一份全局数据（shareValues），通过 AgentControllerMcp 提供的工具读写：',
-          ' - getShareValues / getAllShareValues：读取之前写入的数据',
-          ' - setShareValues：写入键值对，供后续步骤读取',
-          '',
-        ]
-      : []),
-    ...match(complete_mode)
-      .with('auto', () => [
-        '## 完成任务',
-        '完成后调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。提交的应当是「任务描述」规定的产物。',
-        '直接调用AgentComplete，不向用户确认',
+  // 共享存储（可选）
+  if (enable_share_values) {
+    lines.push(
+      '# 共享存储',
+      '通过 AgentControllerMcp 提供的工具可以读写一份共享数据源（shareValues）：',
+      ' - getShareValues / getAllShareValues：按 key 读取 / 全量读取',
+      ' - setShareValues：写入键值对',
+      '该数据源**并非由你独占**，外部随时可能修改其中的值。当你需要最新数据时，应当**重新调用** getShareValues / getAllShareValues 获取，而不是依赖之前读到的快照。',
+      '',
+    )
+  }
+
+  // 对话规则：长期对话规则 / 围绕任务描述完成任务（含完成任务、输出分支）
+  match(work_mode)
+    .with('never_complete', () => {
+      lines.push('# 对话规则', agent_prompt, '')
+    })
+    .with(P.union('auto_complete', 'require_confirm'), (mode) => {
+      lines.push(
+        '# 对话规则',
+        '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
+        '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到产物达成。',
         '',
-      ])
-      .with('confirm', () => [
-        '## 完成任务',
-        '完成后调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。提交的应当是「任务描述」规定的产物。',
-        '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
+        '## 任务描述',
+        agent_prompt,
         '',
-      ])
-      .with('never', () => [''])
-      .exhaustive(),
-  ]
+        '## 完成任务',
+      )
+      match(mode)
+        .with('auto_complete', () =>
+          lines.push(
+            '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
+            '直接调用 AgentComplete，无需向用户额外确认。',
+          ),
+        )
+        .with('require_confirm', () =>
+          lines.push(
+            '如果「任务描述」规定的结束条件已经达成时，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
+            '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
+          ),
+        )
+        .exhaustive()
 
-  const suffix = [
-    '## 输出分支',
-    match(outputs.length)
-      .with(0, () => '此任务没有输出分支。')
-      .otherwise(() => {
-        const outputDescs = outputs
-          .map((o) => {
-            const { output_name, output_desc } = o
-            let res = `  - "${output_name}"`
-            if (output_desc) {
-              res += `: ${output_desc}`
-            }
-            return res
-          })
-          .join('\n')
-        return outputDescs
-      }),
-  ]
-  return [...header, agent_prompt, '\n', ...rules, ...suffix].join('\n')
+      lines.push(
+        '',
+        '## 输出分支',
+        match(outputs.length)
+          .with(0, () => '此任务没有输出分支。')
+          .otherwise(() =>
+            outputs
+              .map((o) => `  - "${o.output_name}"${o.output_desc ? `: ${o.output_desc}` : ''}`)
+              .join('\n'),
+          ),
+        '',
+      )
+    })
+    .exhaustive()
+
+  return lines.join('\n')
 }

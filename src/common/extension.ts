@@ -49,7 +49,7 @@ function withErrorBoundary<TArgs>(
  */
 export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
-  if (agent.complete_mode !== 'never') {
+  if (agent.work_mode !== 'never_complete') {
     const outputs = agent.outputs ?? []
     const outputNames = outputs.map((o) => o.output_name)
     const outputDescs = outputs

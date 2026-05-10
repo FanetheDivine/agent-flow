@@ -64,17 +64,19 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   const initial = useMemo(() => flowToReactFlow(flow), [flow])
 
   // 切换到该 flow 时，根据运行状态决定是否打开 ChatPanel
+  // 注意：依赖里只放 activeFlowId / flowId，agents 现取，避免编辑 Agent 触发 ChatDrawer 自动打开
   useEffect(() => {
     if (activeFlowId !== flowId) return
     const fs = useFlowStore.getState().flowRunStates[flowId]
     const currentAgentId = fs?.sessions[fs.sessions.length - 1]?.agentId
     if (currentAgentId) {
-      const agent = flow.agents?.find((a) => a.id === currentAgentId)
+      const latestFlow = useFlowStore.getState().flows.find((f) => f.id === flowId)
+      const agent = latestFlow?.agents?.find((a) => a.id === currentAgentId)
       openChatDrawer(flowId, currentAgentId, agent?.agent_name ?? '')
     } else {
       closeChatDrawer()
     }
-  }, [activeFlowId, flowId, flow.agents, openChatDrawer, closeChatDrawer])
+  }, [activeFlowId, flowId, openChatDrawer, closeChatDrawer])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentNode>(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
@@ -180,7 +182,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
       agent_name: 'example-agent',
       model: 'haiku',
       auto_allowed_tools: true,
-      complete_mode: 'auto',
+      work_mode: 'auto_complete',
       agent_prompt: '将用户输入视作纯文本，原样输出。',
       outputs: [{ output_name: '输出', output_desc: '用户输入原文' }],
     }

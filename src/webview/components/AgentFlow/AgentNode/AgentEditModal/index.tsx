@@ -7,6 +7,8 @@ import { InfoCircleOutlined } from '@ant-design/icons'
 import type { Agent } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
 
+const FormItem = Form.Item<Agent>
+
 export type AgentEditModalProps = {
   open: boolean
   agent: Agent | null
@@ -59,14 +61,14 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
 
   useEffect(() => {
     if (open && agent) {
-      form.setFieldsValue({
+      const newFormValue: Omit<Agent, 'id'> = {
         agent_name: agent.agent_name,
         model: agent.model,
         effort: agent.effort,
         agent_prompt: agent.agent_prompt,
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
-        complete_mode: agent.complete_mode ?? 'auto',
+        work_mode: agent.work_mode ?? 'auto_complete',
         no_input: agent.no_input ?? false,
         enable_share_values: agent.enable_share_values ?? false,
         outputs: (agent.outputs ?? []).map((o) => ({
@@ -74,7 +76,8 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           output_desc: o.output_desc,
           next_agent: o.next_agent,
         })),
-      })
+      }
+      form.setFieldsValue(newFormValue)
     }
   }, [open, agent, form])
 
@@ -85,7 +88,6 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
   }
 
   const currentAgent = useWatch([], form)
-
   return (
     <Modal
       title='编辑 Agent'
@@ -107,7 +109,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           }
         }}
       >
-        <Form.Item
+        <FormItem
           name='agent_name'
           label='Agent 名称'
           rules={[
@@ -125,10 +127,10 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           ]}
         >
           <Input />
-        </Form.Item>
+        </FormItem>
 
         <div className='flex gap-4'>
-          <Form.Item
+          <FormItem
             name='model'
             label='模型'
             rules={[{ required: true, message: '请选择或输入模型' }]}
@@ -154,9 +156,9 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                 option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false
               }
             />
-          </Form.Item>
+          </FormItem>
 
-          <Form.Item name='effort' label='努力程度' className='mb-0 w-56'>
+          <FormItem name='effort' label='努力程度' className='mb-0 w-56'>
             <Select
               placeholder='默认（不指定）'
               allowClear
@@ -168,18 +170,18 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
                 { label: 'max — 最大性能(opus4.6+)', value: 'max' },
               ]}
             />
-          </Form.Item>
+          </FormItem>
         </div>
 
-        <Form.Item
+        <FormItem
           name='auto_allowed_tools'
           label='自动允许的工具'
           tooltip={`不需要用户确认、自动执行的工具。开启「允许全部」或留空表示全部放行；特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
         >
           <AutoAllowedToolsField />
-        </Form.Item>
+        </FormItem>
 
-        <Form.Item
+        <FormItem
           name='must_confirm_tools'
           label='必须确认的工具'
           tooltip={`每次调用都必须用户确认的工具，优先级高于「自动允许」。特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
@@ -190,42 +192,42 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
             options={TOOL_OPTIONS}
             tokenSeparators={[',', ' ']}
           />
-        </Form.Item>
+        </FormItem>
 
         <div className='flex gap-4'>
-          <Form.Item
-            name='complete_mode'
+          <FormItem
+            name='work_mode'
             label='完成方式'
             tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
           >
             <Select
               options={[
-                { value: 'auto', label: '自动完成' },
-                { value: 'confirm', label: '用户确认后完成' },
-                { value: 'never', label: '永不完成' },
+                { value: 'auto_complete', label: '自动完成' },
+                { value: 'require_confirm', label: '用户确认后完成' },
+                { value: 'never_complete', label: '永不完成' },
               ]}
             />
-          </Form.Item>
+          </FormItem>
 
-          <Form.Item
+          <FormItem
             name='no_input'
             label='无输入'
             tooltip='开启后节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）'
             valuePropName='checked'
           >
             <Switch />
-          </Form.Item>
+          </FormItem>
 
-          <Form.Item
+          <FormItem
             name='enable_share_values'
             label='共享存储'
             tooltip='开启后才会注入 setShareValues / getShareValues / getAllShareValues 工具，并在系统提示词中告知 Agent 共享存储的存在；关闭时本 Agent 完全无感知'
             valuePropName='checked'
           >
             <Switch />
-          </Form.Item>
+          </FormItem>
         </div>
-        <Form.Item
+        <FormItem
           label={
             <span className='flex items-center gap-1 whitespace-nowrap'>
               提示词
@@ -247,16 +249,16 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
             </span>
           }
         >
-          <Form.Item
+          <FormItem
             name='agent_prompt'
             rules={[{ required: true, message: '请输入提示词' }]}
             className='mb-0'
           >
             <Input.TextArea rows={6} placeholder='请输入提示词' />
-          </Form.Item>
-        </Form.Item>
+          </FormItem>
+        </FormItem>
 
-        <Form.Item label='输出分支'>
+        <FormItem label='输出分支'>
           <Form.List name='outputs'>
             {(fields, { add, remove }) => (
               <>
@@ -315,7 +317,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
               </>
             )}
           </Form.List>
-        </Form.Item>
+        </FormItem>
       </Form>
     </Modal>
   )
