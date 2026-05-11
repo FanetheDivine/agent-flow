@@ -123,6 +123,7 @@ type FlowStoreType = StoreState & {
   answerToolPermission: (flowId: string, toolUseId: string, allow: boolean) => void
   interruptAgent: (flowId: string) => void
   killFlow: (flowId: string) => void
+  setShareValues: (flowId: string, values: Record<string, string>) => void
   openChatDrawer: (flowId: string, agentId: string, agentName: string) => void
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
@@ -436,6 +437,15 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       dispatchCommand({
         type: 'flow.command.killFlow',
         data: { flowId },
+      })
+    },
+    setShareValues: (flowId, values) => {
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
+      if (!fs?.runId) return
+      dispatchCommand({
+        type: 'flow.command.setShareValues',
+        data: { flowId, runId: fs.runId, values },
       })
     },
     copyAgents: (newAgents, flowId) => {
