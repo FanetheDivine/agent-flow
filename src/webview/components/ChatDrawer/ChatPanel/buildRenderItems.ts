@@ -1,3 +1,4 @@
+import { match } from 'ts-pattern'
 import type { AskUserQuestionInput, ExtensionToWebviewMessage } from '@/common'
 
 // ── 类型 ──────────────────────────────────────────────────────────────────
@@ -33,21 +34,23 @@ export type RenderItem =
 type StreamingBlock = { type: 'text' | 'thinking'; content: string }
 type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
 
-// ── 缓存 ─────────────────────────────────────────────────────────────────
-
-type CacheEntry = {
-  lastScannedIdx: number
+type ScanState = {
   items: RenderItem[]
   seenToolUseIds: Set<string>
-  // 第一遍辅助索引
   toolUseIdToResult: Map<string, ToolResult>
   completedBlockCounts: Map<string, { thinking: number; text: number }>
   renderedAssistantTexts: Set<string>
   partialsByMessageId: Map<string, PartialMessage>
-  // 第二遍流式状态
   currentRenderingPartialMsgId: string | null
   partialBlockSeen: Map<string, { thinking: number; text: number }>
 }
+
+type CacheEntry = {
+  nextScanStart: number
+  state: ScanState
+}
+
+// ── 缓存 ─────────────────────────────────────────────────────────────────
 
 const cache = new Map<string, CacheEntry>()
 
@@ -80,60 +83,25 @@ function extractToolResultText(content: unknown): string {
 
 // ── 核心构建 ─────────────────────────────────────────────────────────────
 
-export function buildRenderItems(
-  sessionId: string,
+function scanIncremental(
   msgs: ExtensionToWebviewMessage[],
-): RenderItem[] {
-  const cached = cache.get(sessionId)
-
-  // 消息未增长 → 直接返回缓存
-  if (cached && cached.lastScannedIdx === msgs.length) return cached.items
-
-  // 初始化或复用缓存状态
-  let lastScannedIdx: number
-  let items: RenderItem[]
-  let seenToolUseIds: Set<string>
-  let toolUseIdToResult: Map<string, ToolResult>
-  let completedBlockCounts: Map<string, { thinking: number; text: number }>
-  let renderedAssistantTexts: Set<string>
-  let partialsByMessageId: Map<string, PartialMessage>
-  let currentRenderingPartialMsgId: string | null
-  let partialBlockSeen: Map<string, { thinking: number; text: number }>
-
-  if (cached && cached.lastScannedIdx < msgs.length) {
-    lastScannedIdx = cached.lastScannedIdx
-    items = cached.items
-    seenToolUseIds = cached.seenToolUseIds
-    toolUseIdToResult = cached.toolUseIdToResult
-    completedBlockCounts = cached.completedBlockCounts
-    renderedAssistantTexts = cached.renderedAssistantTexts
-    partialsByMessageId = cached.partialsByMessageId
-    currentRenderingPartialMsgId = cached.currentRenderingPartialMsgId
-    partialBlockSeen = cached.partialBlockSeen
-  } else {
-    // 无缓存或消息被截断（不应发生），从头开始
-    lastScannedIdx = 0
-    items = []
-    seenToolUseIds = new Set()
-    toolUseIdToResult = new Map()
-    completedBlockCounts = new Map()
-    renderedAssistantTexts = new Set()
-    partialsByMessageId = new Map()
-    currentRenderingPartialMsgId = null
-    partialBlockSeen = new Map()
-  }
+  nextScanStart: number,
+  state: ScanState,
+): void {
+  const {
+    items,
+    seenToolUseIds,
+    toolUseIdToResult,
+    completedBlockCounts,
+    renderedAssistantTexts,
+    partialsByMessageId,
+    partialBlockSeen,
+  } = state
 
   // ── 第一遍（增量）：辅助索引 ─────────────────────────────────────────
-  let currentPartialMsgId: string | null = null
-  // 如果有缓存，恢复到上次扫描末尾的 partial 上下文
-  if (cached) {
-    // 尝试从最后的 partials 推断 currentPartialMsgId
-    // 最后一条 stream_event 若未 message_stop，则 currentPartialMsgId 仍有效
-    // 简化处理：遍历新增消息前先检查最后一条是否是 message_stop
-    currentPartialMsgId = cached.currentRenderingPartialMsgId
-  }
+  let currentPartialMsgId: string | null = state.currentRenderingPartialMsgId
 
-  for (let i = lastScannedIdx; i < msgs.length; i++) {
+  for (let i = nextScanStart; i < msgs.length; i++) {
     const msg = msgs[i]
     if (msg.type !== 'flow.signal.aiMessage') continue
     const { message } = msg.data
@@ -210,7 +178,6 @@ export function buildRenderItems(
   }
 
   // ── 更新已有 tool_use 项的 result ────────────────────────────────────
-  // 新消息可能带来了之前尚未出结果的 tool_use 的 tool_result
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
     if (item.kind === 'tool_use' && !item.result) {
@@ -222,7 +189,7 @@ export function buildRenderItems(
   }
 
   // ── 第二遍（增量）：按时序生成 RenderItem ─────────────────────────────
-  for (let i = lastScannedIdx; i < msgs.length; i++) {
+  for (let i = nextScanStart; i < msgs.length; i++) {
     const mIdx = i
     const msg = msgs[i]
 
@@ -293,28 +260,28 @@ export function buildRenderItems(
         const event = message.event as any
         if (event?.type === 'message_start') {
           const id = event.message?.id
-          if (typeof id === 'string') currentRenderingPartialMsgId = id
+          if (typeof id === 'string') state.currentRenderingPartialMsgId = id
           continue
         }
         if (event?.type === 'message_stop') {
-          currentRenderingPartialMsgId = null
+          state.currentRenderingPartialMsgId = null
           continue
         }
         if (event?.type !== 'content_block_start') continue
-        if (!currentRenderingPartialMsgId) continue
-        const partial = partialsByMessageId.get(currentRenderingPartialMsgId)
+        if (!state.currentRenderingPartialMsgId) continue
+        const partial = partialsByMessageId.get(state.currentRenderingPartialMsgId)
         if (!partial) continue
         const cbType = event.content_block?.type
         const blockType: 'text' | 'thinking' | null =
           cbType === 'text' ? 'text' : cbType === 'thinking' ? 'thinking' : null
         if (!blockType) continue
-        const seen = partialBlockSeen.get(currentRenderingPartialMsgId) ?? {
+        const seen = partialBlockSeen.get(state.currentRenderingPartialMsgId) ?? {
           thinking: 0,
           text: 0,
         }
         seen[blockType] += 1
-        partialBlockSeen.set(currentRenderingPartialMsgId, seen)
-        const completed = completedBlockCounts.get(currentRenderingPartialMsgId) ?? {
+        partialBlockSeen.set(state.currentRenderingPartialMsgId, seen)
+        const completed = completedBlockCounts.get(state.currentRenderingPartialMsgId) ?? {
           thinking: 0,
           text: 0,
         }
@@ -344,19 +311,48 @@ export function buildRenderItems(
       })
     }
   }
+}
 
-  // ── 更新缓存 ──────────────────────────────────────────────────────────
-  cache.set(sessionId, {
-    lastScannedIdx: msgs.length,
-    items,
-    seenToolUseIds,
-    toolUseIdToResult,
-    completedBlockCounts,
-    renderedAssistantTexts,
-    partialsByMessageId,
-    currentRenderingPartialMsgId,
-    partialBlockSeen,
-  })
+/**
+ * 按 sessionId 缓存的渲染项构建器。
+ *
+ * - 首次调用：扫描全部消息，将扫描中间态与最终产物缓存。
+ * - 后续调用：消息未增长则直接返回缓存；消息增长则从断点继续增量扫描。
+ */
+export function buildRenderItems(
+  sessionId: string,
+  msgs: ExtensionToWebviewMessage[],
+): RenderItem[] {
+  const cached = match(cache.has(sessionId))
+    .with(true, () => cache.get(sessionId)!)
+    .with(false, () => {
+      cache.set(sessionId, {
+        nextScanStart: 0,
+        state: {
+          items: [],
+          seenToolUseIds: new Set(),
+          toolUseIdToResult: new Map(),
+          completedBlockCounts: new Map(),
+          renderedAssistantTexts: new Set(),
+          partialsByMessageId: new Map(),
+          currentRenderingPartialMsgId: null,
+          partialBlockSeen: new Map(),
+        },
+      })
+      return cache.get(sessionId)!
+    })
+    .exhaustive()
 
-  return items
+  // 消息未增长 → 直接返回缓存
+  if (cached.nextScanStart === msgs.length) {
+    return cached.state.items
+  }
+
+  const nextScanStart = cached.nextScanStart
+
+  scanIncremental(msgs, nextScanStart, cached.state)
+
+  cached.nextScanStart = msgs.length
+
+  return cached.state.items
 }
