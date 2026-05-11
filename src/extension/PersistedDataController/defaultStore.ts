@@ -93,7 +93,7 @@ const PresetFlows: Flow[] = [
           '3. 参考「设计规范」产出Flow JSON',
           '4. 调用validateFlow自校验，有错则修改直到通过',
           '5. 写回共享存储（分支B：将修改后的完整 Flow 覆盖写回 generatedFlow，变更条目追加到 changeList；分支D：覆盖generatedFlow并清空changeList）',
-          '6. 以```json包裹当前版本Flow JSON调用AgentComplete选「完成设计」',
+          '6. 调用AgentComplete，分支「完成设计」，内容是当前版本Flow JSON（可以通过JSON.parse的纯json）',
           '',
           '### 分支B：最小修改规则',
           '- 以generatedFlow为基线，在其基础上仅修改feedback明确提及的节点和字段，不触碰未提及的节点',
