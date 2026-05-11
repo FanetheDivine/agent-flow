@@ -1,10 +1,11 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
-  type FC,
   type WheelEventHandler,
 } from 'react'
 import { Button, Skeleton, Tag, Tooltip } from 'antd'
@@ -54,7 +55,14 @@ function buildAnsweredMap(
   return answeredMap
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) => {
+export type ChatPanelRef = {
+  forceScrollToBottom: () => void
+}
+
+export const ChatPanel = forwardRef<ChatPanelRef, Props>(function ChatPanel(
+  { flowId, agentId, agentName, onClose },
+  ref,
+) {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
@@ -143,6 +151,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
     }, 0)
   }, [])
+
+  useImperativeHandle(ref, () => ({ forceScrollToBottom: () => {
+    shouldScrollRef.current = true
+    scrollToBottom()
+  } }), [scrollToBottom])
 
   // 新消息到达时按需滚到底
   useEffect(() => {
@@ -285,4 +298,4 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       </AnimatePresence>
     </div>
   )
-}
+})
