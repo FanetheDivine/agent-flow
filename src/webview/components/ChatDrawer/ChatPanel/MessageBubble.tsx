@@ -10,14 +10,16 @@ import {
 } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
-import type {
-  AskUserQuestionInput,
-  AskUserQuestionOutput,
-  ExtensionToWebviewMessage,
-} from '@/common'
+import type { AskUserQuestionInput, AskUserQuestionOutput, ExtensionToWebviewMessage } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
+import {
+  buildRenderItems,
+  clearBuildCache,
+  type RenderItem,
+  type ToolResult,
+} from './buildRenderItems'
 import { ToolPermissionCard } from './ToolPermissionCard'
 
 type Props = {
@@ -266,23 +268,6 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   }
 }
 
-/** 从 tool_result 的 content 中提取纯文本 */
-function extractToolResultText(content: unknown): string {
-  if (!content) return ''
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content
-      .map((b: any) => {
-        if (typeof b === 'string') return b
-        if (b && typeof b === 'object' && b.type === 'text') return b.text ?? ''
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
-  }
-  return ''
-}
-
 /** 根据工具名和输入参数生成一行摘要 */
 function getToolSummary(toolName: string, input: any): string {
   if (!input || typeof input !== 'object') return toolName
@@ -311,272 +296,6 @@ function getToolSummary(toolName: string, input: any): string {
     default:
       return name
   }
-}
-
-// ── 数据归一化层 ─────────────────────────────────────────────────────────
-// 把流式 + 完整消息混合的原始事件流，整理为按时序排列的"已完成数据项"。
-// 流式 partial 与完整 assistant 通过 message.id 配对：
-//   - 若 partial 对应的 assistant 已到达，则丢弃 partial（用 assistant 完整内容渲染）
-//   - 若没到达（中断 / 仍在流式中），则用 partial 累积的内容渲染
-
-type ToolResult = { isError: boolean; text: string }
-
-type RenderItem =
-  | { kind: 'user'; key: string; rawContent: unknown }
-  | { kind: 'text'; key: string; text: string; streaming: boolean }
-  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
-  | {
-      kind: 'tool_use'
-      key: string
-      toolUseId: string
-      toolName: string
-      input: unknown
-      result?: ToolResult
-    }
-  | {
-      kind: 'ask_user_question'
-      key: string
-      toolUseId: string
-      input: AskUserQuestionInput
-    }
-  | { kind: 'turn_end'; key: string; isError: boolean }
-  | {
-      kind: 'agent_complete'
-      key: string
-      outputName?: string
-      displayContent?: string
-    }
-
-type StreamingBlock = { type: 'text' | 'thinking'; content: string }
-type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
-
-function buildRenderItems(
-  msgs: ExtensionToWebviewMessage[],
-  seenToolUseIds: Set<string>,
-): RenderItem[] {
-  // ── 第一遍：辅助索引 ───────────────────────────────────────────────────
-  const toolUseIdToResult = new Map<string, ToolResult>()
-  // 同一条 message.id 可能被分多条 assistant 消息发出（OpenAI 兼容代理常见，
-  // 每个 content_block 单独打一条 assistant），所以不能整 mid 丢 partial，
-  // 改为按 type 计数：每出现一份完整 assistant 中的 thinking/text，就消耗一份 partial。
-  const completedBlockCounts = new Map<string, { thinking: number; text: number }>()
-  const renderedAssistantTexts = new Set<string>()
-  const partialsByMessageId = new Map<string, PartialMessage>()
-  let currentPartialMsgId: string | null = null
-
-  msgs.forEach((msg, mIdx) => {
-    if (msg.type !== 'flow.signal.aiMessage') return
-    const { message } = msg.data
-
-    if (message.type === 'user') {
-      const rawContent = message.message.content
-      if (!Array.isArray(rawContent)) return
-      rawContent.forEach((block: any) => {
-        if (block?.type === 'tool_result' && block.tool_use_id) {
-          const text = extractToolResultText(block.content)
-          if (text) {
-            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
-          }
-        }
-      })
-      return
-    }
-
-    if (message.type === 'assistant') {
-      const mid = message.message.id
-      const blocks = message.message.content
-      if (!Array.isArray(blocks)) return
-      const counts = completedBlockCounts.get(mid) ?? { thinking: 0, text: 0 }
-      blocks.forEach((block: any) => {
-        if (block?.type === 'text' && typeof block.text === 'string') {
-          renderedAssistantTexts.add(block.text)
-          counts.text += 1
-        }
-        if (block?.type === 'thinking') {
-          counts.thinking += 1
-        }
-        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
-          const text = extractToolResultText(block.content)
-          if (text) {
-            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
-          }
-        }
-      })
-      completedBlockCounts.set(mid, counts)
-      return
-    }
-
-    if (message.type === 'stream_event') {
-      const event = message.event as any
-      if (event?.type === 'message_start') {
-        const id = event.message?.id
-        if (typeof id !== 'string') return
-        currentPartialMsgId = id
-        if (!partialsByMessageId.has(id)) {
-          partialsByMessageId.set(id, { mIdx, blocks: new Map() })
-        }
-        return
-      }
-      if (!currentPartialMsgId) return
-      const partial = partialsByMessageId.get(currentPartialMsgId)
-      if (!partial) return
-      if (event?.type === 'content_block_start') {
-        const cb = event.content_block
-        if (cb?.type === 'thinking') {
-          partial.blocks.set(event.index, { type: 'thinking', content: cb.thinking ?? '' })
-        } else if (cb?.type === 'text') {
-          partial.blocks.set(event.index, { type: 'text', content: cb.text ?? '' })
-        }
-      } else if (event?.type === 'content_block_delta') {
-        const existing = partial.blocks.get(event.index)
-        if (!existing) return
-        const delta = event.delta
-        if (delta?.type === 'thinking_delta') existing.content += delta.thinking
-        else if (delta?.type === 'text_delta') existing.content += delta.text
-      } else if (event?.type === 'message_stop') {
-        currentPartialMsgId = null
-      }
-    }
-  })
-
-  // ── 第二遍：按时序生成 RenderItem ──────────────────────────────────────
-  const items: RenderItem[] = []
-  // 跟踪当前流式所属的 message.id，以便在 content_block_start 位置就地渲染
-  let currentRenderingPartialMsgId: string | null = null
-  // 每个 mid 已经"看到"过的 partial block 计数，按 type 累加。配合 completedBlockCounts
-  // 决定当前 content_block_start 是否对应一个尚未被完整 assistant 渲染的流式块。
-  const partialBlockSeen = new Map<string, { thinking: number; text: number }>()
-
-  msgs.forEach((msg, mIdx) => {
-    if (msg.type === 'flow.signal.aiMessage') {
-      const { message } = msg.data
-
-      if (message.type === 'user') {
-        const rawContent = message.message.content
-        // 含 tool_result 的 user message：结果已合并到 tool_use 展示中，跳过独立渲染
-        if (
-          Array.isArray(rawContent) &&
-          rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
-        ) {
-          return
-        }
-        if (message.isSynthetic) return
-        // parent_tool_use_id 非空 = 嵌套在某个 tool_use 内部（子 Agent 调用、工具结果等），
-        // 不是用户的真实输入，跳过独立渲染
-        if (message.parent_tool_use_id) return
-        items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
-        return
-      }
-
-      if (message.type === 'assistant') {
-        const blocks = message.message.content
-        if (!Array.isArray(blocks)) return
-        blocks.forEach((block: any, bIdx) => {
-          const key = `${mIdx}-${bIdx}`
-          if (block.type === 'text' && typeof block.text === 'string') {
-            items.push({ kind: 'text', key, text: block.text, streaming: false })
-            return
-          }
-          if (block.type === 'thinking' && block.thinking) {
-            items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
-            return
-          }
-          if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
-            if (seenToolUseIds.has(block.id)) return
-            seenToolUseIds.add(block.id)
-            const toolName =
-              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
-            if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
-              const input = block.input as AskUserQuestionInput | undefined
-              if (input && Array.isArray(input.questions)) {
-                items.push({ kind: 'ask_user_question', key, toolUseId: block.id, input })
-              }
-              return
-            }
-            const result = toolUseIdToResult.get(block.id)
-            items.push({
-              kind: 'tool_use',
-              key,
-              toolUseId: block.id,
-              toolName,
-              input: block.input,
-              result,
-            })
-            return
-          }
-          // 其他 block（含 mcp_tool_result）：结果已合并到对应 tool_use，跳过
-        })
-        return
-      }
-
-      if (message.type === 'result') {
-        const isError = 'error' in message && !!message.error
-        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError })
-        return
-      }
-
-      if (message.type === 'stream_event') {
-        // 在每个 content_block_start 位置就地渲染流式 partial（按时序自然出现）。
-        // OpenAI 兼容代理把每个 block 单独打成完整 assistant，必须按时序插入，
-        // 否则流式中的下一个 block 会跑到已完整 block 之前。
-        const event = message.event as any
-        if (event?.type === 'message_start') {
-          const id = event.message?.id
-          if (typeof id === 'string') currentRenderingPartialMsgId = id
-          return
-        }
-        if (event?.type === 'message_stop') {
-          currentRenderingPartialMsgId = null
-          return
-        }
-        if (event?.type !== 'content_block_start') return
-        if (!currentRenderingPartialMsgId) return
-        const partial = partialsByMessageId.get(currentRenderingPartialMsgId)
-        if (!partial) return
-        const cbType = event.content_block?.type
-        const blockType: 'text' | 'thinking' | null =
-          cbType === 'text' ? 'text' : cbType === 'thinking' ? 'thinking' : null
-        if (!blockType) return
-        const seen = partialBlockSeen.get(currentRenderingPartialMsgId) ?? {
-          thinking: 0,
-          text: 0,
-        }
-        seen[blockType] += 1
-        partialBlockSeen.set(currentRenderingPartialMsgId, seen)
-        // 当前 partial block 是该 mid 第几个该 type 的 block；如果完整 assistant
-        // 已经发过对应序号的 block，则跳过流式版本（让完整版本独立渲染）。
-        const completed = completedBlockCounts.get(currentRenderingPartialMsgId) ?? {
-          thinking: 0,
-          text: 0,
-        }
-        if (seen[blockType] <= completed[blockType]) return
-        const block = partial.blocks.get(event.index)
-        if (!block || !block.content) return
-        const key = `${mIdx}-streaming-${event.index}`
-        if (block.type === 'text') {
-          items.push({ kind: 'text', key, text: block.content, streaming: true })
-        } else {
-          items.push({ kind: 'thinking', key, text: block.content, streaming: true })
-        }
-        return
-      }
-      return
-    }
-
-    if (msg.type === 'flow.signal.agentComplete') {
-      const data = msg.data
-      const contentAlreadyShown = !!(data.content && renderedAssistantTexts.has(data.content))
-      const displayContent = contentAlreadyShown ? undefined : data.content
-      items.push({
-        kind: 'agent_complete',
-        key: `${mIdx}-complete`,
-        outputName: data.output?.name,
-        displayContent,
-      })
-    }
-  })
-
-  return items
 }
 
 // ── 渲染层 ───────────────────────────────────────────────────────────────
@@ -759,12 +478,12 @@ function renderItemToBubble(
 }
 
 export function toBubbleItems(
+  sessionId: string,
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
-  seenToolUseIds = new Set<string>(),
   sessionCompleted = false,
 ): RenderedBubble[] {
-  const renderItems = buildRenderItems(msgs, seenToolUseIds)
+  const renderItems = buildRenderItems(sessionId, msgs)
   const out: RenderedBubble[] = []
   for (const item of renderItems) {
     const bubble = renderItemToBubble(item, ctx, sessionCompleted)
@@ -773,12 +492,14 @@ export function toBubbleItems(
   return out
 }
 
+export { clearBuildCache }
+
 /**
  * 保留单气泡渲染入口（可用于调试或非列表场景）。
  * 列表场景请直接使用 Bubble.List + toBubbleItems。
  */
 const MessageBubbleInner: FC<Props> = ({ msg }) => {
-  const items = toBubbleItems([msg])
+  const items = toBubbleItems('__debug__', [msg])
   if (items.length === 0) return null
   return (
     <div className='flex flex-col gap-1'>
