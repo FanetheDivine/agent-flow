@@ -357,7 +357,7 @@ const PresetFlows: Flow[] = [
           '4. **实施修改**:',
           '   - `feedback` 非空 → 把它当作本次增量修改的依据,**优先修正其中指出的问题,不要从零重做**。',
           '   - `feedback` 为空 → 按 `summary` 实施修改。',
-          '   - 按逻辑单元分批 commit:subject 一句话讲业务意图,body 讲代码层面的改动。如果有**飞书工作项**，将其加入subject中。',
+          '   - 按逻辑单元分批 commit:subject 一句话讲业务意图,body 讲代码层面的改动。如果有**飞书工作项**url，将其加入subject和body中',
           '5. **清理 feedback**:`setShareValues` 把 `feedback` 覆盖写为空字符串,避免残留值被误用。',
           '6. **结束**:以"改码完成"作为 content 调用 `AgentComplete` 选择"改码完成"分支。',
           '',
