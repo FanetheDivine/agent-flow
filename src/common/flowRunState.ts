@@ -93,6 +93,8 @@ export type FlowRunState = {
    * 与最后一个 session 的 agentId 对齐，但在 `starting`（尚未建 session）阶段也可用。
    */
   currentAgentId?: string
+  /** Flow 运行时的共享数据，Agent 通过 MCP 读写，webview 可查看/编辑 */
+  shareValues: Record<string, string>
 }
 
 // ── 消息的副作用 ────────────────────────────────────────────────────────
@@ -142,6 +144,7 @@ export function updateFlowRunState(
         answeredQuestions: {},
         answeredToolPermissions: {},
         currentAgentId: msg.data.agentId,
+        shareValues: {},
       },
       effects,
     }
@@ -296,6 +299,9 @@ export function updateFlowRunState(
         draft.phase = 'error'
         clearPendings()
       })
+      .with({ type: 'flow.signal.shareValuesChanged' }, ({ data }) => {
+        draft.shareValues = data.shareValues
+      })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
         // 把用户消息作为 aiMessage 回显追加到 session.messages，消费者侧统一
@@ -328,6 +334,9 @@ export function updateFlowRunState(
           draft.pendingToolPermission = undefined
         }
         draft.phase = 'running'
+      })
+      .with({ type: 'flow.command.setShareValues' }, ({ data }) => {
+        draft.shareValues = data.values
       })
       .exhaustive()
   })

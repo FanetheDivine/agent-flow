@@ -11,6 +11,7 @@ export type AgentMcpServerOptions = {
   agent: Agent
   shareValues: Record<string, string>
   onComplete: (output: { content: string; outputName?: string }) => void
+  onShareValuesChanged?: (shareValues: Record<string, string>) => void
 }
 
 type ToolContent = { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
@@ -47,7 +48,7 @@ function withErrorBoundary<TArgs>(
  * - `validateFlow` — 校验工作流定义是否合法
  * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
-export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcpServerOptions) {
+export function buildAgentMcpServer({ agent, shareValues, onComplete, onShareValuesChanged }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
   if (agent.work_mode !== 'never_complete') {
     const outputs = agent.outputs ?? []
@@ -106,6 +107,7 @@ export function buildAgentMcpServer({ agent, shareValues, onComplete }: AgentMcp
       },
       withErrorBoundary('setShareValues', async ({ values }) => {
         Object.assign(shareValues, values)
+        onShareValuesChanged?.(shareValues)
         return {
           content: [{ type: 'text', text: '写入成功' }],
         }

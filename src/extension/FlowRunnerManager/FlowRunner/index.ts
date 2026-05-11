@@ -116,6 +116,9 @@ export class FlowRunner {
       .with('flow.command.killFlow', () => {
         // killFlow 走 FlowRunnerManager.disposeRunner，不在此处处理
       })
+      .with('flow.command.setShareValues', () => {
+        this.handleSetShareValues(data as FlowRunnerCommandEvents['flow.command.setShareValues'])
+      })
       .exhaustive()
   }
 
@@ -242,6 +245,18 @@ export class FlowRunner {
     this.currentExecutor.answerToolPermission(toolUseId, allow)
   }
 
+  private handleSetShareValues({
+    runId,
+    values,
+  }: FlowRunnerCommandEvents['flow.command.setShareValues']): void {
+    if (this.currentRunId !== runId) return
+    Object.assign(this.runState.shareValues, values)
+    this.fire('flow.signal.shareValuesChanged', {
+      runId,
+      shareValues: { ...this.runState.shareValues },
+    })
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private runAgent(
@@ -287,6 +302,12 @@ export class FlowRunner {
           toolUseId,
           toolName,
           input,
+        })
+      },
+      onShareValuesChanged: (shareValues) => {
+        this.fire('flow.signal.shareValuesChanged', {
+          runId,
+          shareValues: { ...shareValues },
         })
       },
       onError: (err) => {
