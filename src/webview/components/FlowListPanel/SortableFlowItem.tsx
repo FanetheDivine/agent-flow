@@ -48,6 +48,11 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const [editing, setEditing] = useState(false)
   const [shareValuesModalOpen, setShareValuesModalOpen] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const nextKeyIndex = (vs: Record<string, string>) => {
+    let i = 1
+    while (vs[`key_${i}`]) i++
+    return i
+  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   })
@@ -186,7 +191,8 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
         open={shareValuesModalOpen}
         onCancel={() => setShareValuesModalOpen(false)}
         onOk={() => {
-          setShareValues(id, editValues)
+          const ok = setShareValues(id, editValues)
+          if (!ok) message.warning('Flow 未运行，无法保存共享数据')
           setShareValuesModalOpen(false)
         }}
         okText='保存'
@@ -201,7 +207,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
               type='dashed'
               icon={<PlusOutlined />}
               onClick={() =>
-                setEditValues((prev) => ({ ...prev, '': '' }))
+                setEditValues((prev) => ({ ...prev, [`key_${nextKeyIndex(prev)}`]: '' }))
               }
             >
               添加
@@ -253,7 +259,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
               type='dashed'
               icon={<PlusOutlined />}
               onClick={() =>
-                setEditValues((prev) => ({ ...prev, '': '' }))
+                setEditValues((prev) => ({ ...prev, [`key_${nextKeyIndex(prev)}`]: '' }))
               }
               block
             >

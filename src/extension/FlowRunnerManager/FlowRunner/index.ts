@@ -250,7 +250,9 @@ export class FlowRunner {
     values,
   }: FlowRunnerCommandEvents['flow.command.setShareValues']): void {
     if (this.currentRunId !== runId) return
-    Object.assign(this.runState.shareValues, values)
+    const sv = this.runState.shareValues
+    for (const k of Object.keys(sv)) delete sv[k]
+    Object.assign(sv, values)
     this.fire('flow.signal.shareValuesChanged', {
       runId,
       shareValues: { ...this.runState.shareValues },

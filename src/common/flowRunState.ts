@@ -211,8 +211,8 @@ export function updateFlowRunState(
     const session = draft?.sessions?.find((s) => !s.completed)
     const currentAgentId = draft.currentAgentId
 
-    // signal 统一追加到当前 session 的消息流
-    if (msg.type.startsWith('flow.signal.')) {
+    // signal 统一追加到当前 session 的消息流（shareValuesChanged 除外，不进 ChatPanel）
+    if (msg.type.startsWith('flow.signal.') && msg.type !== 'flow.signal.shareValuesChanged') {
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
