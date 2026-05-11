@@ -234,7 +234,7 @@ const PresetFlows: Flow[] = [
           '### 执行步骤',
           '1. **读取当前分支**:执行 `git rev-parse --abbrev-ref HEAD` 得到 currentBranch,作为分支默认值的兜底。',
           '2. **判断输入形态,挑选分支策略默认值**:',
-          '   - 用户消息中携带**完整的需求文档 / 缺陷描述 / 飞书工作项**等成体系材料 → 默认建议 `useNewBranch="true"`、`srcBranch="develop"`、`targetBranch="dev-offline"`、`newBranch=<根据需求生成的可读分支名>`。',
+          '   - 用户消息中携带**完整的需求文档 / 缺陷描述 / 飞书工作项**等成体系材料 → 默认建议 `useNewBranch="true"`、`srcBranch="develop"`、`targetBranch="dev-offline"`、`newBranch=<根据需求生成的可读分支名>-MMDD`(后缀为今天的日期)。',
           '   - 否则(短反馈、临时改动、探索性修改) → 默认建议 `useNewBranch="false"`、`srcBranch=currentBranch`、不设 `targetBranch`、不设 `newBranch`。',
           '   - 用户消息中**显式指定**了分支策略(如"在 main 上改"、"基于 release 派生 worktree"等) → 优先按用户说明,不被默认值覆盖。',
           '3. **收集需求信息**:用 AskUserQuestion / Read / Grep / Glob 反复核对修改目标、涉及范围、边界与验收标准、已知约束 / 风险。',
