@@ -51,7 +51,7 @@ function buildAnsweredMap(
     const values: Record<string, string[]> = {}
     for (const [q, a] of Object.entries(output.answers ?? {})) {
       values[q] = (a ?? '')
-        .split(',')
+        .split('\x1F')
         .map((s) => s.trim())
         .filter(Boolean)
     }
@@ -255,7 +255,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
       <AnimatePresence>
         {showCard && pending && (
           <motion.div
-            key='ask-card'
+            key={`ask-card-${pending.toolUseId}`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: cardHeight, opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

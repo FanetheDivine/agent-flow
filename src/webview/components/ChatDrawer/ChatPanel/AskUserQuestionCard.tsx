@@ -15,6 +15,7 @@ type Props = {
 type Selections = Record<number, string[]>
 type OtherState = { text: string }
 
+const ANSWER_SEP = '\x1F'
 const OTHER_LABEL = 'Other'
 const OTHER_OPTION = { label: OTHER_LABEL, description: '自定义回答' }
 
@@ -28,7 +29,7 @@ function buildOutput(
     const sel = selections[i] ?? []
     const o = otherStates[i]
     const effective = sel.map((s) => (s === OTHER_LABEL && o?.text ? o.text : s))
-    answers[q.question] = effective.join(',')
+    answers[q.question] = effective.join(ANSWER_SEP)
   })
   return { questions, answers }
 }
