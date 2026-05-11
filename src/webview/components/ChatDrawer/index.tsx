@@ -1,4 +1,4 @@
-import { useCallback, useRef, type FC } from 'react'
+import { useCallback, type FC } from 'react'
 import { Drawer } from 'antd'
 import type { UserMessageType } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
@@ -10,7 +10,6 @@ import {
 } from '@/webview/store/flow'
 import { ChatInput } from './ChatInput'
 import { ChatPanel } from './ChatPanel'
-import type { ChatPanelRef } from './ChatPanel'
 
 export const ChatDrawer: FC = () => {
   const chatDrawer = useFlowStore((s) => s.chatDrawer)
@@ -18,7 +17,6 @@ export const ChatDrawer: FC = () => {
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
   const interruptAgent = useFlowStore((s) => s.interruptAgent)
   const startFlow = useStartFlow()
-  const chatPanelRef = useRef<ChatPanelRef>(null)
 
   const agentPhase = useFlowStore((s): AgentPhase => {
     if (!s.chatDrawer) return 'idle'
@@ -43,21 +41,18 @@ export const ChatDrawer: FC = () => {
       // result/interrputed 且仍是当前活跃 agent → 同会话追问，不重启 flow
       if (isActiveAgent && (agentPhase === 'result' || agentPhase === 'interrupted')) {
         sendUserMessage(flowId, content)
-        chatPanelRef.current?.forceScrollToBottom()
         return true
       }
 
       // ready (idle / 非活跃 agent 的 result) 或 confirm-required → 启动 flow
       // useStartFlow 内部会根据 FlowPhase !== idle 弹窗确认
-      const started = await startFlow(flowId, agentId, {
+      return startFlow(flowId, agentId, {
         type: 'user',
         message: { role: 'user', content },
         parent_tool_use_id: null,
       })
-      if (started) chatPanelRef.current?.forceScrollToBottom()
-      return started
     },
-    [chatDrawer, inputState, agentPhase, isActiveAgent, startFlow, sendUserMessage, chatPanelRef],
+    [chatDrawer, inputState, agentPhase, isActiveAgent, startFlow, sendUserMessage],
   )
 
   return (
@@ -79,7 +74,6 @@ export const ChatDrawer: FC = () => {
       <div className='flex flex-1 flex-col overflow-hidden bg-[#1e1e2e]'>
         {chatDrawer ? (
           <ChatPanel
-            ref={chatPanelRef}
             flowId={chatDrawer.flowId}
             agentId={chatDrawer.agentId}
             agentName={chatDrawer.agentName}
