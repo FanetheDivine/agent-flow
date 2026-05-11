@@ -378,7 +378,9 @@ export const agentChatInputState = (p: AgentPhase): AgentChatInputState =>
     )
     .with(P.union('completed', 'stopped', 'error'), () => 'confirm-required' as const)
     .exhaustive()
-export const flowIsDestructiveReadOnly = (p: FlowPhase) => p === 'running' || p === 'starting'
+// 取消flow readonly的设计 任意时候允许用户更改
+export const flowIsDestructiveReadOnly = (p: FlowPhase) =>
+  false && (p === 'running' || p === 'starting')
 export const flowCanBeKilled = (p: FlowPhase) =>
   match(p)
     .with(
