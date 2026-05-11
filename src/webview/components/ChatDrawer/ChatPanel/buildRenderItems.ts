@@ -1,5 +1,6 @@
 import { match } from 'ts-pattern'
 import type { AskUserQuestionInput, ExtensionToWebviewMessage } from '@/common'
+import { addTokenUsage, emptyTokenUsage, extractTokenUsage, type TokenUsage } from '@/common'
 
 // ── 类型 ──────────────────────────────────────────────────────────────────
 
@@ -23,13 +24,14 @@ export type RenderItem =
       toolUseId: string
       input: AskUserQuestionInput
     }
-  | { kind: 'turn_end'; key: string; isError: boolean }
+  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage }
   | {
       kind: 'agent_complete'
       key: string
       outputName?: string
       displayContent?: string
     }
+  | { kind: 'message_usage'; key: string; usage: TokenUsage }
 
 type StreamingBlock = { type: 'text' | 'thinking'; content: string }
 type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
@@ -43,6 +45,10 @@ type ScanState = {
   partialsByMessageId: Map<string, PartialMessage>
   currentRenderingPartialMsgId: string | null
   partialBlockSeen: Map<string, { thinking: number; text: number }>
+  /** 上一次 result 消息的累计 usage，用于计算回合增量 */
+  prevResultUsage: TokenUsage
+  /** 当前正在处理的 assistant 消息 id */
+  currentAssistantMsgId: string | null
 }
 
 type CacheEntry = {
@@ -206,12 +212,14 @@ function scanIncremental(
         }
         if (message.isSynthetic) continue
         if (message.parent_tool_use_id) continue
+        state.currentAssistantMsgId = null
         items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
         continue
       }
 
       if (message.type === 'assistant') {
         const blocks = message.message.content
+        const usage = extractTokenUsage(message.message.usage)
         if (!Array.isArray(blocks)) continue
         blocks.forEach((block: any, bIdx: number) => {
           const key = `${mIdx}-${bIdx}`
@@ -247,12 +255,27 @@ function scanIncremental(
             return
           }
         })
+        if (usage.input_tokens > 0 || usage.output_tokens > 0) {
+          items.push({ kind: 'message_usage', key: `${mIdx}-usage`, usage })
+        }
         continue
       }
 
       if (message.type === 'result') {
         const isError = 'error' in message && !!message.error
-        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError })
+        const resultUsage = extractTokenUsage((message as any).usage)
+        const turnUsage: TokenUsage | undefined =
+          resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0
+            ? addTokenUsage(resultUsage, {
+                ...emptyTokenUsage,
+                input_tokens: -state.prevResultUsage.input_tokens,
+                output_tokens: -state.prevResultUsage.output_tokens,
+                cache_creation_input_tokens: -state.prevResultUsage.cache_creation_input_tokens,
+                cache_read_input_tokens: -state.prevResultUsage.cache_read_input_tokens,
+              })
+            : undefined
+        state.prevResultUsage = resultUsage
+        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage })
         continue
       }
 
@@ -337,6 +360,8 @@ export function buildRenderItems(
           partialsByMessageId: new Map(),
           currentRenderingPartialMsgId: null,
           partialBlockSeen: new Map(),
+          prevResultUsage: { ...emptyTokenUsage },
+          currentAssistantMsgId: null,
         },
       })
       return cache.get(sessionId)!

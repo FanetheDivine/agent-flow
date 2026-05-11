@@ -7,6 +7,42 @@ import type {
 } from './event'
 import type { AskUserQuestionInput, AskUserQuestionOutput, Agent, Flow } from './index'
 
+// ── TokenUsage ────────────────────────────────────────────────────────────
+
+export type TokenUsage = {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}
+
+export const emptyTokenUsage: TokenUsage = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+}
+
+export const addTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
+  input_tokens: a.input_tokens + b.input_tokens,
+  output_tokens: a.output_tokens + b.output_tokens,
+  cache_creation_input_tokens: a.cache_creation_input_tokens + b.cache_creation_input_tokens,
+  cache_read_input_tokens: a.cache_read_input_tokens + b.cache_read_input_tokens,
+})
+
+/** 从 BetaUsage（可能含 null/undefined 的缓存字段）提取 TokenUsage */
+export const extractTokenUsage = (u: {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number | null
+  cache_read_input_tokens?: number | null
+}): TokenUsage => ({
+  input_tokens: u.input_tokens ?? 0,
+  output_tokens: u.output_tokens ?? 0,
+  cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+  cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+})
+
 // ── Phase ────────────────────────────────────────────────────────────────────
 
 /**

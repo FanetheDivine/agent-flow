@@ -14,7 +14,8 @@ import { Welcome } from '@ant-design/x'
 import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionOutput } from '@/common'
+import type { AskUserQuestionOutput, TokenUsage } from '@/common'
+import { addTokenUsage, emptyTokenUsage, extractTokenUsage } from '@/common'
 import type { AgentSession } from '@/webview/store/flow'
 import {
   useFlowStore,
@@ -60,6 +61,18 @@ function buildAnsweredMap(
   return answeredMap
 }
 
+function fmtToken(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function formatTokenSummary(u: TokenUsage): string {
+  const total = u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
+  if (total === 0) return ''
+  return `${fmtToken(total)} tokens`
+}
+
 export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
@@ -76,6 +89,22 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
     [allSessions, agentId],
   )
   const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
+
+  // Flow 级累计 token usage（取每个 session 最后一条 result 消息的累计 usage，跨 session 求和）
+  const totalUsage = useMemo<TokenUsage>(() => {
+    if (!allSessions) return emptyTokenUsage
+    let total = { ...emptyTokenUsage }
+    for (const session of allSessions) {
+      let lastResultUsage: TokenUsage | undefined
+      for (const msg of session.messages) {
+        if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'result') {
+          lastResultUsage = extractTokenUsage((msg.data.message as any).usage)
+        }
+      }
+      if (lastResultUsage) total = addTokenUsage(total, lastResultUsage)
+    }
+    return total
+  }, [allSessions])
 
   const canKillFlow = flowCanBeKilled(flowPhase)
 
@@ -197,6 +226,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           <Tag color={statusColor} className='m-0 text-[10px]'>
             {statusText}
           </Tag>
+          {(totalUsage.input_tokens > 0 || totalUsage.output_tokens > 0) && (
+            <Tag color='default' className='m-0 text-[10px]'>
+              {formatTokenSummary(totalUsage)}
+            </Tag>
+          )}
         </div>
         {canKillFlow && (
           <Tooltip title='停止工作流'>

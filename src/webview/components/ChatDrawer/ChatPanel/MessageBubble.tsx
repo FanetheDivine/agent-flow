@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
-import type { AskUserQuestionInput, AskUserQuestionOutput, ExtensionToWebviewMessage } from '@/common'
+import type { AskUserQuestionInput, AskUserQuestionOutput, ExtensionToWebviewMessage, TokenUsage } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
@@ -301,6 +301,24 @@ function getToolSummary(toolName: string, input: any): string {
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function TokenUsageBadge({ usage }: { usage: TokenUsage }) {
+  const parts: string[] = []
+  if (usage.input_tokens > 0) parts.push(`in ${formatTokenCount(usage.input_tokens)}`)
+  if (usage.output_tokens > 0) parts.push(`out ${formatTokenCount(usage.output_tokens)}`)
+  if (usage.cache_creation_input_tokens > 0)
+    parts.push(`cache+ ${formatTokenCount(usage.cache_creation_input_tokens)}`)
+  if (usage.cache_read_input_tokens > 0)
+    parts.push(`cache→ ${formatTokenCount(usage.cache_read_input_tokens)}`)
+  if (parts.length === 0) return null
+  return <span className='text-[10px] text-[#6c7086]'>{parts.join(' · ')}</span>
+}
+
 function renderToolUseDetails(
   toolName: string,
   input: unknown,
@@ -444,6 +462,11 @@ function renderItemToBubble(
           <span className='text-[10px] text-[#6c7086]'>
             <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
             <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+            {item.usage && (
+              <span className='ml-2'>
+                <TokenUsageBadge usage={item.usage} />
+              </span>
+            )}
           </span>
         ),
       }
@@ -472,6 +495,13 @@ function renderItemToBubble(
             </div>
           </Copyable>
         ),
+      }
+    }
+    case 'message_usage': {
+      return {
+        key: item.key,
+        role: 'system',
+        content: <TokenUsageBadge usage={item.usage} />,
       }
     }
   }
