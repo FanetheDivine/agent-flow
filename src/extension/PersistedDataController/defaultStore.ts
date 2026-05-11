@@ -571,7 +571,7 @@ const PresetFlows: Flow[] = [
         enable_share_values: false,
         agent_prompt: '与用户对话。',
         outputs: [],
-        id: '5c86d5a7-b263-4efe-8a34-23fe482c5636',
+        id: '3',
       },
     ],
   },
