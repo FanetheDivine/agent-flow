@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -29,11 +30,16 @@ import { AskUserQuestionCard } from './AskUserQuestionCard'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
 
+export type ChatPanelRef = {
+  forceScrollToBottom: () => void
+}
+
 type Props = {
   flowId: string
   agentId: string
   agentName: string
   onClose?: () => void
+  ref?: React.Ref<ChatPanelRef>
 }
 
 /** 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射 */
@@ -54,7 +60,7 @@ function buildAnsweredMap(
   return answeredMap
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) => {
+export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
@@ -143,6 +149,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
     }, 0)
   }, [])
+
+  useImperativeHandle(ref, () => ({ forceScrollToBottom: () => {
+    shouldScrollRef.current = true
+    scrollToBottom()
+  } }), [scrollToBottom])
 
   // 新消息到达时按需滚到底
   useEffect(() => {
