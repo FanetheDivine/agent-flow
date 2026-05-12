@@ -7,9 +7,9 @@ import { addTokenUsage, emptyTokenUsage, extractTokenUsage, type TokenUsage } fr
 export type ToolResult = { isError: boolean; text: string }
 
 export type RenderItem =
-  | { kind: 'user'; key: string; rawContent: unknown }
-  | { kind: 'text'; key: string; text: string; streaming: boolean }
-  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
+  | { kind: 'user'; key: string; rawContent: unknown; usage?: TokenUsage; cost?: number }
+  | { kind: 'text'; key: string; text: string; streaming: boolean; usage?: TokenUsage; cost?: number }
+  | { kind: 'thinking'; key: string; text: string; streaming: boolean; usage?: TokenUsage; cost?: number }
   | {
       kind: 'tool_use'
       key: string
@@ -24,14 +24,13 @@ export type RenderItem =
       toolUseId: string
       input: AskUserQuestionInput
     }
-  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage }
+  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage; cost?: number }
   | {
       kind: 'agent_complete'
       key: string
       outputName?: string
       displayContent?: string
     }
-  | { kind: 'message_usage'; key: string; usage: TokenUsage }
 
 type StreamingBlock = { type: 'text' | 'thinking'; content: string }
 type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
@@ -45,10 +44,8 @@ type ScanState = {
   partialsByMessageId: Map<string, PartialMessage>
   currentRenderingPartialMsgId: string | null
   partialBlockSeen: Map<string, { thinking: number; text: number }>
-  /** 上一次 result 消息的累计 usage，用于计算回合增量 */
-  prevResultUsage: TokenUsage
-  /** 当前正在处理的 assistant 消息 id */
-  currentAssistantMsgId: string | null
+  /** 当前回合内累加的 assistant 消息 usage */
+  turnAccUsage: TokenUsage
 }
 
 type CacheEntry = {
@@ -212,7 +209,6 @@ function scanIncremental(
         }
         if (message.isSynthetic) continue
         if (message.parent_tool_use_id) continue
-        state.currentAssistantMsgId = null
         items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
         continue
       }
@@ -220,15 +216,24 @@ function scanIncremental(
       if (message.type === 'assistant') {
         const blocks = message.message.content
         const usage = extractTokenUsage(message.message.usage)
+        // 累加到回合 usage
+        if (usage.input_tokens > 0 || usage.output_tokens > 0) {
+          state.turnAccUsage = addTokenUsage(state.turnAccUsage, usage)
+        }
         if (!Array.isArray(blocks)) continue
+        const hasUsage = usage.input_tokens > 0 || usage.output_tokens > 0
+        // 记录本轮最后一个 text/thinking 的 index（用于挂 usage）
+        let lastContentIdx = -1
         blocks.forEach((block: any, bIdx: number) => {
           const key = `${mIdx}-${bIdx}`
           if (block.type === 'text' && typeof block.text === 'string') {
             items.push({ kind: 'text', key, text: block.text, streaming: false })
+            lastContentIdx = items.length - 1
             return
           }
           if (block.type === 'thinking' && block.thinking) {
             items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
+            lastContentIdx = items.length - 1
             return
           }
           if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
@@ -255,27 +260,58 @@ function scanIncremental(
             return
           }
         })
-        if (usage.input_tokens > 0 || usage.output_tokens > 0) {
-          items.push({ kind: 'message_usage', key: `${mIdx}-usage`, usage })
+        // 把 usage 挂到最后一个 text/thinking item 上，嵌入 AI 气泡
+        if (hasUsage && lastContentIdx >= 0) {
+          const last = items[lastContentIdx]
+          if (last.kind === 'text' || last.kind === 'thinking') {
+            items[lastContentIdx] = { ...last, usage }
+          }
         }
         continue
       }
 
       if (message.type === 'result') {
         const isError = 'error' in message && !!message.error
+        // 回合级 usage：优先用累加的 assistant usage，回退到 result.usage
+        const accUsage = state.turnAccUsage
         const resultUsage = extractTokenUsage((message as any).usage)
         const turnUsage: TokenUsage | undefined =
-          resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0
-            ? addTokenUsage(resultUsage, {
-                ...emptyTokenUsage,
-                input_tokens: -state.prevResultUsage.input_tokens,
-                output_tokens: -state.prevResultUsage.output_tokens,
-                cache_creation_input_tokens: -state.prevResultUsage.cache_creation_input_tokens,
-                cache_read_input_tokens: -state.prevResultUsage.cache_read_input_tokens,
-              })
-            : undefined
-        state.prevResultUsage = resultUsage
-        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage })
+          (accUsage.input_tokens > 0 || accUsage.output_tokens > 0)
+            ? accUsage
+            : (resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0)
+              ? resultUsage
+              : undefined
+        // 从 result 消息提取实际费用
+        const totalCostUsd: number | undefined =
+          typeof (message as any).total_cost_usd === 'number' ? (message as any).total_cost_usd : undefined
+        // 回填最后一个 AI text/thinking 的 usage（若尚未从 assistant 消息获取到）
+        if (turnUsage) {
+          for (let j = items.length - 1; j >= 0; j--) {
+            const it = items[j]
+            if (it.kind === 'text' || it.kind === 'thinking') {
+              if (!it.usage) {
+                items[j] = { ...it, usage: turnUsage, cost: totalCostUsd }
+              } else if (totalCostUsd !== undefined && it.cost === undefined) {
+                items[j] = { ...it, cost: totalCostUsd }
+              }
+              break
+            }
+          }
+          // 回填本轮回合的输入 token 到最后一个 user RenderItem
+          const inputUsage: TokenUsage = {
+            ...emptyTokenUsage,
+            input_tokens: turnUsage.input_tokens + turnUsage.cache_creation_input_tokens + turnUsage.cache_read_input_tokens,
+          }
+          for (let j = items.length - 1; j >= 0; j--) {
+            const it = items[j]
+            if (it.kind === 'user') {
+              items[j] = { kind: 'user', key: it.key, rawContent: it.rawContent, usage: inputUsage, cost: totalCostUsd }
+              break
+            }
+          }
+        }
+        state.turnAccUsage = { ...emptyTokenUsage }
+        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage, cost: totalCostUsd })
         continue
       }
 
@@ -360,8 +396,7 @@ export function buildRenderItems(
           partialsByMessageId: new Map(),
           currentRenderingPartialMsgId: null,
           partialBlockSeen: new Map(),
-          prevResultUsage: { ...emptyTokenUsage },
-          currentAssistantMsgId: null,
+          turnAccUsage: { ...emptyTokenUsage },
         },
       })
       return cache.get(sessionId)!

@@ -11,6 +11,7 @@ import {
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
 import type { AskUserQuestionInput, AskUserQuestionOutput, ExtensionToWebviewMessage, TokenUsage } from '@/common'
+import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
@@ -40,6 +41,8 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
+  /** 当前 Agent 的模型，用于计算费用 */
+  model?: string
 }
 
 type RenderedBubble = {
@@ -301,22 +304,25 @@ function getToolSummary(toolName: string, input: any): string {
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
-
-function TokenUsageBadge({ usage }: { usage: TokenUsage }) {
+function TokenUsageBadge({ usage, model, cost }: { usage: TokenUsage; model?: string; cost?: number }) {
   const parts: string[] = []
   if (usage.input_tokens > 0) parts.push(`in ${formatTokenCount(usage.input_tokens)}`)
   if (usage.output_tokens > 0) parts.push(`out ${formatTokenCount(usage.output_tokens)}`)
   if (usage.cache_creation_input_tokens > 0)
-    parts.push(`cache+ ${formatTokenCount(usage.cache_creation_input_tokens)}`)
+    parts.push(`cache write ${formatTokenCount(usage.cache_creation_input_tokens)}`)
   if (usage.cache_read_input_tokens > 0)
-    parts.push(`cache→ ${formatTokenCount(usage.cache_read_input_tokens)}`)
+    parts.push(`cache read ${formatTokenCount(usage.cache_read_input_tokens)}`)
   if (parts.length === 0) return null
-  return <span className='text-[10px] text-[#6c7086]'>{parts.join(' · ')}</span>
+  const costStr = cost !== undefined
+    ? formatTokenCost(cost)
+    : model
+      ? formatTokenCost(calculateTokenCost(usage, model))
+      : ''
+  return (
+    <span className='text-[10px] text-[#6c7086]'>
+      {parts.join(' · ')} tokens{costStr ? ` · ${costStr}` : ''}
+    </span>
+  )
 }
 
 function renderToolUseDetails(
@@ -374,15 +380,30 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'user',
-        content: <Copyable text={copyText}>{node}</Copyable>,
+        content: (
+          <div>
+            <Copyable text={copyText}>{node}</Copyable>
+            {item.usage && (
+              <div className='mt-1 text-left'>
+                <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
+              </div>
+            )}
+          </div>
+        ),
       }
     }
     case 'text': {
       const md = <Md content={item.text} />
+      const content = item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>
       return {
         key: item.key,
         role: 'ai',
-        content: item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>,
+        content: item.usage ? (
+          <div>
+            {content}
+            <div className='mt-1'><TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} /></div>
+          </div>
+        ) : content,
       }
     }
     case 'thinking': {
@@ -391,10 +412,16 @@ function renderItemToBubble(
           <Md content={item.text} />
         </Think>
       )
+      const content = item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>
       return {
         key: item.key,
         role: 'ai',
-        content: item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>,
+        content: item.usage ? (
+          <div>
+            {content}
+            <div className='mt-1'><TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} /></div>
+          </div>
+        ) : content,
       }
     }
     case 'ask_user_question': {
@@ -464,7 +491,7 @@ function renderItemToBubble(
             <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
             {item.usage && (
               <span className='ml-2'>
-                <TokenUsageBadge usage={item.usage} />
+                <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
               </span>
             )}
           </span>
@@ -495,13 +522,6 @@ function renderItemToBubble(
             </div>
           </Copyable>
         ),
-      }
-    }
-    case 'message_usage': {
-      return {
-        key: item.key,
-        role: 'system',
-        content: <TokenUsageBadge usage={item.usage} />,
       }
     }
   }

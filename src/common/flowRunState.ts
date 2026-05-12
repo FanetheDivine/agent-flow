@@ -43,6 +43,53 @@ export const extractTokenUsage = (u: {
   cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
 })
 
+export const subtractTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
+  input_tokens: a.input_tokens - b.input_tokens,
+  output_tokens: a.output_tokens - b.output_tokens,
+  cache_creation_input_tokens: a.cache_creation_input_tokens - b.cache_creation_input_tokens,
+  cache_read_input_tokens: a.cache_read_input_tokens - b.cache_read_input_tokens,
+})
+
+// ── Token 定价与费用 ─────────────────────────────────────────────────────
+
+export type TokenPricing = {
+  input: number
+  output: number
+  cache_write: number
+  cache_read: number
+}
+
+/** 各模型的每百万 token 定价（美元） */
+export const MODEL_PRICING: Record<string, TokenPricing> = {
+  opus: { input: 15, output: 75, cache_write: 18.75, cache_read: 1.5 },
+  sonnet: { input: 3, output: 15, cache_write: 3.75, cache_read: 0.3 },
+  haiku: { input: 0.8, output: 4, cache_write: 1, cache_read: 0.08 },
+}
+
+export const calculateTokenCost = (usage: TokenUsage, model: string): number => {
+  const p = MODEL_PRICING[model]
+  if (!p) return 0
+  const mTok = 1_000_000
+  return (
+    usage.input_tokens * p.input +
+    usage.output_tokens * p.output +
+    usage.cache_creation_input_tokens * p.cache_write +
+    usage.cache_read_input_tokens * p.cache_read
+  ) / mTok
+}
+
+export const formatTokenCount = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+export const formatTokenCost = (cost: number): string => {
+  if (cost <= 0) return ''
+  if (cost < 0.01) return '<$0.01'
+  return `$${cost.toFixed(2)}`
+}
+
 // ── Phase ────────────────────────────────────────────────────────────────────
 
 /**
