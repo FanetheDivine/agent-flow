@@ -84,12 +84,15 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
     let totalTokens = 0
     let totalCost = 0
     for (const session of allSessions) {
+      // total_cost_usd 是 session 累计值，只取最后一条 result 避免重复累加
+      let lastResultCost: number | undefined
+      let lastResultTokens: number = 0
       for (const msg of session.messages) {
         if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'result') {
           const result = msg.data.message as any
           if (result.modelUsage && typeof result.modelUsage === 'object') {
             for (const mu of Object.values(result.modelUsage) as any[]) {
-              totalTokens +=
+              lastResultTokens =
                 (mu.inputTokens ?? 0) +
                 (mu.outputTokens ?? 0) +
                 (mu.cacheCreationInputTokens ?? 0) +
@@ -97,10 +100,12 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
             }
           }
           if (typeof result.total_cost_usd === 'number') {
-            totalCost += result.total_cost_usd
+            lastResultCost = result.total_cost_usd
           }
         }
       }
+      if (lastResultCost !== undefined) totalCost += lastResultCost
+      totalTokens += lastResultTokens
     }
     return { totalTokens, totalCost }
   }, [allSessions])

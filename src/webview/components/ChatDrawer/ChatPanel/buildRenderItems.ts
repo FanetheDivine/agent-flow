@@ -46,6 +46,8 @@ type ScanState = {
   partialBlockSeen: Map<string, { thinking: number; text: number }>
   /** 当前回合内累加的 assistant 消息 usage */
   turnAccUsage: TokenUsage
+  /** 上一个 session 的 result 累计费用，用于计算 per-turn 费用差值 */
+  prevSessionTotalCost: number
 }
 
 type CacheEntry = {
@@ -281,23 +283,28 @@ function scanIncremental(
             : (resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0)
               ? resultUsage
               : undefined
-        // 从 result 消息提取实际费用
-        const totalCostUsd: number | undefined =
+        // 从 result 消息提取累计费用，计算 per-turn 差值
+        const cumulativeCost: number | undefined =
           typeof (message as any).total_cost_usd === 'number' ? (message as any).total_cost_usd : undefined
+        const perTurnCost: number | undefined =
+          cumulativeCost !== undefined
+            ? cumulativeCost - state.prevSessionTotalCost
+            : undefined
+        state.prevSessionTotalCost = cumulativeCost ?? state.prevSessionTotalCost
         // 回填最后一个 AI text/thinking 的 usage（若尚未从 assistant 消息获取到）
         if (turnUsage) {
           for (let j = items.length - 1; j >= 0; j--) {
             const it = items[j]
             if (it.kind === 'text' || it.kind === 'thinking') {
               if (!it.usage) {
-                items[j] = { ...it, usage: turnUsage, cost: totalCostUsd }
-              } else if (totalCostUsd !== undefined && it.cost === undefined) {
-                items[j] = { ...it, cost: totalCostUsd }
+                items[j] = { ...it, usage: turnUsage, cost: perTurnCost }
+              } else if (perTurnCost !== undefined && it.cost === undefined) {
+                items[j] = { ...it, cost: perTurnCost }
               }
               break
             }
           }
-          // 回填本轮回合的输入 token 到最后一个 user RenderItem
+          // 回填本轮回合的输入 token 到最后一个 user RenderItem（费用由渲染层按 usage 计算）
           const inputUsage: TokenUsage = {
             ...emptyTokenUsage,
             input_tokens: turnUsage.input_tokens + turnUsage.cache_creation_input_tokens + turnUsage.cache_read_input_tokens,
@@ -305,13 +312,13 @@ function scanIncremental(
           for (let j = items.length - 1; j >= 0; j--) {
             const it = items[j]
             if (it.kind === 'user') {
-              items[j] = { kind: 'user', key: it.key, rawContent: it.rawContent, usage: inputUsage, cost: totalCostUsd }
+              items[j] = { kind: 'user', key: it.key, rawContent: it.rawContent, usage: inputUsage }
               break
             }
           }
         }
         state.turnAccUsage = { ...emptyTokenUsage }
-        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage, cost: totalCostUsd })
+        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage, cost: perTurnCost })
         continue
       }
 
@@ -397,6 +404,7 @@ export function buildRenderItems(
           currentRenderingPartialMsgId: null,
           partialBlockSeen: new Map(),
           turnAccUsage: { ...emptyTokenUsage },
+          prevSessionTotalCost: 0,
         },
       })
       return cache.get(sessionId)!
