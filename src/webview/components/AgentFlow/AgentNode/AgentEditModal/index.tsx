@@ -63,6 +63,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
     if (open && agent) {
       const newFormValue: Omit<Agent, 'id'> = {
         agent_name: agent.agent_name,
+        agent_desc: agent.agent_desc,
         model: agent.model,
         effort: agent.effort,
         agent_prompt: agent.agent_prompt,
@@ -127,6 +128,14 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
           ]}
         >
           <Input />
+        </FormItem>
+
+        <FormItem
+          name='agent_desc'
+          label='Agent 简介'
+          tooltip='简要描述该 Agent 的职责与定位，会在系统提示词中作为任务上下文注入'
+        >
+          <Input placeholder='例如：负责代码评审，检查潜在 bug 与性能问题' />
         </FormItem>
 
         <div className='flex gap-4'>

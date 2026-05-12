@@ -26,6 +26,7 @@ export const AgentSchema = z.object({
     .optional()
     .describe('AI 思考的努力程度，影响响应速度与质量的权衡'),
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),
+  agent_desc: z.string().optional().describe('Agent 简介，简要描述该 Agent 的职责与定位'),
   agent_prompt: z.string().describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
   outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
   auto_allowed_tools: z
@@ -234,15 +235,20 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
  */
 export function buildAgentSystemPrompt(
-  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'work_mode' | 'enable_share_values' | 'no_input'>,
+  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'work_mode' | 'enable_share_values' | 'no_input' | 'agent_name' | 'agent_desc'>,
 ): string {
-  const { agent_prompt, outputs = [], work_mode, enable_share_values = false } = agent
+  const { agent_name, agent_desc, agent_prompt, outputs = [], work_mode, enable_share_values = false } = agent
 
   const lines: string[] = [
     '始终使用**中文**进行思考和回复。',
     '信息不足时，**禁止**凭空推测，应当尝试读取文件、执行命令行或使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
     '',
   ]
+
+  // Agent 简介（可选）
+  if (agent_desc) {
+    lines.push('# Agent 简介', `${agent_name}：${agent_desc}`, '')
+  }
 
   // 共享存储（可选）
   if (enable_share_values) {
