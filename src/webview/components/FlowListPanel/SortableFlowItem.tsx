@@ -112,44 +112,37 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             {name}
           </Typography.Text>
         </div>
-        <Button
-          title='共享数据'
-          type='text'
-          size='small'
-          icon={<DatabaseOutlined />}
-          onClick={(e) => {
-            e.stopPropagation()
-            const current = flowRunStates[id]?.shareValues ?? {}
-            setEditValues(structuredClone(current))
-            setShareValuesModalOpen(true)
-          }}
-          className={cn(
-            'text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100',
-            Object.keys(flowRunStates[id]?.shareValues ?? {}).length > 0
-              ? 'hover:bg-[#45475a]! hover:text-[#a6e3a1]!'
-              : 'hover:bg-[#45475a]! hover:text-[#89b4fa]!',
-          )}
-        />
-        <Button
-          title='克隆'
-          type='text'
-          size='small'
-          icon={<BlockOutlined />}
-          onClick={(e) => {
-            e.stopPropagation()
-            const newId = crypto.randomUUID()
-            const cloned = structuredClone(flow)
-            cloned.id = newId
-            save((flows) => flows.push(cloned))
-            setActiveFlowId(newId)
-            setFlowListCollapsed(false)
-          }}
-          className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#45475a]! hover:text-[#89b4fa]!'
-        />
+
         <span
-          className='flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'
+          className='flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100'
           onClick={(e) => e.stopPropagation()}
         >
+          <DatabaseOutlined
+            title='共享数据'
+            onClick={(e) => {
+              const current = flowRunStates[id]?.shareValues ?? {}
+              setEditValues(structuredClone(current))
+              setShareValuesModalOpen(true)
+            }}
+            className={cn(
+              'text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100',
+              Object.keys(flowRunStates[id]?.shareValues ?? {}).length > 0
+                ? 'hover:text-[#a6e3a1]!'
+                : 'hover:text-[#89b4fa]!',
+            )}
+          />
+          <BlockOutlined
+            title='克隆'
+            onClick={() => {
+              const newId = crypto.randomUUID()
+              const cloned = structuredClone(flow)
+              cloned.id = newId
+              save((flows) => flows.push(cloned))
+              setActiveFlowId(newId)
+              setFlowListCollapsed(false)
+            }}
+            className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:text-[#89b4fa]!'
+          />
           <Typography.Text
             copyable={{
               onCopy: async () => {
@@ -159,16 +152,11 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
               tooltips: false,
             }}
           />
-
-          <Button
-            type='text'
-            size='small'
-            icon={<DeleteOutlined />}
-            onClick={(e) => {
-              e.stopPropagation()
+          <DeleteOutlined
+            className='text-[#a6adc8]! hover:text-[#f38ba8]!'
+            onClick={() => {
               onDelete()
             }}
-            className='text-[#a6adc8]! hover:bg-[#45475a]! hover:text-[#f38ba8]!'
           />
         </span>
       </div>
@@ -199,10 +187,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
         width={480}
       >
         {Object.keys(editValues).length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description='暂无共享数据'
-          >
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='暂无共享数据'>
             <Button
               type='dashed'
               icon={<PlusOutlined />}
