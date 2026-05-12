@@ -140,18 +140,6 @@ export function validateFlow(flow: Flow): FlowValidationResult {
     result.duplicateAgentIds = duplicateAgentIds
   }
 
-  // 校验 agent_name 在 flow 内唯一
-  const agentNames = agents.map((a) => a.agent_name)
-  const agentsGroupedByName = groupBy(agentNames)
-  const duplicateAgentNames = Object.entries(agentsGroupedByName)
-    .filter(([, names]) => names.length > 1)
-    .map(([agent_name]) => agent_name)
-  if (duplicateAgentNames.length > 0) {
-    result.duplicateAgentNames = duplicateAgentNames
-    // 其余错误必须在agent_name唯一的情况下进行描述
-    return result
-  }
-
   // 校验"output_name 在同一 agent 内唯一"/"next_agent 引用的 agent id 存在"
   const duplicateOutputNames: Record<string, string[]> = {}
   const invalidNextAgent: Record<string, string[]> = {}
@@ -235,9 +223,25 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
  */
 export function buildAgentSystemPrompt(
-  agent: Pick<Agent, 'agent_prompt' | 'outputs' | 'work_mode' | 'enable_share_values' | 'no_input' | 'agent_name' | 'agent_desc'>,
+  agent: Pick<
+    Agent,
+    | 'agent_prompt'
+    | 'outputs'
+    | 'work_mode'
+    | 'enable_share_values'
+    | 'no_input'
+    | 'agent_name'
+    | 'agent_desc'
+  >,
 ): string {
-  const { agent_name, agent_desc, agent_prompt, outputs = [], work_mode, enable_share_values = false } = agent
+  const {
+    agent_name,
+    agent_desc,
+    agent_prompt,
+    outputs = [],
+    work_mode,
+    enable_share_values = false,
+  } = agent
 
   const lines: string[] = [
     '始终使用**中文**进行思考和回复。',
