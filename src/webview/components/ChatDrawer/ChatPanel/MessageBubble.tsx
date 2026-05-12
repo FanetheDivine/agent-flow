@@ -18,6 +18,7 @@ import { AskUserQuestionCard } from './AskUserQuestionCard'
 import {
   buildRenderItems,
   clearBuildCache,
+  clearBuildCacheForSessions,
   type RenderItem,
   type ToolResult,
 } from './buildRenderItems'
@@ -542,7 +543,7 @@ export function toBubbleItems(
   return out
 }
 
-export { clearBuildCache }
+export { clearBuildCache, clearBuildCacheForSessions }
 
 /**
  * 保留单气泡渲染入口（可用于调试或非列表场景）。

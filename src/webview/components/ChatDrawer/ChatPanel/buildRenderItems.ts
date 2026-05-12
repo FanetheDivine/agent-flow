@@ -67,6 +67,13 @@ export function clearBuildCache(sessionId?: string): void {
   }
 }
 
+/** 按 sessionId 列表批量清除缓存 */
+export function clearBuildCacheForSessions(sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    cache.delete(id)
+  }
+}
+
 // ── 辅助函数 ─────────────────────────────────────────────────────────────
 
 /** 从 tool_result 的 content 中提取纯文本 */

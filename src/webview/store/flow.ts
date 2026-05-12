@@ -23,6 +23,7 @@ import {
 } from '@/common'
 import type { Agent } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
+import { clearBuildCacheForSessions } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
 
 // ── 选择器（webview 本地） ────────────────────────────────────────────────
 
@@ -331,7 +332,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       return cleanup
     },
     runFlow: (flowId, agentId, initMessage) => {
-      const { flows } = get()
+      const { flows, flowRunStates } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
       const agent = flow.agents?.find((a) => a.id === agentId)
@@ -342,6 +343,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             parent_tool_use_id: null,
           }
         : initMessage
+      // 清除该 flow 旧 session 的 build 缓存
+      const existingState = flowRunStates[flowId]
+      if (existingState?.sessions?.length) {
+        clearBuildCacheForSessions(existingState.sessions.map((s) => s.sessionId))
+      }
       const runKey = crypto.randomUUID()
       dispatchCommand({
         type: 'flow.command.flowStart',
