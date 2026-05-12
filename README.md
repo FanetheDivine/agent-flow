@@ -40,7 +40,7 @@ pnpm build-extension   # 生成 .vsix 文件
 ### 1. 可视化编辑工作流
 
 - **框选 / 拖拽画布**：左键拖空白处框选节点，中键或右键拖拽平移画布。
-- **模型自由搭配**：每个 Agent 独立配置模型（opus / sonnet / haiku）与思考强度（effort）。
+- **模型自由搭配**：每个 Agent 独立配置模型（opus / sonnet / haiku）、思考强度（effort）与简介描述。
 - **无输入启动**：开启 `no_input` 的 Agent 在节点上显示启动按钮，点击后始终以"开始"为初始消息自动运行，无需手动输入。
 - **上下文隔离**：每个 Agent 有自己独立的对话上下文。
 - **跨 Agent 共享数据需显式开启**：`shareValues` 默认关闭，需要在 Agent 配置中勾选 `enable_share_values`，对应的 `setShareValues` / `getShareValues` / `getAllShareValues` 三个 MCP 工具才会注入到该 Agent，避免无关节点污染共享上下文。
@@ -57,6 +57,7 @@ pnpm build-extension   # 生成 .vsix 文件
 - **流式传输**：AI 回复的文本块 / thinking 块实时显示，无需等待整段消息生成完毕。
 - **工具调用可视化**：消息气泡中显示工具调用摘要（读取的文件、执行的命令等），未完成时 loading，完成后可展开查看参数与执行结果。
 - **AskUserQuestion 富文本**：AI 向你提问的内容通过 Markdown 渲染，支持代码、链接、列表等格式。
+- **Mermaid 图表**：聊天消息中支持渲染 Mermaid 流程图/时序图，AI 可生成可视化图表。
 - **可拖拽聊天 Drawer**：支持拖拽调整宽度、`Esc` 关闭。
 - **智能通知**：Agent 等待回复或工作流完成时，若面板不在前台，自动弹出 VSCode 系统通知，点击即可跳转回对应聊天。
 - **关闭面板不打断运行**：关闭 Webview 后 Agent 继续在后台执行，重新打开时自动恢复全部历史消息与运行态，等待用户回复 / 完成等通知照常送达。
