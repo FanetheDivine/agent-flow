@@ -7,6 +7,89 @@ import type {
 } from './event'
 import type { AskUserQuestionInput, AskUserQuestionOutput, Agent, Flow } from './index'
 
+// ── TokenUsage ────────────────────────────────────────────────────────────
+
+export type TokenUsage = {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}
+
+export const emptyTokenUsage: TokenUsage = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+}
+
+export const addTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
+  input_tokens: a.input_tokens + b.input_tokens,
+  output_tokens: a.output_tokens + b.output_tokens,
+  cache_creation_input_tokens: a.cache_creation_input_tokens + b.cache_creation_input_tokens,
+  cache_read_input_tokens: a.cache_read_input_tokens + b.cache_read_input_tokens,
+})
+
+/** 从 BetaUsage（可能含 null/undefined 的缓存字段）提取 TokenUsage */
+export const extractTokenUsage = (u: {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number | null
+  cache_read_input_tokens?: number | null
+}): TokenUsage => ({
+  input_tokens: u.input_tokens ?? 0,
+  output_tokens: u.output_tokens ?? 0,
+  cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+  cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+})
+
+export const subtractTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
+  input_tokens: a.input_tokens - b.input_tokens,
+  output_tokens: a.output_tokens - b.output_tokens,
+  cache_creation_input_tokens: a.cache_creation_input_tokens - b.cache_creation_input_tokens,
+  cache_read_input_tokens: a.cache_read_input_tokens - b.cache_read_input_tokens,
+})
+
+// ── Token 定价与费用 ─────────────────────────────────────────────────────
+
+export type TokenPricing = {
+  input: number
+  output: number
+  cache_write: number
+  cache_read: number
+}
+
+/** 各模型的每百万 token 定价（美元） */
+export const MODEL_PRICING: Record<string, TokenPricing> = {
+  opus: { input: 15, output: 75, cache_write: 18.75, cache_read: 1.5 },
+  sonnet: { input: 3, output: 15, cache_write: 3.75, cache_read: 0.3 },
+  haiku: { input: 0.8, output: 4, cache_write: 1, cache_read: 0.08 },
+}
+
+export const calculateTokenCost = (usage: TokenUsage, model: string): number => {
+  const p = MODEL_PRICING[model]
+  if (!p) return 0
+  const mTok = 1_000_000
+  return (
+    usage.input_tokens * p.input +
+    usage.output_tokens * p.output +
+    usage.cache_creation_input_tokens * p.cache_write +
+    usage.cache_read_input_tokens * p.cache_read
+  ) / mTok
+}
+
+export const formatTokenCount = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+export const formatTokenCost = (cost: number): string => {
+  if (cost <= 0) return ''
+  if (cost < 0.01) return '<$0.01'
+  return `$${cost.toFixed(2)}`
+}
+
 // ── Phase ────────────────────────────────────────────────────────────────────
 
 /**
@@ -93,6 +176,8 @@ export type FlowRunState = {
    * 与最后一个 session 的 agentId 对齐，但在 `starting`（尚未建 session）阶段也可用。
    */
   currentAgentId?: string
+  /** Flow 运行时的共享数据，Agent 通过 MCP 读写，webview 可查看/编辑 */
+  shareValues: Record<string, string>
 }
 
 // ── 消息的副作用 ────────────────────────────────────────────────────────
@@ -142,6 +227,7 @@ export function updateFlowRunState(
         answeredQuestions: {},
         answeredToolPermissions: {},
         currentAgentId: msg.data.agentId,
+        shareValues: {},
       },
       effects,
     }
@@ -208,8 +294,8 @@ export function updateFlowRunState(
     const session = draft?.sessions?.find((s) => !s.completed)
     const currentAgentId = draft.currentAgentId
 
-    // signal 统一追加到当前 session 的消息流
-    if (msg.type.startsWith('flow.signal.')) {
+    // signal 统一追加到当前 session 的消息流（shareValuesChanged 除外，不进 ChatPanel）
+    if (msg.type.startsWith('flow.signal.') && msg.type !== 'flow.signal.shareValuesChanged') {
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
@@ -296,6 +382,9 @@ export function updateFlowRunState(
         draft.phase = 'error'
         clearPendings()
       })
+      .with({ type: 'flow.signal.shareValuesChanged' }, ({ data }) => {
+        draft.shareValues = data.shareValues
+      })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
         // 把用户消息作为 aiMessage 回显追加到 session.messages，消费者侧统一
@@ -328,6 +417,9 @@ export function updateFlowRunState(
           draft.pendingToolPermission = undefined
         }
         draft.phase = 'running'
+      })
+      .with({ type: 'flow.command.setShareValues' }, ({ data }) => {
+        draft.shareValues = data.values
       })
       .exhaustive()
   })
@@ -378,7 +470,9 @@ export const agentChatInputState = (p: AgentPhase): AgentChatInputState =>
     )
     .with(P.union('completed', 'stopped', 'error'), () => 'confirm-required' as const)
     .exhaustive()
-export const flowIsDestructiveReadOnly = (p: FlowPhase) => p === 'running' || p === 'starting'
+// 取消flow readonly的设计 任意时候允许用户更改
+export const flowIsDestructiveReadOnly = (p: FlowPhase) =>
+  false && (p === 'running' || p === 'starting')
 export const flowCanBeKilled = (p: FlowPhase) =>
   match(p)
     .with(

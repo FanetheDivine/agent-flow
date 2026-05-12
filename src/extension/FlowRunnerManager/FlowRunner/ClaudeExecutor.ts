@@ -32,6 +32,8 @@ export type ExecutorEvents = {
   onComplete: (result: ExecutorResult) => void
   /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
   onToolPermissionRequest: (req: { toolUseId: string; toolName: string; input: unknown }) => void
+  /** shareValues 被 Agent MCP 写入后触发 */
+  onShareValuesChanged: (shareValues: Record<string, string>) => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -229,6 +231,9 @@ export class ClaudeExecutor {
         if (this.completed || this.disposed) return
         this.events.onComplete(result)
         this.completed = true
+      },
+      onShareValuesChanged: (shareValues) => {
+        this.events.onShareValuesChanged(shareValues)
       },
     })
     const options: Options = {

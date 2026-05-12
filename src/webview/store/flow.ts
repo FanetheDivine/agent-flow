@@ -23,6 +23,7 @@ import {
 } from '@/common'
 import type { Agent } from '@/common'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
+import { clearBuildCacheForSessions } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
 
 // ── 选择器（webview 本地） ────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ type FlowStoreType = StoreState & {
   answerToolPermission: (flowId: string, toolUseId: string, allow: boolean) => void
   interruptAgent: (flowId: string) => void
   killFlow: (flowId: string) => void
+  setShareValues: (flowId: string, values: Record<string, string>) => boolean
   openChatDrawer: (flowId: string, agentId: string, agentName: string) => void
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
@@ -330,7 +332,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       return cleanup
     },
     runFlow: (flowId, agentId, initMessage) => {
-      const { flows } = get()
+      const { flows, flowRunStates } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
       const agent = flow.agents?.find((a) => a.id === agentId)
@@ -341,6 +343,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             parent_tool_use_id: null,
           }
         : initMessage
+      // 清除该 flow 旧 session 的 build 缓存
+      const existingState = flowRunStates[flowId]
+      if (existingState?.sessions?.length) {
+        clearBuildCacheForSessions(existingState.sessions.map((s) => s.sessionId))
+      }
       const runKey = crypto.randomUUID()
       dispatchCommand({
         type: 'flow.command.flowStart',
@@ -437,6 +444,16 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         type: 'flow.command.killFlow',
         data: { flowId },
       })
+    },
+    setShareValues: (flowId, values) => {
+      const { flowRunStates } = get()
+      const fs = flowRunStates[flowId]
+      if (!fs?.runId) return false
+      dispatchCommand({
+        type: 'flow.command.setShareValues',
+        data: { flowId, runId: fs.runId, values },
+      })
+      return true
     },
     copyAgents: (newAgents, flowId) => {
       let remapped: Agent[] = []

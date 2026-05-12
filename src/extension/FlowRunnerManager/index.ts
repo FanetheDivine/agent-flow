@@ -46,6 +46,11 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.toolPermissionResult']
         this.runners.get(flowId)?.emit('flow.command.toolPermissionResult', rest)
       })
+      .with('flow.command.setShareValues', () => {
+        const { flowId, ...rest } =
+          data as ExtensionFlowCommandEvents['flow.command.setShareValues']
+        this.runners.get(flowId)?.emit('flow.command.setShareValues', rest)
+      })
       .with('killFlow', () => {
         const { flowId } = data as ExtensionFlowCommandEvents['flow.command.killFlow'] & {
           flowId: string

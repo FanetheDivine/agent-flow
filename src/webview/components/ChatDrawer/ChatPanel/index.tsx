@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -14,6 +15,7 @@ import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionOutput } from '@/common'
+import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
 import type { AgentSession } from '@/webview/store/flow'
 import {
   useFlowStore,
@@ -29,11 +31,16 @@ import { AskUserQuestionCard } from './AskUserQuestionCard'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
 
+export type ChatPanelRef = {
+  forceScrollToBottom: () => void
+}
+
 type Props = {
   flowId: string
   agentId: string
   agentName: string
   onClose?: () => void
+  ref?: React.Ref<ChatPanelRef>
 }
 
 /** 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射 */
@@ -45,7 +52,7 @@ function buildAnsweredMap(
     const values: Record<string, string[]> = {}
     for (const [q, a] of Object.entries(output.answers ?? {})) {
       values[q] = (a ?? '')
-        .split(',')
+        .split('\x1F')
         .map((s) => s.trim())
         .filter(Boolean)
     }
@@ -54,7 +61,7 @@ function buildAnsweredMap(
   return answeredMap
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) => {
+export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
@@ -70,6 +77,44 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
     [allSessions, agentId],
   )
   const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
+
+  // Flow 级累计：token 用 modelUsage（camelCase），费用用 total_cost_usd
+  const { totalTokens, totalCost } = useMemo(() => {
+    if (!allSessions) return { totalTokens: 0, totalCost: 0 }
+    let totalTokens = 0
+    let totalCost = 0
+    for (const session of allSessions) {
+      // total_cost_usd 是 session 累计值，只取最后一条 result 避免重复累加
+      let lastResultCost: number | undefined
+      let lastResultTokens: number = 0
+      for (const msg of session.messages) {
+        if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'result') {
+          const result = msg.data.message as any
+          if (result.modelUsage && typeof result.modelUsage === 'object') {
+            for (const mu of Object.values(result.modelUsage) as any[]) {
+              lastResultTokens =
+                (mu.inputTokens ?? 0) +
+                (mu.outputTokens ?? 0) +
+                (mu.cacheCreationInputTokens ?? 0) +
+                (mu.cacheReadInputTokens ?? 0)
+            }
+          }
+          if (typeof result.total_cost_usd === 'number') {
+            lastResultCost = result.total_cost_usd
+          }
+        }
+      }
+      if (lastResultCost !== undefined) totalCost += lastResultCost
+      totalTokens += lastResultTokens
+    }
+    return { totalTokens, totalCost }
+  }, [allSessions])
+
+  // 当前 Agent 的模型
+  const model = useFlowStore((s) => {
+    const flow = s.flows.find((f) => f.id === flowId)
+    return flow?.agents?.find((a) => a.id === agentId)?.model
+  })
 
   const canKillFlow = flowCanBeKilled(flowPhase)
 
@@ -104,6 +149,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
+      model,
     }),
     [
       pendingToolUseId,
@@ -113,6 +159,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
+      model,
     ],
   )
 
@@ -143,6 +190,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
     }, 0)
   }, [])
+
+  useImperativeHandle(ref, () => ({ forceScrollToBottom: () => {
+    shouldScrollRef.current = true
+    scrollToBottom()
+  } }), [scrollToBottom])
 
   // 新消息到达时按需滚到底
   useEffect(() => {
@@ -186,6 +238,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
           <Tag color={statusColor} className='m-0 text-[10px]'>
             {statusText}
           </Tag>
+          {totalTokens > 0 && (
+            <Tag color='default' className='m-0 text-[10px]'>
+              {formatTokenCount(totalTokens)} tokens{totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''}
+            </Tag>
+          )}
         </div>
         {canKillFlow && (
           <Tooltip title='停止工作流'>
@@ -244,7 +301,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose }) =>
       <AnimatePresence>
         {showCard && pending && (
           <motion.div
-            key='ask-card'
+            key={`ask-card-${pending.toolUseId}`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: cardHeight, opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

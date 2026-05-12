@@ -33,7 +33,6 @@ export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList
 ) {
   const items = useMemo<BubbleItemType[]>(() => {
     const result: BubbleItemType[] = []
-    const seenToolUseIds = new Set<string>()
     sessions.forEach((session, idx) => {
       if (idx > 0) {
         result.push({
@@ -44,7 +43,7 @@ export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList
           ),
         })
       }
-      toBubbleItems(session.messages, ctx, seenToolUseIds, session.completed).forEach((item) => {
+      toBubbleItems(session.sessionId, session.messages, ctx, session.completed).forEach((item) => {
         result.push({
           key: `${session.sessionId}-${item.key}`,
           role: item.role,
