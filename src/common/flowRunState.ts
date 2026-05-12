@@ -473,6 +473,7 @@ export const agentChatInputState = (p: AgentPhase): AgentChatInputState =>
     .exhaustive()
 // 取消flow readonly的设计 任意时候允许用户更改
 export const flowIsDestructiveReadOnly = (p: FlowPhase) =>
+  // eslint-disable-next-line no-constant-binary-expression
   false && (p === 'running' || p === 'starting')
 export const flowCanBeKilled = (p: FlowPhase) =>
   match(p)
