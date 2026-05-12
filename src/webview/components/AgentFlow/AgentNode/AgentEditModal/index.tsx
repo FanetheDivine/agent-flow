@@ -113,19 +113,7 @@ export const AgentEditModal: FC<AgentEditModalProps> = (props) => {
         <FormItem
           name='agent_name'
           label='Agent 名称'
-          rules={[
-            { required: true, message: '请输入名称' },
-            () => ({
-              validator(_: any, value: string) {
-                const currentName = agent?.agent_name
-                const others = allAgents.filter((a) => a.agent_name !== currentName)
-                if (others.some((a) => a.agent_name === value)) {
-                  return Promise.reject(new Error('名称已存在'))
-                }
-                return Promise.resolve()
-              },
-            }),
-          ]}
+          rules={[{ required: true, message: '请输入名称' }]}
         >
           <Input />
         </FormItem>
