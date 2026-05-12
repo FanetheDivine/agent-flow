@@ -191,10 +191,16 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
     }, 0)
   }, [])
 
-  useImperativeHandle(ref, () => ({ forceScrollToBottom: () => {
-    shouldScrollRef.current = true
-    scrollToBottom()
-  } }), [scrollToBottom])
+  useImperativeHandle(
+    ref,
+    () => ({
+      forceScrollToBottom: () => {
+        shouldScrollRef.current = true
+        scrollToBottom()
+      },
+    }),
+    [scrollToBottom],
+  )
 
   // 新消息到达时按需滚到底
   useEffect(() => {
@@ -240,7 +246,8 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           </Tag>
           {totalTokens > 0 && (
             <Tag color='default' className='m-0 text-[10px]'>
-              {formatTokenCount(totalTokens)} tokens{totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''}
+              {formatTokenCount(totalTokens)} tokens
+              {totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''}
             </Tag>
           )}
         </div>

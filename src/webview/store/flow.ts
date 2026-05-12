@@ -22,8 +22,8 @@ import {
   flowIsDestructiveReadOnly,
 } from '@/common'
 import type { Agent } from '@/common'
-import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 import { clearBuildCacheForSessions } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
+import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
 // ── 选择器（webview 本地） ────────────────────────────────────────────────
 

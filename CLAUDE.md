@@ -61,7 +61,7 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 [updateFlowRunState](src/common/flowState.ts) 是统管 Flow 运行态的**单一 reducer**：signal 路径上 extension 发出前 / webview 收到后各 reduce 一次，command 路径上 webview 发出前 / extension 收到后各 reduce 一次，两端走同一份 reducer 保证状态推进同步。
 
 - **`FlowPhase` / `AgentPhase`**：`idle | starting | running | result | awaiting-question | awaiting-tool-permission | completed | stopped | error`。`AgentPhase` 与 `FlowPhase` 同构，仅在非活跃 agent 上根据是否完成投影为 `idle`/`completed`
-- **`FlowRunState`** 字段：`runKey`（防竞态）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission`
+- **`FlowRunState`** 字段：`runKey`（防竞态）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission` / `shareValues`（跨 Agent 共享数据，以引用贯穿整个 Run）
 - **守卫**：终态（`stopped` / `completed` / `error`）下除 `flowStart` / `killFlow` 外的消息直接忽略；非 `flowStart` 的消息要求 `state.runId === msg.data.runId`
 - **特殊入口**：`flow.command.flowStart` 覆盖式初始化（state 可为 `undefined`）；`flow.command.killFlow` 任意状态下幂等强制置 `stopped`
 - **`MessageEffect`** 的 5 个 `reason`：`result` / `awaiting-question` / `awaiting-tool-permission` / `flow-completed` / `agent-error`，由 reducer 与新 state 一并产出，调用方负责消费（见下节）
@@ -83,3 +83,17 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - **ChatPanel 的"开始运行"**：`phase === 'idle'` 直接启动，非 idle 非 awaiting 要 modal 确认（会清空运行数据），见 [ChatDrawer.onSend](src/webview/components/ChatDrawer.tsx)
 - **webview 粘贴双路径**：`<AgentFlow>` 内粘贴 = 粘贴 Agent（保留内部连接、ID 重映射）；画布空白 / App 层粘贴 = 作为 Flow JSON 导入
 - **代码片段（CodeRef）的 `line`**：`line?: [number, number]`，整个文件时为 `undefined`。Tag 仅在 `line` 存在时展示行范围；点击 Tag 触发 `openFile`，`line` 为 `undefined` 时只打开文件不选中行。快捷键 `Ctrl+Shift+L`（Mac: `Cmd+Shift+L`）：有选中文字时注入带行范围的片段，**无选中时注入整个文件**(`line` 省略)。
+
+## ShareValues 双向同步
+
+- **事件契约**：`flow.command.setShareValues`（webview→extension，full replace）和 `flow.signal.shareValuesChanged`（extension→webview，full replace）
+- **MCP 工具**：Agent 通过 `AgentControllerMcp` 的 `setShareValues` / `getShareValues` / `getAllShareValues` 读写，需开启 `enable_share_values`
+- **UI**：SortableFlowItem 提供 DatabaseOutlined 按钮，Modal 支持增删改 key-value pairs，空 key 自动生成占位名
+- **验证**：排除 `shareValuesChanged` signal 追加到 session.messages，避免污染 ChatPanel；未运行时保存给出 warning
+
+## Token 追踪
+
+- **flowRunState.ts**：`TokenUsage` 类型及 `extractTokenUsage`/`addTokenUsage` 工具函数
+- **buildRenderItems.ts**：从 assistant 消息提取 usage 生成 message_usage 项；从 result 消息计算回合增量 usage 附加到 turn_end；以 sessionId 为 key 的 Map 缓存机制
+- **MessageBubble.tsx**：`TokenUsageBadge` 组件展示 input/output/cache+/cache→ 标签；turn_end 增强 usage 展示
+- **ChatPanel**：从 sessions 计算 Flow 级累计 usage，header 中以 Tag 展示总量；优先使用 SDK 实际 `total_cost_usd`

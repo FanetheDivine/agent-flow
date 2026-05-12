@@ -8,8 +8,22 @@ export type ToolResult = { isError: boolean; text: string }
 
 export type RenderItem =
   | { kind: 'user'; key: string; rawContent: unknown; usage?: TokenUsage; cost?: number }
-  | { kind: 'text'; key: string; text: string; streaming: boolean; usage?: TokenUsage; cost?: number }
-  | { kind: 'thinking'; key: string; text: string; streaming: boolean; usage?: TokenUsage; cost?: number }
+  | {
+      kind: 'text'
+      key: string
+      text: string
+      streaming: boolean
+      usage?: TokenUsage
+      cost?: number
+    }
+  | {
+      kind: 'thinking'
+      key: string
+      text: string
+      streaming: boolean
+      usage?: TokenUsage
+      cost?: number
+    }
   | {
       kind: 'tool_use'
       key: string
@@ -285,18 +299,18 @@ function scanIncremental(
         const accUsage = state.turnAccUsage
         const resultUsage = extractTokenUsage((message as any).usage)
         const turnUsage: TokenUsage | undefined =
-          (accUsage.input_tokens > 0 || accUsage.output_tokens > 0)
+          accUsage.input_tokens > 0 || accUsage.output_tokens > 0
             ? accUsage
-            : (resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0)
+            : resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0
               ? resultUsage
               : undefined
         // 从 result 消息提取累计费用，计算 per-turn 差值
         const cumulativeCost: number | undefined =
-          typeof (message as any).total_cost_usd === 'number' ? (message as any).total_cost_usd : undefined
-        const perTurnCost: number | undefined =
-          cumulativeCost !== undefined
-            ? cumulativeCost - state.prevSessionTotalCost
+          typeof (message as any).total_cost_usd === 'number'
+            ? (message as any).total_cost_usd
             : undefined
+        const perTurnCost: number | undefined =
+          cumulativeCost !== undefined ? cumulativeCost - state.prevSessionTotalCost : undefined
         state.prevSessionTotalCost = cumulativeCost ?? state.prevSessionTotalCost
         // 回填最后一个 AI text/thinking 的 usage（若尚未从 assistant 消息获取到）
         if (turnUsage) {
@@ -314,7 +328,10 @@ function scanIncremental(
           // 回填本轮回合的输入 token 到最后一个 user RenderItem（费用由渲染层按 usage 计算）
           const inputUsage: TokenUsage = {
             ...emptyTokenUsage,
-            input_tokens: turnUsage.input_tokens + turnUsage.cache_creation_input_tokens + turnUsage.cache_read_input_tokens,
+            input_tokens:
+              turnUsage.input_tokens +
+              turnUsage.cache_creation_input_tokens +
+              turnUsage.cache_read_input_tokens,
           }
           for (let j = items.length - 1; j >= 0; j--) {
             const it = items[j]
@@ -325,7 +342,13 @@ function scanIncremental(
           }
         }
         state.turnAccUsage = { ...emptyTokenUsage }
-        items.push({ kind: 'turn_end', key: `${mIdx}-result`, isError, usage: turnUsage, cost: perTurnCost })
+        items.push({
+          kind: 'turn_end',
+          key: `${mIdx}-result`,
+          isError,
+          usage: turnUsage,
+          cost: perTurnCost,
+        })
         continue
       }
 

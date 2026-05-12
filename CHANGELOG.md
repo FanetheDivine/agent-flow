@@ -1,5 +1,27 @@
 # Change Log
 
+## [0.0.9] - 2026-05-12
+
+### 新增
+
+- **ShareValues 双向同步数据通道**：`FlowRunState` 新增 `shareValues` 字段，`flowStart` 时初始化为空对象；event 新增 `flow.command.setShareValues`（webview→extension）和 `flow.signal.shareValuesChanged`（extension→webview）；MCP `setShareValues` 工具添加 `onShareValuesChanged` 回调，Agent 写入后即时通知外部；webview 端提供 `DatabaseOutlined` 按钮，支持在 Modal 中增删改 key-value pairs，空 key 自动生成占位名。
+- **消息 Token 消耗可视化**：三层 token 信息展示——消息级（每条 AI 消息后显示 input/output/cache+/cache→）、回合级（turn_end 分隔线处展示本轮增量汇总）、Flow 级（ChatPanel header 中展示累计总量）；从 result 消息提取 `total_cost_usd` 优先显示 SDK 实际费用。
+- **Flow 运行中可编辑**：取消 flow readonly 的设计，任意时候允许用户更改，但对更改的后果不做承诺。
+
+### 优化
+
+- **提取 `buildRenderItems` 到独立文件并增加 Map 缓存**：以 sessionId 为 key 缓存上次扫描结果，新消息中的 `tool_result` 会回填已有 `tool_use` 项的 result 字段。
+- **优化默认工作流与系统提示词**：多次迭代优化默认 Flow 结构和 Agent 提示词措辞。
+- **滚动修复**：用户发送消息后强制滚动到 ChatPanel 底部，解决向上滚动后 `shouldScrollRef` 被置为 false 导致的自动滚动失效。
+- **算法优化**：消息展示结果计算按照 session 缓存优化。
+- **Token 展示优化**：AI 气泡 token 回填解决 assistant 消息可能不携带 usage 的问题；缓存标签改为英文（in/out/cache write/cache read）。
+- **清除无用缓存**。
+
+### 修复
+
+- **ShareValues 编辑的4个验证问题**：先清空旧 key 再赋值，删除 key 不再回弹；排除 `shareValuesChanged` signal 追加到 session.messages 避免污染 ChatPanel；未运行时保存给出 warning 反馈；添加按钮生成占位 key 代替空字符串。
+- **重复提问卡片与单选选项被当成 Other**：修复 ChatPanel 中重复提问卡片展示问题，修复单选选项被错误归类为 "Other" 自由文本回答。
+
 ## [0.0.8] - 2026-05-11
 
 ### 新增

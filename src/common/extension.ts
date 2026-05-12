@@ -48,7 +48,12 @@ function withErrorBoundary<TArgs>(
  * - `validateFlow` — 校验工作流定义是否合法
  * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
-export function buildAgentMcpServer({ agent, shareValues, onComplete, onShareValuesChanged }: AgentMcpServerOptions) {
+export function buildAgentMcpServer({
+  agent,
+  shareValues,
+  onComplete,
+  onShareValuesChanged,
+}: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
   if (agent.work_mode !== 'never_complete') {
     const outputs = agent.outputs ?? []

@@ -71,11 +71,12 @@ export const calculateTokenCost = (usage: TokenUsage, model: string): number => 
   if (!p) return 0
   const mTok = 1_000_000
   return (
-    usage.input_tokens * p.input +
-    usage.output_tokens * p.output +
-    usage.cache_creation_input_tokens * p.cache_write +
-    usage.cache_read_input_tokens * p.cache_read
-  ) / mTok
+    (usage.input_tokens * p.input +
+      usage.output_tokens * p.output +
+      usage.cache_creation_input_tokens * p.cache_write +
+      usage.cache_read_input_tokens * p.cache_read) /
+    mTok
+  )
 }
 
 export const formatTokenCount = (n: number): string => {

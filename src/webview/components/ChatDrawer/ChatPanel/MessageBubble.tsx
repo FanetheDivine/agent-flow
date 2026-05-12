@@ -10,11 +10,17 @@ import {
 } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
-import type { AskUserQuestionInput, AskUserQuestionOutput, ExtensionToWebviewMessage, TokenUsage } from '@/common'
+import type {
+  AskUserQuestionInput,
+  AskUserQuestionOutput,
+  ExtensionToWebviewMessage,
+  TokenUsage,
+} from '@/common'
 import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
+import { ToolPermissionCard } from './ToolPermissionCard'
 import {
   buildRenderItems,
   clearBuildCache,
@@ -22,7 +28,6 @@ import {
   type RenderItem,
   type ToolResult,
 } from './buildRenderItems'
-import { ToolPermissionCard } from './ToolPermissionCard'
 
 type Props = {
   msg: ExtensionToWebviewMessage
@@ -305,7 +310,15 @@ function getToolSummary(toolName: string, input: any): string {
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
-function TokenUsageBadge({ usage, model, cost }: { usage: TokenUsage; model?: string; cost?: number }) {
+function TokenUsageBadge({
+  usage,
+  model,
+  cost,
+}: {
+  usage: TokenUsage
+  model?: string
+  cost?: number
+}) {
   const parts: string[] = []
   if (usage.input_tokens > 0) parts.push(`in ${formatTokenCount(usage.input_tokens)}`)
   if (usage.output_tokens > 0) parts.push(`out ${formatTokenCount(usage.output_tokens)}`)
@@ -314,11 +327,12 @@ function TokenUsageBadge({ usage, model, cost }: { usage: TokenUsage; model?: st
   if (usage.cache_read_input_tokens > 0)
     parts.push(`cache read ${formatTokenCount(usage.cache_read_input_tokens)}`)
   if (parts.length === 0) return null
-  const costStr = cost !== undefined
-    ? formatTokenCost(cost)
-    : model
-      ? formatTokenCost(calculateTokenCost(usage, model))
-      : ''
+  const costStr =
+    cost !== undefined
+      ? formatTokenCost(cost)
+      : model
+        ? formatTokenCost(calculateTokenCost(usage, model))
+        : ''
   return (
     <span className='text-[10px] text-[#6c7086]'>
       {parts.join(' · ')} tokens{costStr ? ` · ${costStr}` : ''}
@@ -402,9 +416,13 @@ function renderItemToBubble(
         content: item.usage ? (
           <div>
             {content}
-            <div className='mt-1'><TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} /></div>
+            <div className='mt-1'>
+              <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
+            </div>
           </div>
-        ) : content,
+        ) : (
+          content
+        ),
       }
     }
     case 'thinking': {
@@ -420,9 +438,13 @@ function renderItemToBubble(
         content: item.usage ? (
           <div>
             {content}
-            <div className='mt-1'><TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} /></div>
+            <div className='mt-1'>
+              <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
+            </div>
           </div>
-        ) : content,
+        ) : (
+          content
+        ),
       }
     }
     case 'ask_user_question': {
