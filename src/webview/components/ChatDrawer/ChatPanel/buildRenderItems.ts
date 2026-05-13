@@ -65,6 +65,7 @@ type ScanState = {
   partialsByMessageId: Map<string, PartialMessage>
   currentRenderingPartialMsgId: string | null
   partialBlockSeen: Map<string, { thinking: number; text: number }>
+  streamingItemKeysByMsgId: Map<string, string[]>
   /** 当前回合内累加的 assistant 消息 usage */
   turnAccUsage: TokenUsage
   /** 上一个 session 的 result 累计费用，用于计算 per-turn 费用差值 */
@@ -244,6 +245,27 @@ function scanIncremental(
       }
 
       if (message.type === 'assistant') {
+        const mid = message.message.id
+        // 移除同 message ID 的 streaming item（防止重复显示）
+        const streamingKeys = state.streamingItemKeysByMsgId.get(mid)
+        if (streamingKeys && streamingKeys.length > 0) {
+          const keySet = new Set(streamingKeys)
+          let writeIdx = 0
+          for (let readIdx = 0; readIdx < items.length; readIdx++) {
+            const item = items[readIdx]
+            if (
+              (item.kind === 'text' || item.kind === 'thinking') &&
+              item.streaming &&
+              keySet.has(item.key)
+            ) {
+              continue
+            }
+            items[writeIdx] = items[readIdx]
+            writeIdx++
+          }
+          items.length = writeIdx
+          state.streamingItemKeysByMsgId.delete(mid)
+        }
         const blocks = message.message.content
         const usage = extractTokenUsage(message.message.usage)
         // 累加到回合 usage
@@ -395,6 +417,12 @@ function scanIncremental(
         } else {
           items.push({ kind: 'thinking', key, text: block.content, streaming: true })
         }
+        const msgId = state.currentRenderingPartialMsgId
+        if (msgId) {
+          const keys = state.streamingItemKeysByMsgId.get(msgId) ?? []
+          keys.push(key)
+          state.streamingItemKeysByMsgId.set(msgId, keys)
+        }
         continue
       }
       continue
@@ -438,6 +466,7 @@ export function buildRenderItems(
           partialsByMessageId: new Map(),
           currentRenderingPartialMsgId: null,
           partialBlockSeen: new Map(),
+          streamingItemKeysByMsgId: new Map(),
           turnAccUsage: { ...emptyTokenUsage },
           prevSessionTotalCost: 0,
         },
