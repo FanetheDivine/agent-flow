@@ -33,7 +33,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const isCurrentAgent = useFlowStore((s) => {
     const fs = s.flowRunStates[flowId]
-    return fs?.sessions[fs.sessions.length - 1]?.agentId === agentId
+    return fs?.currentAgentId === agentId
   })
   const outputs = agent?.outputs ?? []
   const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
