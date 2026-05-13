@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { FC } from 'react'
-import { Drawer, Form, Input, Switch, Select, Button, Flex } from 'antd'
+import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex } from 'antd'
 import {
   PlusOutlined,
   MinusCircleOutlined,
@@ -168,24 +168,25 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                   rules={[{ required: true, message: '请选择或输入模型' }]}
                   className='mb-0 flex-1'
                 >
-                  <Select
+                  <AutoComplete
                     placeholder='选择或输入模型名称'
                     allowClear
                     options={[
-                      { label: 'opus', value: 'opus' },
-                      { label: 'gpt-5.5', value: 'gpt-5.5' },
-                      { label: 'glm-5.1', value: 'glm-5.1' },
-                      { label: 'DeepSeek-V4-Pro', value: 'DeepSeek-V4-Pro' },
-                      { label: 'opus4.7', value: 'claude-opus-4-7' },
-                      { label: 'opus4.6', value: 'claude-opus-4-6-v1' },
-                      { label: 'sonnet', value: 'sonnet' },
-                      { label: 'haiku', value: 'haiku' },
-                      { label: 'gpt-5.4', value: 'gpt-5.4' },
-                      { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-                      { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
+                      { value: 'opus', label: 'opus' },
+                      { value: 'gpt-5.5', label: 'gpt-5.5' },
+                      { value: 'glm-5.1', label: 'glm-5.1' },
+                      { value: 'DeepSeek-V4-Pro', label: 'DeepSeek-V4-Pro' },
+                      { value: 'claude-opus-4-7', label: 'opus4.7' },
+                      { value: 'claude-opus-4-6-v1', label: 'opus4.6' },
+                      { value: 'sonnet', label: 'sonnet' },
+                      { value: 'haiku', label: 'haiku' },
+                      { value: 'gpt-5.4', label: 'gpt-5.4' },
+                      { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+                      { value: 'DeepSeek-V4-flash', label: 'DeepSeek-V4-flash' },
                     ]}
                     filterOption={(inputValue, option) =>
-                      option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false
+                      (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                      (option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false)
                     }
                   />
                 </FormItem>
