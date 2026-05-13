@@ -54,10 +54,10 @@ export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList
     return result
   }, [sessions, ctx])
 
-  const hasAnySessionCompleted = sessions.some((s) => s.completed)
+  const lastSessionCompleted = sessions.at(-1)?.completed
 
   const finalItems = useMemo<BubbleItemType[]>(() => {
-    if (!loading || hasAnySessionCompleted) return items
+    if (!loading || lastSessionCompleted) return items
     return [
       ...items,
       {
@@ -67,7 +67,7 @@ export const MessageList = forwardRef<BubbleListRef, Props>(function MessageList
         loading: true,
       },
     ]
-  }, [items, loading, hasAnySessionCompleted])
+  }, [items, loading, lastSessionCompleted])
 
   return (
     <div className='flex min-h-0 flex-1 flex-col' onWheel={onWheel}>

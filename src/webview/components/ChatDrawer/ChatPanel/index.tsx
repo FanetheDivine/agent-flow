@@ -79,35 +79,46 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
 
   // Flow 级累计：token 用 modelUsage（camelCase），费用用 total_cost_usd
-  const { totalTokens, totalCost } = useMemo(() => {
-    if (!allSessions) return { totalTokens: 0, totalCost: 0 }
+  const { totalTokens, totalCost, modelBreakdown } = useMemo(() => {
+    if (!allSessions) return { totalTokens: 0, totalCost: 0, modelBreakdown: [] as Array<{ model: string; tokens: number; cost: number }> }
     let totalTokens = 0
     let totalCost = 0
+    const modelMap = new Map<string, { tokens: number; cost: number }>()
     for (const session of allSessions) {
       // total_cost_usd 是 session 累计值，只取最后一条 result 避免重复累加
       let lastResultCost: number | undefined
-      let lastResultTokens: number = 0
+      let totalResultTokens: number = 0
+      let sessionModel: string | undefined
       for (const msg of session.messages) {
         if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'result') {
           const result = msg.data.message as any
           if (result.modelUsage && typeof result.modelUsage === 'object') {
             for (const mu of Object.values(result.modelUsage) as any[]) {
-              lastResultTokens =
+              totalResultTokens +=
                 (mu.inputTokens ?? 0) +
-                (mu.outputTokens ?? 0) +
-                (mu.cacheCreationInputTokens ?? 0) +
-                (mu.cacheReadInputTokens ?? 0)
+                (mu.outputTokens ?? 0)
             }
           }
           if (typeof result.total_cost_usd === 'number') {
             lastResultCost = result.total_cost_usd
           }
+          // 提取模型名称
+          if (!sessionModel && typeof result.model === 'string') {
+            sessionModel = result.model
+          }
         }
       }
       if (lastResultCost !== undefined) totalCost += lastResultCost
-      totalTokens += lastResultTokens
+      totalTokens += totalResultTokens
+      // 按模型归集
+      const m = sessionModel ?? session.agentId
+      const entry = modelMap.get(m) ?? { tokens: 0, cost: 0 }
+      entry.tokens += totalResultTokens
+      if (lastResultCost !== undefined) entry.cost += lastResultCost
+      modelMap.set(m, entry)
     }
-    return { totalTokens, totalCost }
+    const modelBreakdown = Array.from(modelMap.entries()).map(([m, v]) => ({ model: m, ...v }))
+    return { totalTokens, totalCost, modelBreakdown }
   }, [allSessions])
 
   // 当前 Agent 的模型
@@ -247,7 +258,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           {totalTokens > 0 && (
             <Tag color='default' className='m-0 text-[10px]'>
               {formatTokenCount(totalTokens)} tokens
-              {totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''}
+              {totalCost > 0 ? ` · ${formatTokenCost(totalCost)}` : ''}
             </Tag>
           )}
         </div>

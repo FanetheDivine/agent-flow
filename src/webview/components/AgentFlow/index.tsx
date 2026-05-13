@@ -68,7 +68,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   useEffect(() => {
     if (activeFlowId !== flowId) return
     const fs = useFlowStore.getState().flowRunStates[flowId]
-    const currentAgentId = fs?.sessions[fs.sessions.length - 1]?.agentId
+    const currentAgentId = fs?.currentAgentId
     if (currentAgentId) {
       const latestFlow = useFlowStore.getState().flows.find((f) => f.id === flowId)
       const agent = latestFlow?.agents?.find((a) => a.id === currentAgentId)
