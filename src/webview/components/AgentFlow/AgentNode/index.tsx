@@ -8,7 +8,7 @@ import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
-import { AgentEditModal } from './AgentEditModal'
+import { AgentEditor } from './AgentEditor'
 
 const handleStyle = {
   height: 16,
@@ -195,7 +195,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
         )}
       </div>
 
-      <AgentEditModal
+      <AgentEditor
         open={editOpen}
         agent={agent ?? null}
         allAgents={allAgents}
