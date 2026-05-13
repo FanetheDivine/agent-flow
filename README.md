@@ -63,6 +63,8 @@ pnpm build-extension   # 生成 .vsix 文件
 - **关闭面板不打断运行**：关闭 Webview 后 Agent 继续在后台执行，重新打开时自动恢复全部历史消息与运行态，等待用户回复 / 完成等通知照常送达。
 - **ShareValues 运行时查看/编辑**：Flow 列表项提供 shareValues 管理按钮，支持在运行中动态查看和编辑跨 Agent 共享数据，写入后即时对后续 Agent 可见。
 - **Token 消耗可视化**：消息级、回合级、Flow 级三层展示 token 用量与费用，AI 气泡自动回填实际消耗，优先显示 SDK 实际费用而非估算。
+- **Starting 阶段节点高亮与红点**：启动阶段（session 尚未建立）Agent 节点也能正确高亮显示，对话框同步展示红点提示。
+- **AskUserQuestion 字体优化**：调整提问卡片字体样式，提升可读性。
 
 ### 4. 内置示例工作流
 

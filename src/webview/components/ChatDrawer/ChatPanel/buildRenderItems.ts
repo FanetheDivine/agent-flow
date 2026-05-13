@@ -38,7 +38,14 @@ export type RenderItem =
       toolUseId: string
       input: AskUserQuestionInput
     }
-  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage; cost?: number; model?: string }
+  | {
+      kind: 'turn_end'
+      key: string
+      isError: boolean
+      usage?: TokenUsage
+      cost?: number
+      model?: string
+    }
   | {
       kind: 'agent_complete'
       key: string
@@ -331,7 +338,11 @@ function scanIncremental(
           }
           for (const j of itemsToUpdate) {
             const it = items[j]
-            items[j] = { ...(it as RenderItem & { kind: 'text' | 'thinking' }), usage: turnUsage, cost: perTurnCost }
+            items[j] = {
+              ...(it as RenderItem & { kind: 'text' | 'thinking' }),
+              usage: turnUsage,
+              cost: perTurnCost,
+            }
           }
         }
         state.turnAccUsage = { ...emptyTokenUsage }

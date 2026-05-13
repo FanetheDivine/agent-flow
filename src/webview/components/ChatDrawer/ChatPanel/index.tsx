@@ -80,7 +80,12 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
 
   // Flow 级累计：token 用 modelUsage（camelCase），费用用 total_cost_usd
   const { totalTokens, totalCost, modelBreakdown } = useMemo(() => {
-    if (!allSessions) return { totalTokens: 0, totalCost: 0, modelBreakdown: [] as Array<{ model: string; tokens: number; cost: number }> }
+    if (!allSessions)
+      return {
+        totalTokens: 0,
+        totalCost: 0,
+        modelBreakdown: [] as Array<{ model: string; tokens: number; cost: number }>,
+      }
     let totalTokens = 0
     let totalCost = 0
     const modelMap = new Map<string, { tokens: number; cost: number }>()
@@ -94,9 +99,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           const result = msg.data.message as any
           if (result.modelUsage && typeof result.modelUsage === 'object') {
             for (const mu of Object.values(result.modelUsage) as any[]) {
-              totalResultTokens +=
-                (mu.inputTokens ?? 0) +
-                (mu.outputTokens ?? 0)
+              totalResultTokens += (mu.inputTokens ?? 0) + (mu.outputTokens ?? 0)
             }
           }
           if (typeof result.total_cost_usd === 'number') {

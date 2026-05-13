@@ -1,5 +1,18 @@
 # Change Log
 
+## [0.0.12] - 2026-05-13
+
+### 修复
+
+- **Starting 阶段节点高亮与红点**：修复 `starting` 阶段 AgentNode 无高亮和对话框无红点的问题，改用 `currentAgentId` 替代 `sessions[last].agentId` 判断当前 Agent，使 session 尚未建立时也能正确显示。
+- **费用 Tokens 展示**：修复费用与 tokens 展示异常。
+
+### 优化
+
+- **Loading 展示逻辑**：修复 AI 回复 loading 状态的展示逻辑。
+- **AskUserQuestion 字体**：调整 AskUserQuestion 提问卡片字体样式，提升可读性。
+- **Agent 编辑组件**：优化 AgentEditor 组件结构与样式。
+
 ## [0.0.11] - 2026-05-12
 
 ### 新增
