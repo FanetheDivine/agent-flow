@@ -106,14 +106,14 @@ export const AskUserQuestionCard: FC<Props> = ({ input, mode, answeredValues, on
     <div className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
       <div className='flex items-center gap-2'>
         <QuestionCircleOutlined className='text-[#89b4fa]' />
-        <span className='text-[11px] font-semibold text-[#cdd6f4]'>AI 提问</span>
+        <span className='text-xs font-semibold text-[#cdd6f4]'>AI 提问</span>
         {mode === 'historical' &&
           (answeredValues ? (
-            <Tag color={'success'} className='m-0 text-[10px]' icon={<CheckOutlined />}>
+            <Tag color={'success'} className='m-0 text-xs' icon={<CheckOutlined />}>
               已回答
             </Tag>
           ) : (
-            <Tag color={'warning'} className='m-0 text-[10px]'>
+            <Tag color={'warning'} className='m-0 text-xs'>
               已中断
             </Tag>
           ))}
@@ -132,14 +132,14 @@ export const AskUserQuestionCard: FC<Props> = ({ input, mode, answeredValues, on
           <div key={qIdx} className='flex flex-col gap-1.5'>
             <div className='flex items-start justify-between gap-2'>
               <XMarkdown
-                className='x-markdown-dark text-[12px] text-[#cdd6f4]'
+                className='x-markdown-dark text-sm text-[#cdd6f4]'
                 content={q.question}
                 openLinksInNewTab
                 escapeRawHtml
                 components={EMPTY_COMPONENTS}
               />
               {q.header && (
-                <Tag color='processing' className='m-0 shrink-0 text-[10px]'>
+                <Tag color='processing' className='m-0 shrink-0 text-xs'>
                   {q.header}
                 </Tag>
               )}
@@ -185,7 +185,7 @@ export const AskUserQuestionCard: FC<Props> = ({ input, mode, answeredValues, on
                   disabled={!isActive}
                   onChange={(e) => handleOtherTextChange(qIdx, e.target.value)}
                   placeholder='输入自定义回答...'
-                  className='text-[11.5px]'
+                  className='text-sm'
                 />
               </div>
             )}
@@ -212,9 +212,9 @@ const OptionRow: FC<{
     <label className='flex cursor-pointer items-start gap-2 rounded px-1 py-0.5 hover:bg-[#313244]'>
       {children}
       <span className='flex flex-col gap-0.5'>
-        <span className='text-[11.5px] text-[#cdd6f4]'>{option.label}</span>
+        <span className='text-sm text-[#cdd6f4]'>{option.label}</span>
         {option.description && (
-          <span className='text-[10px] leading-snug text-[#a6adc8]'>{option.description}</span>
+          <span className='text-xs leading-snug text-[#a6adc8]'>{option.description}</span>
         )}
       </span>
     </label>
@@ -223,7 +223,7 @@ const OptionRow: FC<{
     return (
       <Popover
         content={
-          <pre className='m-0 max-w-[320px] text-[10px] whitespace-pre-wrap'>{option.preview}</pre>
+          <pre className='m-0 max-w-[320px] text-xs whitespace-pre-wrap'>{option.preview}</pre>
         }
         placement='right'
         trigger={['hover', 'focus']}
