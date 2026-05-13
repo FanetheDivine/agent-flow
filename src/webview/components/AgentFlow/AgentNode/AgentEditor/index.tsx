@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
 import type { FC } from 'react'
 import { Drawer, Form, Input, Switch, Select, Button, Flex } from 'antd'
-import { PlusOutlined, MinusCircleOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  MinusCircleOutlined,
+  EditOutlined,
+  EyeOutlined,
+  CloseOutlined,
+} from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import type { Agent } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
@@ -119,19 +125,20 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
       footer={null}
     >
       <div
-        onKeyDownCapture={(e) => {
+        onKeyDown={(e) => {
           if (e.key === 'Escape' || e.key === 'Tab') return
           e.stopPropagation()
         }}
-        onMouseMoveCapture={(e) => e.stopPropagation()}
-        onPasteCapture={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPaste={(e) => e.stopPropagation()}
         className='flex h-full'
       >
         {/* 左侧表单 — 独立滚动 */}
         <div className='flex flex-col' style={{ width: 560 }}>
           {/* header */}
-          <div className='border-b border-[#313244] px-4 py-3'>
-            <span className='font-medium'>编辑 Agent</span>
+          <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
+            <CloseOutlined onClick={onCancel} className='mr-2' />
+            <span>编辑 Agent</span>
           </div>
           {/* 滚动表单区域 */}
           <div className='flex-1 overflow-auto' style={SCROLLBAR_STYLE}>
