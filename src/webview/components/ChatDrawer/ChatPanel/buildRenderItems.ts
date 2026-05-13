@@ -38,7 +38,7 @@ export type RenderItem =
       toolUseId: string
       input: AskUserQuestionInput
     }
-  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage; cost?: number }
+  | { kind: 'turn_end'; key: string; isError: boolean; usage?: TokenUsage; cost?: number; model?: string }
   | {
       kind: 'agent_complete'
       key: string
@@ -245,18 +245,18 @@ function scanIncremental(
         }
         if (!Array.isArray(blocks)) continue
         const hasUsage = usage.input_tokens > 0 || usage.output_tokens > 0
-        // 记录本轮最后一个 text/thinking 的 index（用于挂 usage）
-        let lastContentIdx = -1
+        // 记录该 assistant 消息所有 text/thinking 的 index（用于挂 usage）
+        const contentIndices: number[] = []
         blocks.forEach((block: any, bIdx: number) => {
           const key = `${mIdx}-${bIdx}`
           if (block.type === 'text' && typeof block.text === 'string') {
             items.push({ kind: 'text', key, text: block.text, streaming: false })
-            lastContentIdx = items.length - 1
+            contentIndices.push(items.length - 1)
             return
           }
           if (block.type === 'thinking' && block.thinking) {
             items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
-            lastContentIdx = items.length - 1
+            contentIndices.push(items.length - 1)
             return
           }
           if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
@@ -283,11 +283,13 @@ function scanIncremental(
             return
           }
         })
-        // 把 usage 挂到最后一个 text/thinking item 上，嵌入 AI 气泡
-        if (hasUsage && lastContentIdx >= 0) {
-          const last = items[lastContentIdx]
-          if (last.kind === 'text' || last.kind === 'thinking') {
-            items[lastContentIdx] = { ...last, usage }
+        // 把 usage 挂到该消息的所有 text/thinking item 上
+        if (hasUsage && contentIndices.length > 0) {
+          for (const idx of contentIndices) {
+            const it = items[idx]
+            if (it.kind === 'text' || it.kind === 'thinking') {
+              items[idx] = { ...it, usage }
+            }
           }
         }
         continue
@@ -312,33 +314,24 @@ function scanIncremental(
         const perTurnCost: number | undefined =
           cumulativeCost !== undefined ? cumulativeCost - state.prevSessionTotalCost : undefined
         state.prevSessionTotalCost = cumulativeCost ?? state.prevSessionTotalCost
-        // 回填最后一个 AI text/thinking 的 usage（若尚未从 assistant 消息获取到）
+        // 从 result 消息提取模型名称
+        const resultModel: string | undefined = (message as any).model ?? undefined
+        // 回填本轮 AI text/thinking 的 usage 和 cost（若尚未从 assistant 消息获取到）
         if (turnUsage) {
+          const itemsToUpdate: number[] = []
           for (let j = items.length - 1; j >= 0; j--) {
             const it = items[j]
             if (it.kind === 'text' || it.kind === 'thinking') {
               if (!it.usage) {
-                items[j] = { ...it, usage: turnUsage, cost: perTurnCost }
+                itemsToUpdate.push(j)
               } else if (perTurnCost !== undefined && it.cost === undefined) {
                 items[j] = { ...it, cost: perTurnCost }
               }
-              break
             }
           }
-          // 回填本轮回合的输入 token 到最后一个 user RenderItem（费用由渲染层按 usage 计算）
-          const inputUsage: TokenUsage = {
-            ...emptyTokenUsage,
-            input_tokens:
-              turnUsage.input_tokens +
-              turnUsage.cache_creation_input_tokens +
-              turnUsage.cache_read_input_tokens,
-          }
-          for (let j = items.length - 1; j >= 0; j--) {
+          for (const j of itemsToUpdate) {
             const it = items[j]
-            if (it.kind === 'user') {
-              items[j] = { kind: 'user', key: it.key, rawContent: it.rawContent, usage: inputUsage }
-              break
-            }
+            items[j] = { ...(it as RenderItem & { kind: 'text' | 'thinking' }), usage: turnUsage, cost: perTurnCost }
           }
         }
         state.turnAccUsage = { ...emptyTokenUsage }
@@ -348,6 +341,7 @@ function scanIncremental(
           isError,
           usage: turnUsage,
           cost: perTurnCost,
+          model: resultModel,
         })
         continue
       }

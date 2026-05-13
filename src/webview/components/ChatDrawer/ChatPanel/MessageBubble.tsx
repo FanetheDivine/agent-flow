@@ -410,7 +410,9 @@ function TokenUsageBadge({
         : ''
   return (
     <span className='text-[10px] text-[#6c7086]'>
-      {parts.join(' · ')} tokens{costStr ? ` · ${costStr}` : ''}
+      {model && <span className='font-semibold text-[#a6adc8]'>{model}</span>}
+      {model ? ` · ${parts.join(' · ')} tokens` : parts.join(' · ')} tokens
+      {costStr ? ` · ${costStr}` : ''}
     </span>
   )
 }
@@ -470,16 +472,7 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'user',
-        content: (
-          <div>
-            <Copyable text={copyText}>{node}</Copyable>
-            {item.usage && (
-              <div className='mt-1 text-left'>
-                <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
-              </div>
-            )}
-          </div>
-        ),
+        content: <Copyable text={copyText}>{node}</Copyable>,
       }
     }
     case 'text': {
@@ -492,7 +485,7 @@ function renderItemToBubble(
           <div>
             {content}
             <div className='mt-1'>
-              <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
+              <TokenUsageBadge usage={item.usage} cost={item.cost} />
             </div>
           </div>
         ) : (
@@ -510,16 +503,7 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: item.usage ? (
-          <div>
-            {content}
-            <div className='mt-1'>
-              <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
-            </div>
-          </div>
-        ) : (
-          content
-        ),
+        content,
       }
     }
     case 'ask_user_question': {
@@ -580,6 +564,7 @@ function renderItemToBubble(
       }
     }
     case 'turn_end': {
+      const displayModel = item.model ?? ctx?.model
       return {
         key: item.key,
         role: 'divider',
@@ -589,7 +574,7 @@ function renderItemToBubble(
             <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
             {item.usage && (
               <span className='ml-2'>
-                <TokenUsageBadge usage={item.usage} model={ctx?.model} cost={item.cost} />
+                <TokenUsageBadge usage={item.usage} model={displayModel} cost={item.cost} />
               </span>
             )}
           </span>
