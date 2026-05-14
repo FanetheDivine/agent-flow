@@ -246,7 +246,7 @@ function scanIncremental(
 
       if (message.type === 'assistant') {
         const mid = message.message.id
-        // 移除同 message ID 的 streaming item（防止重复显示）
+        // 同 message ID 的 streaming item 去重（SDK 正常流程）
         const streamingKeys = state.streamingItemKeysByMsgId.get(mid)
         if (streamingKeys && streamingKeys.length > 0) {
           const keySet = new Set(streamingKeys)
@@ -266,7 +266,50 @@ function scanIncremental(
           items.length = writeIdx
           state.streamingItemKeysByMsgId.delete(mid)
         }
+        // 跨 ID 去重：某些模型（如 glm-5.1）会发一条完整重述的 assistant
+        // 消息（stop_reason 为 null），其 message.id 与 streaming 事件不同，
+        // 但包含了之前 streaming 碎片的完整文本。移除所有 trailing streaming
+        // items（无论 ID），用这条完整消息替代。
         const blocks = message.message.content
+        const hasTextContent =
+          Array.isArray(blocks) &&
+          blocks.some(
+            (b: any) =>
+              (b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0) ||
+              (b?.type === 'thinking' && b.thinking && b.thinking.length > 0),
+          )
+        if (hasTextContent) {
+          let trailingStreamingEnd = items.length
+          for (let j = items.length - 1; j >= 0; j--) {
+            const it = items[j]
+            if (it.kind === 'text' || it.kind === 'thinking') {
+              if (it.streaming) {
+                trailingStreamingEnd = j
+              } else {
+                break
+              }
+            } else {
+              break
+            }
+          }
+          if (trailingStreamingEnd < items.length) {
+            for (let j = trailingStreamingEnd; j < items.length; j++) {
+              const it = items[j]
+              if ((it.kind === 'text' || it.kind === 'thinking') && it.streaming) {
+                const oldMsgId = it.key.match(/^(\d+)-/)?.[1]
+                if (oldMsgId && oldMsgId !== mid) {
+                  const keys = state.streamingItemKeysByMsgId.get(oldMsgId)
+                  if (keys) {
+                    const idx = keys.indexOf(it.key)
+                    if (idx !== -1) keys.splice(idx, 1)
+                    if (keys.length === 0) state.streamingItemKeysByMsgId.delete(oldMsgId)
+                  }
+                }
+              }
+            }
+            items.length = trailingStreamingEnd
+          }
+        }
         const usage = extractTokenUsage(message.message.usage)
         // 累加到回合 usage
         if (usage.input_tokens > 0 || usage.output_tokens > 0) {
@@ -274,17 +317,24 @@ function scanIncremental(
         }
         if (!Array.isArray(blocks)) continue
         const hasUsage = usage.input_tokens > 0 || usage.output_tokens > 0
+        // 检测该 assistant 消息是否已完成（stop_reason 非 null 表示最终消息）
+        const isFinal = !!(message.message as any)?.stop_reason
         // 记录该 assistant 消息所有 text/thinking 的 index（用于挂 usage）
         const contentIndices: number[] = []
+        const completeMsgStreamingKeys: string[] = []
         blocks.forEach((block: any, bIdx: number) => {
           const key = `${mIdx}-${bIdx}`
           if (block.type === 'text' && typeof block.text === 'string') {
-            items.push({ kind: 'text', key, text: block.text, streaming: false })
+            const streaming = !isFinal
+            items.push({ kind: 'text', key, text: block.text, streaming })
+            if (streaming) completeMsgStreamingKeys.push(key)
             contentIndices.push(items.length - 1)
             return
           }
           if (block.type === 'thinking' && block.thinking) {
-            items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
+            const streaming = !isFinal
+            items.push({ kind: 'thinking', key, text: block.thinking, streaming })
+            if (streaming) completeMsgStreamingKeys.push(key)
             contentIndices.push(items.length - 1)
             return
           }
@@ -312,6 +362,10 @@ function scanIncremental(
             return
           }
         })
+        // 注册完整消息的 streaming keys（stop_reason 为 null 时表示仍在生成中）
+        if (completeMsgStreamingKeys.length > 0) {
+          state.streamingItemKeysByMsgId.set(mid, completeMsgStreamingKeys)
+        }
         // 把 usage 挂到该消息的所有 text/thinking item 上
         if (hasUsage && contentIndices.length > 0) {
           for (const idx of contentIndices) {
