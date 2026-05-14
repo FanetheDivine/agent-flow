@@ -397,8 +397,12 @@ function scanIncremental(
         const perTurnCost: number | undefined =
           cumulativeCost !== undefined ? cumulativeCost - state.prevSessionTotalCost : undefined
         state.prevSessionTotalCost = cumulativeCost ?? state.prevSessionTotalCost
-        // 从 result 消息提取模型名称
-        const resultModel: string | undefined = (message as any).model ?? undefined
+        // 从 result 消息的 modelUsage 提取模型名称
+        const modelUsage = (message as any).modelUsage
+        const resultModel: string | undefined =
+          modelUsage && typeof modelUsage === 'object' && Object.keys(modelUsage).length > 0
+            ? Object.keys(modelUsage).join(', ')
+            : undefined
         // 回填本轮 AI text/thinking 的 usage 和 cost（若尚未从 assistant 消息获取到）
         if (turnUsage) {
           const itemsToUpdate: number[] = []
