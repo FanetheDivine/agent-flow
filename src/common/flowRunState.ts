@@ -166,8 +166,8 @@ export type FlowRunState = {
   sessions: AgentSession[]
   /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
   answeredQuestions: Record<string, AskUserQuestionOutput>
-  /** 当前未回答的 AskUserQuestion，显式存储（不从消息反推） */
-  pendingQuestion?: PendingQuestion
+  /** 当前未回答的 AskUserQuestion 队列（按出现顺序），显式存储（不从消息反推） */
+  pendingQuestions: PendingQuestion[]
   /** 已回答的工具权限请求：toolUseId -> allow，用于 UI 回显历史态 */
   answeredToolPermissions: Record<string, { allow: boolean }>
   /** 当前未回答的工具权限请求 */
@@ -228,6 +228,7 @@ export function updateFlowRunState(
         answeredQuestions: {},
         answeredToolPermissions: {},
         currentAgentId: msg.data.agentId,
+        pendingQuestions: [],
         shareValues: {},
       },
       effects,
@@ -253,7 +254,7 @@ export function updateFlowRunState(
   const next = produce(state, (draft) => {
     const flowId = msg.data.flowId
     const clearPendings = () => {
-      draft.pendingQuestion = undefined
+      draft.pendingQuestions = []
       draft.pendingToolPermission = undefined
     }
 
@@ -300,7 +301,7 @@ export function updateFlowRunState(
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
-    const prevPendingToolUseId = draft.pendingQuestion?.toolUseId
+    const prevPendingToolUseId = draft.pendingQuestions[0]?.toolUseId
 
     match(msg)
       // ── signals ──────────────────────────────────────────────
@@ -308,25 +309,32 @@ export function updateFlowRunState(
         const { message } = m.data
         if (message.type === 'result') {
           draft.phase = 'result'
-          if (!draft.pendingQuestion && currentAgentId) {
+          if (draft.pendingQuestions.length === 0 && currentAgentId) {
             pushEffect({ flowId, agentId: currentAgentId, reason: 'result' })
           }
           return
         }
         if (session) {
-          const found = extractPendingQuestion(m, draft.answeredQuestions, session.sessionId)
-          if (found) {
-            draft.pendingQuestion = found
+          const found = extractPendingQuestions(m, draft.answeredQuestions, session.sessionId)
+          if (found.length > 0) {
+            // 追加到队列尾部（去重：已存在的 toolUseId 不重复加入）
+            const existingIds = new Set(draft.pendingQuestions.map((q) => q.toolUseId))
+            for (const q of found) {
+              if (!existingIds.has(q.toolUseId)) {
+                draft.pendingQuestions.push(q)
+                existingIds.add(q.toolUseId)
+              }
+            }
             draft.phase = 'awaiting-question'
             // 只在从无 pending 或换到新 toolUseId 时才通知
-            if (found.toolUseId !== prevPendingToolUseId) {
+            if (found[0].toolUseId !== prevPendingToolUseId) {
               pushEffect({ flowId, agentId: session.agentId, reason: 'awaiting-question' })
             }
             return
           }
         }
         // 只在没有未回答的提问/权限请求时才设为 running
-        if (!draft.pendingQuestion && !draft.pendingToolPermission) {
+        if (draft.pendingQuestions.length === 0 && !draft.pendingToolPermission) {
           draft.phase = 'running'
         }
       })
@@ -407,10 +415,14 @@ export function updateFlowRunState(
       })
       .with({ type: 'flow.command.answerQuestion' }, ({ data }) => {
         draft.answeredQuestions[data.toolUseId] = data.output
-        if (draft.pendingQuestion?.toolUseId === data.toolUseId) {
-          draft.pendingQuestion = undefined
+        // 从队列中移除已回答的问题
+        draft.pendingQuestions = draft.pendingQuestions.filter(
+          (q) => q.toolUseId !== data.toolUseId,
+        )
+        // 如果队列中还有待回答问题，保持 awaiting-question 状态
+        if (draft.pendingQuestions.length === 0) {
+          draft.phase = 'running'
         }
-        draft.phase = 'running'
       })
       .with({ type: 'flow.command.toolPermissionResult' }, ({ data }) => {
         draft.answeredToolPermissions[data.toolUseId] = { allow: data.allow }
@@ -430,24 +442,25 @@ export function updateFlowRunState(
 
 // ── 内部辅助 ─────────────────────────────────────────────────────────────────
 
-/** 从 assistant 消息中抽取首个未回答的 AskUserQuestion */
-function extractPendingQuestion(
+/** 从 assistant 消息中抽取所有未回答的 AskUserQuestion */
+function extractPendingQuestions(
   msg: Extract<ExtensionToWebviewMessage, { type: 'flow.signal.aiMessage' }>,
   answered: Record<string, AskUserQuestionOutput>,
   sessionId: string,
-): PendingQuestion | undefined {
+): PendingQuestion[] {
   const m = msg.data.message
-  if (m.type !== 'assistant') return undefined
+  if (m.type !== 'assistant') return []
   const blocks = m.message.content
-  if (!Array.isArray(blocks)) return undefined
+  if (!Array.isArray(blocks)) return []
+  const result: PendingQuestion[] = []
   for (const block of blocks) {
     if (block.type !== 'tool_use' || block.name !== 'AskUserQuestion') continue
     if (answered[block.id]) continue
     const input = block.input as AskUserQuestionInput | undefined
     if (!input || !Array.isArray(input.questions)) continue
-    return { toolUseId: block.id, input, sessionId }
+    result.push({ toolUseId: block.id, input, sessionId })
   }
-  return undefined
+  return result
 }
 
 // ── UI helper ────────────────────────────────────────────────────────────────

@@ -71,7 +71,15 @@ export const selectPendingQuestionFor =
   (s: StoreState): PendingQuestion | undefined => {
     const fs = selectFlowRunState(flowId)(s)
     if (!fs || fs.currentAgentId !== agentId) return undefined
-    return fs.pendingQuestion
+    return fs.pendingQuestions[0]
+  }
+const EMPTY_ARRAY: any[] = []
+export const selectPendingQuestionsFor =
+  (flowId: string, agentId: string) =>
+  (s: StoreState): PendingQuestion[] => {
+    const fs = selectFlowRunState(flowId)(s)
+    if (!fs || fs.currentAgentId !== agentId) return EMPTY_ARRAY
+    return fs.pendingQuestions
   }
 
 export const selectPendingToolPermissionFor =

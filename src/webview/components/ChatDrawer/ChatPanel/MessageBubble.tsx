@@ -44,6 +44,8 @@ export type AnsweredInfo = {
 
 export type BubbleCtx = {
   pendingToolUseId?: string
+  /** 所有未回答的 AskUserQuestion toolUseId 集合，用于从消息列表中隐藏 */
+  pendingToolUseIds?: Set<string>
   answeredMap: Map<string, AnsweredInfo>
   onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
   /** 当前挂起的工具权限请求 toolUseId（若有） */
@@ -52,8 +54,6 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
-  /** 当前 Agent 的模型，用于计算费用 */
-  model?: string
 }
 
 type RenderedBubble = {
@@ -515,7 +515,9 @@ function renderItemToBubble(
           content: <AskUserQuestionCard input={item.input} mode='historical' />,
         }
       }
-      const isPending = ctx.pendingToolUseId === item.toolUseId
+      const isPending = ctx.pendingToolUseIds
+        ? ctx.pendingToolUseIds.has(item.toolUseId)
+        : ctx.pendingToolUseId === item.toolUseId
       // pending 卡片不在消息列表中渲染（改为固定在输入框上方），只渲染已回答的历史卡片
       if (isPending) return null
       const answered = ctx.answeredMap.get(item.toolUseId)
@@ -564,7 +566,6 @@ function renderItemToBubble(
       }
     }
     case 'turn_end': {
-      const displayModel = item.model ?? ctx?.model
       return {
         key: item.key,
         role: 'divider',
@@ -574,7 +575,7 @@ function renderItemToBubble(
             <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
             {item.usage && (
               <span className='ml-2'>
-                <TokenUsageBadge usage={item.usage} model={displayModel} cost={item.cost} />
+                <TokenUsageBadge usage={item.usage} model={item.model} cost={item.cost} />
               </span>
             )}
           </span>
