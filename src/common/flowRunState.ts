@@ -50,6 +50,60 @@ export const subtractTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => 
   cache_read_input_tokens: a.cache_read_input_tokens - b.cache_read_input_tokens,
 })
 
+// ── ModelTokenUsage ───────────────────────────────────────────────────────
+//
+// SDK result.modelUsage 是 Record<modelName, ModelUsage>（camelCase），自带
+// SDK 算好的 costUSD。webview 不直连 SDK，所以在 common 镜像等价类型 + helper：
+//   - 计算回合增量（当前 modelUsage 累计 - 上一回合累计）
+//   - 在 agent_complete 上展示 session 累计 breakdown
+
+export type ModelTokenUsage = {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  costUSD: number
+}
+
+export const emptyModelTokenUsage: ModelTokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  costUSD: 0,
+}
+
+export const extractModelTokenUsage = (u: {
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUSD?: number
+}): ModelTokenUsage => ({
+  inputTokens: u.inputTokens ?? 0,
+  outputTokens: u.outputTokens ?? 0,
+  cacheCreationInputTokens: u.cacheCreationInputTokens ?? 0,
+  cacheReadInputTokens: u.cacheReadInputTokens ?? 0,
+  costUSD: u.costUSD ?? 0,
+})
+
+export const subtractModelTokenUsage = (
+  a: ModelTokenUsage,
+  b: ModelTokenUsage,
+): ModelTokenUsage => ({
+  inputTokens: a.inputTokens - b.inputTokens,
+  outputTokens: a.outputTokens - b.outputTokens,
+  cacheCreationInputTokens: a.cacheCreationInputTokens - b.cacheCreationInputTokens,
+  cacheReadInputTokens: a.cacheReadInputTokens - b.cacheReadInputTokens,
+  costUSD: a.costUSD - b.costUSD,
+})
+
+export const isModelTokenUsageNonZero = (u: ModelTokenUsage): boolean =>
+  u.inputTokens > 0 ||
+  u.outputTokens > 0 ||
+  u.cacheCreationInputTokens > 0 ||
+  u.cacheReadInputTokens > 0
+
 // ── Token 定价与费用 ─────────────────────────────────────────────────────
 
 export type TokenPricing = {

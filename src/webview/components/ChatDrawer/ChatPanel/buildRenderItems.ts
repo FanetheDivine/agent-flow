@@ -1,29 +1,20 @@
 import { match } from 'ts-pattern'
 import type { AskUserQuestionInput, ExtensionToWebviewMessage } from '@/common'
-import { addTokenUsage, emptyTokenUsage, extractTokenUsage, type TokenUsage } from '@/common'
+import {
+  extractModelTokenUsage,
+  isModelTokenUsageNonZero,
+  subtractModelTokenUsage,
+  type ModelTokenUsage,
+} from '@/common'
 
 // ── 类型 ──────────────────────────────────────────────────────────────────
 
 export type ToolResult = { isError: boolean; text: string }
 
 export type RenderItem =
-  | { kind: 'user'; key: string; rawContent: unknown; usage?: TokenUsage; cost?: number }
-  | {
-      kind: 'text'
-      key: string
-      text: string
-      streaming: boolean
-      usage?: TokenUsage
-      cost?: number
-    }
-  | {
-      kind: 'thinking'
-      key: string
-      text: string
-      streaming: boolean
-      usage?: TokenUsage
-      cost?: number
-    }
+  | { kind: 'user'; key: string; rawContent: unknown }
+  | { kind: 'text'; key: string; text: string; streaming: boolean }
+  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
   | {
       kind: 'tool_use'
       key: string
@@ -42,39 +33,28 @@ export type RenderItem =
       kind: 'turn_end'
       key: string
       isError: boolean
-      usage?: TokenUsage
-      cost?: number
-      model?: string
+      /** 本回合（自上一条 result 之后）每模型 token 用量增量，多模型分多行展示 */
+      modelUsages?: Array<{ model: string; usage: ModelTokenUsage }>
     }
   | {
       kind: 'agent_complete'
       key: string
       outputName?: string
       displayContent?: string
+      /** 截至本 session 结束的 token 累计（按模型拆分），来自最后一条 result.modelUsage */
+      modelBreakdown?: Array<{ model: string; usage: ModelTokenUsage }>
+      /** 截至本 session 结束的总成本，来自最后一条 result.total_cost_usd */
+      totalCost?: number
     }
-
-type StreamingBlock = { type: 'text' | 'thinking'; content: string }
-type PartialMessage = { mIdx: number; blocks: Map<number, StreamingBlock> }
-
-type ScanState = {
-  items: RenderItem[]
-  seenToolUseIds: Set<string>
-  toolUseIdToResult: Map<string, ToolResult>
-  completedBlockCounts: Map<string, { thinking: number; text: number }>
-  renderedAssistantTexts: Set<string>
-  partialsByMessageId: Map<string, PartialMessage>
-  currentRenderingPartialMsgId: string | null
-  partialBlockSeen: Map<string, { thinking: number; text: number }>
-  streamingItemKeysByMsgId: Map<string, string[]>
-  /** 当前回合内累加的 assistant 消息 usage */
-  turnAccUsage: TokenUsage
-  /** 上一个 session 的 result 累计费用，用于计算 per-turn 费用差值 */
-  prevSessionTotalCost: number
-}
 
 type CacheEntry = {
   nextScanStart: number
-  state: ScanState
+  items: RenderItem[]
+  pendingTooluse: Record<string, number>
+  /** 上一条 result 的 modelUsage 累计（per model）—— 用于计算本回合增量 */
+  prevModelUsage: Record<string, ModelTokenUsage>
+  /** 截至最近一条 result 的 total_cost_usd（session 累计成本） */
+  lastTotalCost: number
 }
 
 // ── 缓存 ─────────────────────────────────────────────────────────────────
@@ -115,396 +95,198 @@ function extractToolResultText(content: unknown): string {
   return ''
 }
 
+/** 把 SDK result.modelUsage 规整为 Record<model, ModelTokenUsage>（剔除非对象项） */
+function readResultModelUsage(message: unknown): Record<string, ModelTokenUsage> {
+  const raw = (message as any)?.modelUsage
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, ModelTokenUsage> = {}
+  for (const [model, value] of Object.entries(raw)) {
+    if (value && typeof value === 'object') {
+      out[model] = extractModelTokenUsage(value as Record<string, number>)
+    }
+  }
+  return out
+}
+
 // ── 核心构建 ─────────────────────────────────────────────────────────────
 
-function scanIncremental(
-  msgs: ExtensionToWebviewMessage[],
-  nextScanStart: number,
-  state: ScanState,
-): void {
-  const {
-    items,
-    seenToolUseIds,
-    toolUseIdToResult,
-    completedBlockCounts,
-    renderedAssistantTexts,
-    partialsByMessageId,
-    partialBlockSeen,
-  } = state
-
-  // ── 第一遍（增量）：辅助索引 ─────────────────────────────────────────
-  let currentPartialMsgId: string | null = state.currentRenderingPartialMsgId
+function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry): void {
+  const { items, pendingTooluse, nextScanStart } = cached
 
   for (let i = nextScanStart; i < msgs.length; i++) {
+    const mIdx = i
     const msg = msgs[i]
+
+    if (msg.type === 'flow.signal.agentComplete') {
+      const data = msg.data
+      // session 结束时把缓存里累计到此刻的 modelUsage / total_cost 作为 breakdown
+      // 写到 agent_complete 项上（"session 结束"后展示按模型分布）
+      const modelBreakdown = Object.entries(cached.prevModelUsage)
+        .map(([model, usage]) => ({ model, usage }))
+        .filter((b) => isModelTokenUsageNonZero(b.usage) || b.usage.costUSD > 0)
+      items.push({
+        kind: 'agent_complete',
+        key: `${mIdx}-complete`,
+        outputName: data.output?.name,
+        displayContent: data.content,
+        modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
+        totalCost: cached.lastTotalCost > 0 ? cached.lastTotalCost : undefined,
+      })
+      continue
+    }
+
     if (msg.type !== 'flow.signal.aiMessage') continue
     const { message } = msg.data
 
     if (message.type === 'user') {
       const rawContent = message.message.content
-      if (!Array.isArray(rawContent)) continue
-      rawContent.forEach((block: any) => {
-        if (block?.type === 'tool_result' && block.tool_use_id) {
-          const text = extractToolResultText(block.content)
-          if (text) {
-            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
+      if (
+        Array.isArray(rawContent) &&
+        rawContent.every((b: any) => b && typeof b === 'object' && b.type === 'tool_result')
+      ) {
+        // tool_result：通过 pendingTooluse 定位对应 tool_use 项并填充 result
+        rawContent.forEach((block: any) => {
+          if (block?.type !== 'tool_result' || !block.tool_use_id) return
+          const idx = pendingTooluse[block.tool_use_id]
+          if (idx === undefined) return
+          const item = items[idx]
+          if (item && item.kind === 'tool_use') {
+            items[idx] = {
+              ...item,
+              result: {
+                isError: !!block.is_error,
+                text: extractToolResultText(block.content),
+              },
+            }
           }
+          delete pendingTooluse[block.tool_use_id]
+        })
+        continue
+      }
+      if (message.isSynthetic) continue
+      if (message.parent_tool_use_id) continue
+      items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
+      continue
+    }
+
+    if (message.type === 'assistant') {
+      const blocks = message.message.content
+      if (!Array.isArray(blocks)) continue
+
+      // 完整消息到达：移除尾部所有 streaming text/thinking 占位项
+      while (items.length > 0) {
+        const last = items[items.length - 1]
+        if ((last.kind === 'text' || last.kind === 'thinking') && last.streaming) {
+          items.pop()
+        } else {
+          break
+        }
+      }
+
+      blocks.forEach((block: any, bIdx: number) => {
+        const key = `${mIdx}-${bIdx}`
+        if (block.type === 'text' && typeof block.text === 'string') {
+          items.push({ kind: 'text', key, text: block.text, streaming: false })
+          return
+        }
+        if (block.type === 'thinking' && block.thinking) {
+          items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
+          return
+        }
+        if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
+          const toolName =
+            'server_name' in block ? `${block.server_name}::${block.name}` : block.name
+          if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
+            const input = block.input as AskUserQuestionInput | undefined
+            if (input && Array.isArray(input.questions)) {
+              items.push({ kind: 'ask_user_question', key, toolUseId: block.id, input })
+            }
+            return
+          }
+          items.push({
+            kind: 'tool_use',
+            key,
+            toolUseId: block.id,
+            toolName,
+            input: block.input,
+          })
+          pendingTooluse[block.id] = items.length - 1
+          return
+        }
+        if (block.type === 'mcp_tool_result' && block.tool_use_id) {
+          const idx = pendingTooluse[block.tool_use_id]
+          if (idx === undefined) return
+          const item = items[idx]
+          if (item && item.kind === 'tool_use') {
+            items[idx] = {
+              ...item,
+              result: {
+                isError: !!block.is_error,
+                text: extractToolResultText(block.content),
+              },
+            }
+          }
+          delete pendingTooluse[block.tool_use_id]
+          return
         }
       })
       continue
     }
 
-    if (message.type === 'assistant') {
-      const mid = message.message.id
-      const blocks = message.message.content
-      if (!Array.isArray(blocks)) continue
-      const counts = completedBlockCounts.get(mid) ?? { thinking: 0, text: 0 }
-      blocks.forEach((block: any) => {
-        if (block?.type === 'text' && typeof block.text === 'string') {
-          renderedAssistantTexts.add(block.text)
-          counts.text += 1
+    if (message.type === 'result') {
+      const isError = 'error' in message && !!message.error
+      // result.modelUsage 是 session 累计；本回合增量 = 当前累计 - 上次累计
+      const currModelUsage = readResultModelUsage(message)
+      const modelUsages: Array<{ model: string; usage: ModelTokenUsage }> = []
+      for (const [model, curr] of Object.entries(currModelUsage)) {
+        const prev = cached.prevModelUsage[model]
+        const delta = prev ? subtractModelTokenUsage(curr, prev) : curr
+        if (isModelTokenUsageNonZero(delta) || delta.costUSD > 0) {
+          modelUsages.push({ model, usage: delta })
         }
-        if (block?.type === 'thinking') {
-          counts.thinking += 1
-        }
-        if (block?.type === 'mcp_tool_result' && block.tool_use_id) {
-          const text = extractToolResultText(block.content)
-          if (text) {
-            toolUseIdToResult.set(block.tool_use_id, { isError: !!block.is_error, text })
-          }
-        }
+      }
+      // 用本条 result 的累计快照覆盖 prev，供下回合计算增量
+      cached.prevModelUsage = currModelUsage
+      const cost = (message as any).total_cost_usd
+      if (typeof cost === 'number') cached.lastTotalCost = cost
+
+      items.push({
+        kind: 'turn_end',
+        key: `${mIdx}-result`,
+        isError,
+        modelUsages: modelUsages.length > 0 ? modelUsages : undefined,
       })
-      completedBlockCounts.set(mid, counts)
       continue
     }
 
     if (message.type === 'stream_event') {
       const event = message.event as any
-      if (event?.type === 'message_start') {
-        const id = event.message?.id
-        if (typeof id !== 'string') continue
-        currentPartialMsgId = id
-        if (!partialsByMessageId.has(id)) {
-          partialsByMessageId.set(id, { mIdx: i, blocks: new Map() })
-        }
-        continue
-      }
-      if (!currentPartialMsgId) continue
-      const partial = partialsByMessageId.get(currentPartialMsgId)
-      if (!partial) continue
-      if (event?.type === 'content_block_start') {
-        const cb = event.content_block
-        if (cb?.type === 'thinking') {
-          partial.blocks.set(event.index, { type: 'thinking', content: cb.thinking ?? '' })
-        } else if (cb?.type === 'text') {
-          partial.blocks.set(event.index, { type: 'text', content: cb.text ?? '' })
-        }
-      } else if (event?.type === 'content_block_delta') {
-        const existing = partial.blocks.get(event.index)
-        if (!existing) continue
-        const delta = event.delta
-        if (delta?.type === 'thinking_delta') existing.content += delta.thinking
-        else if (delta?.type === 'text_delta') existing.content += delta.text
-      } else if (event?.type === 'message_stop') {
-        currentPartialMsgId = null
-      }
-    }
-  }
-
-  // ── 更新已有 tool_use 项的 result ────────────────────────────────────
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    if (item.kind === 'tool_use' && !item.result) {
-      const result = toolUseIdToResult.get(item.toolUseId)
-      if (result) {
-        items[i] = { ...item, result }
-      }
-    }
-  }
-
-  // ── 第二遍（增量）：按时序生成 RenderItem ─────────────────────────────
-  for (let i = nextScanStart; i < msgs.length; i++) {
-    const mIdx = i
-    const msg = msgs[i]
-
-    if (msg.type === 'flow.signal.aiMessage') {
-      const { message } = msg.data
-
-      if (message.type === 'user') {
-        const rawContent = message.message.content
-        if (
-          Array.isArray(rawContent) &&
-          rawContent.every((b) => b && typeof b === 'object' && b.type === 'tool_result')
-        ) {
-          continue
-        }
-        if (message.isSynthetic) continue
-        if (message.parent_tool_use_id) continue
-        items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
-        continue
-      }
-
-      if (message.type === 'assistant') {
-        const mid = message.message.id
-        // 提前计算 final 消息中是否包含对应 kind 的非空内容（同 ID 去重和跨 ID 去重共用）
-        const blocks = message.message.content
-        const finalHasText =
-          Array.isArray(blocks) &&
-          blocks.some(
-            (b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
-          )
-        const finalHasThinking =
-          Array.isArray(blocks) &&
-          blocks.some(
-            (b: any) => b?.type === 'thinking' && b.thinking && b.thinking.length > 0,
-          )
-        // 同 message ID 的 streaming item 去重（SDK 正常流程）
-        // 与下方跨 ID 去重保持一致：按 kind 分别判断，仅当 final 消息中确实有
-        // 对应类型非空内容时才删除对应 kind 的 streaming item；否则保留
-        // （避免如 final thinking 字段缺失时，streaming 阶段产出的 thinking 被一并抹掉）。
-        const streamingKeys = state.streamingItemKeysByMsgId.get(mid)
-        if (streamingKeys && streamingKeys.length > 0) {
-          const keySet = new Set(streamingKeys)
-          const remainingKeys: string[] = []
-          let writeIdx = 0
-          for (let readIdx = 0; readIdx < items.length; readIdx++) {
-            const item = items[readIdx]
-            if (
-              (item.kind === 'text' || item.kind === 'thinking') &&
-              item.streaming &&
-              keySet.has(item.key)
-            ) {
-              const shouldRemove =
-                (item.kind === 'text' && finalHasText) ||
-                (item.kind === 'thinking' && finalHasThinking)
-              if (shouldRemove) continue
-              remainingKeys.push(item.key)
-            }
-            items[writeIdx] = items[readIdx]
-            writeIdx++
-          }
-          items.length = writeIdx
-          if (remainingKeys.length === 0) {
-            state.streamingItemKeysByMsgId.delete(mid)
-          } else {
-            state.streamingItemKeysByMsgId.set(mid, remainingKeys)
-          }
-        }
-        // 跨 ID 去重：某些模型（如 glm-5.1）会发一条完整重述的 assistant
-        // 消息（stop_reason 为 null），其 message.id 与 streaming 事件不同，
-        // 但包含了之前 streaming 碎片的完整文本。
-        // 按 kind 分别判断：仅当 final 消息中确实包含对应类型的非空块时,才
-        // 删除 trailing streaming 项；否则保留(避免如 thinking 字段缺失时
-        // streaming 阶段产出的思考内容被一并抹掉)。
-        if (finalHasText || finalHasThinking) {
-          // 从尾部往前扫 trailing streaming items，按 kind 决定是否删除；
-          // 遇到非 text/thinking 项或非 streaming 的 text/thinking 项就停。
-          for (let j = items.length - 1; j >= 0; j--) {
-            const it = items[j]
-            if (it.kind !== 'text' && it.kind !== 'thinking') break
-            if (!it.streaming) break
-            const shouldRemove =
-              (it.kind === 'text' && finalHasText) ||
-              (it.kind === 'thinking' && finalHasThinking)
-            if (!shouldRemove) continue
-            const oldMsgId = it.key.match(/^(\d+)-/)?.[1]
-            if (oldMsgId && oldMsgId !== mid) {
-              const keys = state.streamingItemKeysByMsgId.get(oldMsgId)
-              if (keys) {
-                const idx = keys.indexOf(it.key)
-                if (idx !== -1) keys.splice(idx, 1)
-                if (keys.length === 0) state.streamingItemKeysByMsgId.delete(oldMsgId)
-              }
-            }
-            items.splice(j, 1)
-          }
-        }
-        const usage = extractTokenUsage(message.message.usage)
-        // 累加到回合 usage
-        if (usage.input_tokens > 0 || usage.output_tokens > 0) {
-          state.turnAccUsage = addTokenUsage(state.turnAccUsage, usage)
-        }
-        if (!Array.isArray(blocks)) continue
-        const hasUsage = usage.input_tokens > 0 || usage.output_tokens > 0
-        // 检测该 assistant 消息是否已完成（stop_reason 非 null 表示最终消息）
-        const isFinal = !!(message.message as any)?.stop_reason
-        // 记录该 assistant 消息所有 text/thinking 的 index（用于挂 usage）
-        const contentIndices: number[] = []
-        const completeMsgStreamingKeys: string[] = []
-        blocks.forEach((block: any, bIdx: number) => {
-          const key = `${mIdx}-${bIdx}`
-          if (block.type === 'text' && typeof block.text === 'string') {
-            const streaming = !isFinal
-            items.push({ kind: 'text', key, text: block.text, streaming })
-            if (streaming) completeMsgStreamingKeys.push(key)
-            contentIndices.push(items.length - 1)
-            return
-          }
-          if (block.type === 'thinking' && block.thinking) {
-            const streaming = !isFinal
-            items.push({ kind: 'thinking', key, text: block.thinking, streaming })
-            if (streaming) completeMsgStreamingKeys.push(key)
-            contentIndices.push(items.length - 1)
-            return
-          }
-          if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
-            if (seenToolUseIds.has(block.id)) return
-            seenToolUseIds.add(block.id)
-            const toolName =
-              'server_name' in block ? `${block.server_name}::${block.name}` : block.name
-            if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
-              const input = block.input as AskUserQuestionInput | undefined
-              if (input && Array.isArray(input.questions)) {
-                items.push({ kind: 'ask_user_question', key, toolUseId: block.id, input })
-              }
-              return
-            }
-            const result = toolUseIdToResult.get(block.id)
-            items.push({
-              kind: 'tool_use',
-              key,
-              toolUseId: block.id,
-              toolName,
-              input: block.input,
-              result,
-            })
-            return
-          }
-        })
-        // 注册完整消息的 streaming keys（stop_reason 为 null 时表示仍在生成中）
-        if (completeMsgStreamingKeys.length > 0) {
-          state.streamingItemKeysByMsgId.set(mid, completeMsgStreamingKeys)
-        }
-        // 把 usage 挂到该消息的所有 text/thinking item 上
-        if (hasUsage && contentIndices.length > 0) {
-          for (const idx of contentIndices) {
-            const it = items[idx]
-            if (it.kind === 'text' || it.kind === 'thinking') {
-              items[idx] = { ...it, usage }
-            }
-          }
-        }
-        continue
-      }
-
-      if (message.type === 'result') {
-        const isError = 'error' in message && !!message.error
-        // 回合级 usage：优先用累加的 assistant usage，回退到 result.usage
-        const accUsage = state.turnAccUsage
-        const resultUsage = extractTokenUsage((message as any).usage)
-        const turnUsage: TokenUsage | undefined =
-          accUsage.input_tokens > 0 || accUsage.output_tokens > 0
-            ? accUsage
-            : resultUsage.input_tokens > 0 || resultUsage.output_tokens > 0
-              ? resultUsage
-              : undefined
-        // 从 result 消息提取累计费用，计算 per-turn 差值
-        const cumulativeCost: number | undefined =
-          typeof (message as any).total_cost_usd === 'number'
-            ? (message as any).total_cost_usd
-            : undefined
-        const perTurnCost: number | undefined =
-          cumulativeCost !== undefined ? cumulativeCost - state.prevSessionTotalCost : undefined
-        state.prevSessionTotalCost = cumulativeCost ?? state.prevSessionTotalCost
-        // 从 result 消息的 modelUsage 提取模型名称
-        const modelUsage = (message as any).modelUsage
-        const resultModel: string | undefined =
-          modelUsage && typeof modelUsage === 'object' && Object.keys(modelUsage).length > 0
-            ? Object.keys(modelUsage).join(', ')
-            : undefined
-        // 回填本轮 AI text/thinking 的 usage 和 cost（若尚未从 assistant 消息获取到）
-        if (turnUsage) {
-          const itemsToUpdate: number[] = []
-          for (let j = items.length - 1; j >= 0; j--) {
-            const it = items[j]
-            if (it.kind === 'text' || it.kind === 'thinking') {
-              if (!it.usage) {
-                itemsToUpdate.push(j)
-              } else if (perTurnCost !== undefined && it.cost === undefined) {
-                items[j] = { ...it, cost: perTurnCost }
-              }
-            }
-          }
-          for (const j of itemsToUpdate) {
-            const it = items[j]
-            items[j] = {
-              ...(it as RenderItem & { kind: 'text' | 'thinking' }),
-              usage: turnUsage,
-              cost: perTurnCost,
-            }
-          }
-        }
-        state.turnAccUsage = { ...emptyTokenUsage }
-        items.push({
-          kind: 'turn_end',
-          key: `${mIdx}-result`,
-          isError,
-          usage: turnUsage,
-          cost: perTurnCost,
-          model: resultModel,
-        })
-        continue
-      }
-
-      if (message.type === 'stream_event') {
-        const event = message.event as any
-        if (event?.type === 'message_start') {
-          const id = event.message?.id
-          if (typeof id === 'string') state.currentRenderingPartialMsgId = id
-          continue
-        }
-        if (event?.type === 'message_stop') {
-          state.currentRenderingPartialMsgId = null
-          continue
-        }
-        if (event?.type !== 'content_block_start') continue
-        if (!state.currentRenderingPartialMsgId) continue
-        const partial = partialsByMessageId.get(state.currentRenderingPartialMsgId)
-        if (!partial) continue
-        const cbType = event.content_block?.type
-        const blockType: 'text' | 'thinking' | null =
-          cbType === 'text' ? 'text' : cbType === 'thinking' ? 'thinking' : null
-        if (!blockType) continue
-        const seen = partialBlockSeen.get(state.currentRenderingPartialMsgId) ?? {
-          thinking: 0,
-          text: 0,
-        }
-        seen[blockType] += 1
-        partialBlockSeen.set(state.currentRenderingPartialMsgId, seen)
-        const completed = completedBlockCounts.get(state.currentRenderingPartialMsgId) ?? {
-          thinking: 0,
-          text: 0,
-        }
-        if (seen[blockType] <= completed[blockType]) continue
-        const block = partial.blocks.get(event.index)
-        if (!block || !block.content) continue
-        const key = `${mIdx}-streaming-${event.index}`
-        if (block.type === 'text') {
-          items.push({ kind: 'text', key, text: block.content, streaming: true })
+      if (event?.type !== 'content_block_delta') continue
+      const delta = event.delta
+      if (!delta) continue
+      const blockType: 'text' | 'thinking' | null =
+        delta.type === 'text_delta'
+          ? 'text'
+          : delta.type === 'thinking_delta'
+            ? 'thinking'
+            : null
+      if (!blockType) continue
+      const deltaText: string =
+        delta.type === 'text_delta' ? delta.text ?? '' : delta.thinking ?? ''
+      if (!deltaText) continue
+      // 累加到最后一条同类型 streaming 项；否则新建
+      const last = items[items.length - 1]
+      if (last && last.kind === blockType && last.streaming) {
+        items[items.length - 1] = { ...last, text: last.text + deltaText }
+      } else {
+        const key = `${mIdx}-streaming-${event.index ?? 0}`
+        if (blockType === 'text') {
+          items.push({ kind: 'text', key, text: deltaText, streaming: true })
         } else {
-          items.push({ kind: 'thinking', key, text: block.content, streaming: true })
+          items.push({ kind: 'thinking', key, text: deltaText, streaming: true })
         }
-        const msgId = state.currentRenderingPartialMsgId
-        if (msgId) {
-          const keys = state.streamingItemKeysByMsgId.get(msgId) ?? []
-          keys.push(key)
-          state.streamingItemKeysByMsgId.set(msgId, keys)
-        }
-        continue
       }
       continue
-    }
-
-    if (msg.type === 'flow.signal.agentComplete') {
-      const data = msg.data
-      const contentAlreadyShown = !!(data.content && renderedAssistantTexts.has(data.content))
-      const displayContent = contentAlreadyShown ? undefined : data.content
-      items.push({
-        kind: 'agent_complete',
-        key: `${mIdx}-complete`,
-        outputName: data.output?.name,
-        displayContent,
-      })
     }
   }
 }
@@ -524,19 +306,10 @@ export function buildRenderItems(
     .with(false, () => {
       cache.set(sessionId, {
         nextScanStart: 0,
-        state: {
-          items: [],
-          seenToolUseIds: new Set(),
-          toolUseIdToResult: new Map(),
-          completedBlockCounts: new Map(),
-          renderedAssistantTexts: new Set(),
-          partialsByMessageId: new Map(),
-          currentRenderingPartialMsgId: null,
-          partialBlockSeen: new Map(),
-          streamingItemKeysByMsgId: new Map(),
-          turnAccUsage: { ...emptyTokenUsage },
-          prevSessionTotalCost: 0,
-        },
+        items: [],
+        pendingTooluse: {},
+        prevModelUsage: {},
+        lastTotalCost: 0,
       })
       return cache.get(sessionId)!
     })
@@ -544,14 +317,10 @@ export function buildRenderItems(
 
   // 消息未增长 → 直接返回缓存
   if (cached.nextScanStart === msgs.length) {
-    return cached.state.items
+    return cached.items
   }
 
-  const nextScanStart = cached.nextScanStart
-
-  scanIncremental(msgs, nextScanStart, cached.state)
-
+  scanIncremental(msgs, cached)
   cached.nextScanStart = msgs.length
-
-  return cached.state.items
+  return cached.items
 }

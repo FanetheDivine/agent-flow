@@ -13,8 +13,8 @@ import { CheckCircleOutlined, CheckOutlined, CopyOutlined } from '@ant-design/ic
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
 import mermaid from 'mermaid'
-import type { AskUserQuestionOutput, ExtensionToWebviewMessage, TokenUsage } from '@/common'
-import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
+import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
+import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
@@ -348,35 +348,23 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
-function TokenUsageBadge({
-  usage,
-  model,
-  cost,
-}: {
-  usage: TokenUsage
-  model?: string
-  cost?: number
-}) {
+/** 单条按模型 token 用量行：模型名 + in/out/cache write/cache read + cost */
+function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage }) {
   const parts: string[] = []
-  if (usage.input_tokens > 0) parts.push(`in ${formatTokenCount(usage.input_tokens)}`)
-  if (usage.output_tokens > 0) parts.push(`out ${formatTokenCount(usage.output_tokens)}`)
-  if (usage.cache_creation_input_tokens > 0)
-    parts.push(`cache write ${formatTokenCount(usage.cache_creation_input_tokens)}`)
-  if (usage.cache_read_input_tokens > 0)
-    parts.push(`cache read ${formatTokenCount(usage.cache_read_input_tokens)}`)
-  if (parts.length === 0) return null
-  const costStr =
-    cost !== undefined
-      ? formatTokenCost(cost)
-      : model
-        ? formatTokenCost(calculateTokenCost(usage, model))
-        : ''
+  if (usage.inputTokens > 0) parts.push(`in ${formatTokenCount(usage.inputTokens)}`)
+  if (usage.outputTokens > 0) parts.push(`out ${formatTokenCount(usage.outputTokens)}`)
+  if (usage.cacheCreationInputTokens > 0)
+    parts.push(`cache write ${formatTokenCount(usage.cacheCreationInputTokens)}`)
+  if (usage.cacheReadInputTokens > 0)
+    parts.push(`cache read ${formatTokenCount(usage.cacheReadInputTokens)}`)
+  const tokensText = parts.length > 0 ? `${parts.join(' · ')} tokens` : ''
+  const costStr = usage.costUSD > 0 ? formatTokenCost(usage.costUSD) : ''
   return (
-    <span className='text-[10px] text-[#6c7086]'>
-      {model && <span className='font-semibold text-[#a6adc8]'>{model}</span>}
-      {model ? ` · ${parts.join(' · ')} tokens` : parts.join(' · ')} tokens
+    <div className='text-[10px] text-[#6c7086]'>
+      <span className='font-semibold text-[#a6adc8]'>{model}</span>
+      {tokensText ? ` · ${tokensText}` : ''}
       {costStr ? ` · ${costStr}` : ''}
-    </span>
+    </div>
   )
 }
 
@@ -400,16 +388,7 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: item.usage ? (
-          <div>
-            {content}
-            <div className='mt-1'>
-              <TokenUsageBadge usage={item.usage} cost={item.cost} />
-            </div>
-          </div>
-        ) : (
-          content
-        ),
+        content,
       }
     }
     case 'thinking': {
@@ -493,19 +472,20 @@ function renderItemToBubble(
       }
     }
     case 'turn_end': {
+      const modelUsages = item.modelUsages ?? []
       return {
         key: item.key,
         role: 'divider',
         content: (
-          <span className='text-[10px] text-[#6c7086]'>
-            <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-            <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
-            {item.usage && (
-              <span className='ml-2'>
-                <TokenUsageBadge usage={item.usage} model={item.model} cost={item.cost} />
-              </span>
-            )}
-          </span>
+          <div className='flex flex-col gap-0.5'>
+            {modelUsages.map((m) => (
+              <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
+            ))}
+            <span className='text-[10px] text-[#6c7086]'>
+              <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
+              <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+            </span>
+          </div>
         ),
       }
     }
@@ -516,6 +496,7 @@ function renderItemToBubble(
       ]
         .filter(Boolean)
         .join('\n')
+      const breakdown = item.modelBreakdown ?? []
       return {
         key: item.key,
         role: 'ai',
@@ -528,6 +509,19 @@ function renderItemToBubble(
               {item.displayContent && (
                 <div className='mt-2'>
                   <Md content={item.displayContent} />
+                </div>
+              )}
+              {(breakdown.length > 0 || item.totalCost !== undefined) && (
+                <div className='mt-2 border-t border-[#45475a] pt-2'>
+                  <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
+                  {breakdown.map((b) => (
+                    <ModelUsageRow key={b.model} model={b.model} usage={b.usage} />
+                  ))}
+                  {item.totalCost !== undefined && item.totalCost > 0 && (
+                    <div className='mt-1 text-[10px] text-[#a6adc8]'>
+                      合计 {formatTokenCost(item.totalCost)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -57,6 +57,12 @@ export class ClaudeExecutor {
   private queryInstance: Query | null = null
   private completed = false
   private disposed = false
+  /**
+   * MCP 端 AgentComplete 工具触发后暂存 result，等本回合的 SDK result 消息到达再
+   * fire onComplete。否则上层立即 killCurrentExecutor，最后一条 result（含
+   * modelUsage / total_cost_usd）会被吞掉。
+   */
+  private pendingCompleteResult: ExecutorResult | null = null
 
   private _sessionId: string | null = null
   private events: ExecutorEvents
@@ -124,6 +130,9 @@ export class ClaudeExecutor {
    */
   async interrupt() {
     if (!this.queryInstance) return
+    // 中断时丢弃尚未通知上层的 AgentComplete pending —— 用户主动打断意味着
+    // 不要继续切到下一个 agent / 完成 flow。
+    this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('interrupted')
     await this.queryInstance.interrupt()
     // 关闭进程
@@ -134,6 +143,7 @@ export class ClaudeExecutor {
   /** 终止执行，销毁 executor */
   kill(): void {
     this.disposed = true
+    this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
     this.mcpServer?.instance.close().catch((err) => {
@@ -238,13 +248,12 @@ export class ClaudeExecutor {
     this.mcpServer = buildAgentMcpServer({
       agent: this.agent,
       onComplete: (result) => {
-        // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
-        // 旧 query 残存事件再次触发 onAgentComplete。
-        // 注意顺序：先调 events.onComplete，成功后才设 completed —— 否则
-        // 上层抛错时 completed 已为 true，AI 重试会被直接 return 静默吞掉。
+        // AgentComplete 触发后不立即通知上层。等 SDK 的 result 消息到达后再 fire，
+        // 否则上层会立刻 killCurrentExecutor，把后续的 result（含 modelUsage /
+        // total_cost_usd）切掉，token 统计就丢了。
         if (this.completed || this.disposed) return
-        this.events.onComplete(result)
-        this.completed = true
+        if (this.pendingCompleteResult) return
+        this.pendingCompleteResult = result
       },
     })
     const options: Options = {
@@ -279,6 +288,15 @@ export class ClaudeExecutor {
           this.events.onMessage(message)
         }
         this.events?.onMessage(msg)
+        // result 是本回合最后一条消息（带 modelUsage / total_cost_usd）。如果
+        // 之前 AgentComplete 触发过 onComplete 暂存 pending，此刻才把它通知
+        // 给上层，让 token 信息进入 webview 后再切换/结束。
+        if (msg.type === 'result' && this.pendingCompleteResult && !this.completed) {
+          const pending = this.pendingCompleteResult
+          this.pendingCompleteResult = null
+          this.events.onComplete(pending)
+          this.completed = true
+        }
       }
     } catch (err) {
       if (!this.disposed) {
