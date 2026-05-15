@@ -148,7 +148,7 @@ export const AgentEditor: FC = () => {
         }}
       >
         {/* 左侧表单 — 独立滚动 */}
-        <div className='flex w-150 grow-0 flex-col'>
+        <div className='flex w-120 grow-0 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
             <CloseOutlined onClick={() => setEditingAgent(undefined)} className='mr-2' />
             <span>编辑 Agent</span>
