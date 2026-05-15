@@ -246,10 +246,26 @@ function scanIncremental(
 
       if (message.type === 'assistant') {
         const mid = message.message.id
+        // 提前计算 final 消息中是否包含对应 kind 的非空内容（同 ID 去重和跨 ID 去重共用）
+        const blocks = message.message.content
+        const finalHasText =
+          Array.isArray(blocks) &&
+          blocks.some(
+            (b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0,
+          )
+        const finalHasThinking =
+          Array.isArray(blocks) &&
+          blocks.some(
+            (b: any) => b?.type === 'thinking' && b.thinking && b.thinking.length > 0,
+          )
         // 同 message ID 的 streaming item 去重（SDK 正常流程）
+        // 与下方跨 ID 去重保持一致：按 kind 分别判断，仅当 final 消息中确实有
+        // 对应类型非空内容时才删除对应 kind 的 streaming item；否则保留
+        // （避免如 final thinking 字段缺失时，streaming 阶段产出的 thinking 被一并抹掉）。
         const streamingKeys = state.streamingItemKeysByMsgId.get(mid)
         if (streamingKeys && streamingKeys.length > 0) {
           const keySet = new Set(streamingKeys)
+          const remainingKeys: string[] = []
           let writeIdx = 0
           for (let readIdx = 0; readIdx < items.length; readIdx++) {
             const item = items[readIdx]
@@ -258,56 +274,49 @@ function scanIncremental(
               item.streaming &&
               keySet.has(item.key)
             ) {
-              continue
+              const shouldRemove =
+                (item.kind === 'text' && finalHasText) ||
+                (item.kind === 'thinking' && finalHasThinking)
+              if (shouldRemove) continue
+              remainingKeys.push(item.key)
             }
             items[writeIdx] = items[readIdx]
             writeIdx++
           }
           items.length = writeIdx
-          state.streamingItemKeysByMsgId.delete(mid)
+          if (remainingKeys.length === 0) {
+            state.streamingItemKeysByMsgId.delete(mid)
+          } else {
+            state.streamingItemKeysByMsgId.set(mid, remainingKeys)
+          }
         }
         // 跨 ID 去重：某些模型（如 glm-5.1）会发一条完整重述的 assistant
         // 消息（stop_reason 为 null），其 message.id 与 streaming 事件不同，
-        // 但包含了之前 streaming 碎片的完整文本。移除所有 trailing streaming
-        // items（无论 ID），用这条完整消息替代。
-        const blocks = message.message.content
-        const hasTextContent =
-          Array.isArray(blocks) &&
-          blocks.some(
-            (b: any) =>
-              (b?.type === 'text' && typeof b.text === 'string' && b.text.length > 0) ||
-              (b?.type === 'thinking' && b.thinking && b.thinking.length > 0),
-          )
-        if (hasTextContent) {
-          let trailingStreamingEnd = items.length
+        // 但包含了之前 streaming 碎片的完整文本。
+        // 按 kind 分别判断：仅当 final 消息中确实包含对应类型的非空块时,才
+        // 删除 trailing streaming 项；否则保留(避免如 thinking 字段缺失时
+        // streaming 阶段产出的思考内容被一并抹掉)。
+        if (finalHasText || finalHasThinking) {
+          // 从尾部往前扫 trailing streaming items，按 kind 决定是否删除；
+          // 遇到非 text/thinking 项或非 streaming 的 text/thinking 项就停。
           for (let j = items.length - 1; j >= 0; j--) {
             const it = items[j]
-            if (it.kind === 'text' || it.kind === 'thinking') {
-              if (it.streaming) {
-                trailingStreamingEnd = j
-              } else {
-                break
-              }
-            } else {
-              break
-            }
-          }
-          if (trailingStreamingEnd < items.length) {
-            for (let j = trailingStreamingEnd; j < items.length; j++) {
-              const it = items[j]
-              if ((it.kind === 'text' || it.kind === 'thinking') && it.streaming) {
-                const oldMsgId = it.key.match(/^(\d+)-/)?.[1]
-                if (oldMsgId && oldMsgId !== mid) {
-                  const keys = state.streamingItemKeysByMsgId.get(oldMsgId)
-                  if (keys) {
-                    const idx = keys.indexOf(it.key)
-                    if (idx !== -1) keys.splice(idx, 1)
-                    if (keys.length === 0) state.streamingItemKeysByMsgId.delete(oldMsgId)
-                  }
-                }
+            if (it.kind !== 'text' && it.kind !== 'thinking') break
+            if (!it.streaming) break
+            const shouldRemove =
+              (it.kind === 'text' && finalHasText) ||
+              (it.kind === 'thinking' && finalHasThinking)
+            if (!shouldRemove) continue
+            const oldMsgId = it.key.match(/^(\d+)-/)?.[1]
+            if (oldMsgId && oldMsgId !== mid) {
+              const keys = state.streamingItemKeysByMsgId.get(oldMsgId)
+              if (keys) {
+                const idx = keys.indexOf(it.key)
+                if (idx !== -1) keys.splice(idx, 1)
+                if (keys.length === 0) state.streamingItemKeysByMsgId.delete(oldMsgId)
               }
             }
-            items.length = trailingStreamingEnd
+            items.splice(j, 1)
           }
         }
         const usage = extractTokenUsage(message.message.usage)
