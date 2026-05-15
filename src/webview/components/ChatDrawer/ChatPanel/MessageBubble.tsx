@@ -9,14 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Spin, Tag } from 'antd'
-import {
-  CheckCircleFilled,
-  CheckCircleOutlined,
-  CheckOutlined,
-  CloseCircleFilled,
-  CopyOutlined,
-  LoadingOutlined,
-} from '@ant-design/icons'
+import { CheckCircleOutlined, CheckOutlined, CopyOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
 import mermaid from 'mermaid'
@@ -26,12 +19,12 @@ import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
+import { ToolUseDetails } from './ToolUseDetails'
 import {
   buildRenderItems,
   clearBuildCache,
   clearBuildCacheForSessions,
   type RenderItem,
-  type ToolResult,
 } from './buildRenderItems'
 
 type Props = {
@@ -352,36 +345,6 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   }
 }
 
-/** 根据工具名和输入参数生成一行摘要 */
-function getToolSummary(toolName: string, input: any): string {
-  if (!input || typeof input !== 'object') return toolName
-  const name = toolName.replace(/^mcp__\w+__/, '')
-  switch (name) {
-    case 'Read':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Write':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Edit':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Bash':
-      return input.command ? `${name} ${input.command}` : name
-    case 'Grep':
-      return input.pattern ? `${name} ${input.pattern}` : name
-    case 'Glob':
-      return input.pattern ? `${name} ${input.pattern}` : name
-    case 'WebFetch':
-      return input.url ? `${name} ${input.url}` : name
-    case 'WebSearch':
-      return input.query ? `${name} ${input.query}` : name
-    case 'Agent':
-      return input.description ? `${name} ${input.description}` : name
-    case 'TodoWrite':
-      return name
-    default:
-      return name
-  }
-}
-
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
@@ -414,50 +377,6 @@ function TokenUsageBadge({
       {model ? ` · ${parts.join(' · ')} tokens` : parts.join(' · ')} tokens
       {costStr ? ` · ${costStr}` : ''}
     </span>
-  )
-}
-
-function renderToolUseDetails(
-  toolName: string,
-  input: unknown,
-  result: ToolResult | undefined,
-  /** 无 result 时是否视为成功——仅用于 AgentComplete：调用后 executor 立刻 kill，
-   *  正常情况下永远收不到 mcp_tool_result，需结合 session.completed 判断 */
-  treatNoResultAsSuccess = false,
-): ReactNode {
-  const summary = getToolSummary(toolName, input)
-  const hasInput = !!input && typeof input === 'object' && Object.keys(input as object).length > 0
-  return (
-    <details className='text-[11px] text-[#a6adc8]'>
-      <summary className='cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap'>
-        {result ? (
-          result.isError ? (
-            <CloseCircleFilled className='mr-1 text-[#f38ba8]' />
-          ) : (
-            <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
-          )
-        ) : treatNoResultAsSuccess ? (
-          <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
-        ) : (
-          <Spin
-            size='small'
-            indicator={<LoadingOutlined className='text-[10px]!' />}
-            className='mr-1'
-          />
-        )}
-        {summary}
-      </summary>
-      {hasInput ? (
-        <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      ) : null}
-      {result && (
-        <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-          {result.text}
-        </pre>
-      )}
-    </details>
   )
 }
 
@@ -495,7 +414,11 @@ function renderItemToBubble(
     }
     case 'thinking': {
       const inner = (
-        <Think title='思考中' defaultExpanded={item.streaming}>
+        <Think
+          title='思考中'
+          key={item.key + (item.streaming ? 'streaming' : 'completed')}
+          defaultExpanded={item.streaming}
+        >
           <Md content={item.text} />
         </Think>
       )
@@ -557,11 +480,15 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: renderToolUseDetails(
-          item.toolName,
-          item.input,
-          item.result,
-          sessionCompleted && item.toolName.includes('AgentComplete'),
+        content: (
+          <ToolUseDetails
+            toolName={item.toolName}
+            input={item.input}
+            result={item.result}
+            treatNoResultAsSuccess={
+              sessionCompleted && item.toolName.includes('AgentComplete')
+            }
+          />
         ),
       }
     }
