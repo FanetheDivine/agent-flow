@@ -73,14 +73,9 @@ export const AgentEditor: FC = () => {
   })()
 
   const [form] = Form.useForm()
-  const [expanded, setExpanded] = useState(false)
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
 
   const watchedValues = Form.useWatch([], form)
-  const activeFlowId = useFlowStore((s) => s.activeFlowId)
-  const flowRunState = useFlowStore((s) =>
-    activeFlowId ? s.flowRunStates[activeFlowId] : undefined,
-  )
 
   useEffect(() => {
     if (open && agent) {
@@ -103,9 +98,6 @@ export const AgentEditor: FC = () => {
         })),
       }
       form.setFieldsValue(newFormValue)
-    } else {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setExpanded(false)
     }
   }, [open, agent, form])
 
@@ -124,11 +116,12 @@ export const AgentEditor: FC = () => {
       placement='left'
       open={open}
       onClose={() => setEditingAgent(undefined)}
-      size={'auto'}
+      defaultSize={1200}
+      resizable
       styles={{
         header: { display: 'none' },
         body: { padding: 0 },
-        wrapper: { transition: 'none' },
+        wrapper: { transition: 'none', minWidth: 1200 },
       }}
       footer={null}
     >
@@ -155,7 +148,7 @@ export const AgentEditor: FC = () => {
         }}
       >
         {/* 左侧表单 — 独立滚动 */}
-        <div className='flex flex-col' style={{ width: 560 }}>
+        <div className='flex w-150 grow-0 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
             <CloseOutlined onClick={() => setEditingAgent(undefined)} className='mr-2' />
             <span>编辑 Agent</span>
@@ -301,20 +294,6 @@ export const AgentEditor: FC = () => {
                 />
               </FormItem>
 
-              {/* 提示词：只展示标题 + 展开/收起 Switch */}
-              <div className='flex items-center gap-2 py-1'>
-                <span className='text-base font-medium'>提示词</span>
-                <Switch
-                  checked={expanded}
-                  onChange={(v) => {
-                    setExpanded(v)
-                    if (v) setPreviewMode('preview')
-                  }}
-                  checkedChildren='展开'
-                  unCheckedChildren='收起'
-                />
-              </div>
-
               <FormItem label='输出分支'>
                 <Form.List name='outputs'>
                   {(fields, { add, remove }) => (
@@ -397,16 +376,13 @@ export const AgentEditor: FC = () => {
           </div>
         </div>
 
-        {/* 右侧提示词面板（仅展开态）— 独立滚动 */}
+        {/* 右侧提示词面板— 独立滚动 */}
         <div
-          className={cn('flex h-full w-150 flex-col overflow-hidden border-l border-[#313244]', {
-            hidden: !expanded,
-          })}
+          className={cn('flex h-full flex-1 flex-col overflow-hidden border-l border-[#313244]')}
         >
           <div className='flex items-center gap-2 px-3 py-2'>
-            <span className='text-[12px] text-[#a6adc8]'>提示词</span>
+            <span className='text-base font-medium'>提示词</span>
             <Switch
-              size='small'
               checked={previewMode === 'preview'}
               onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
               checkedChildren={<EyeOutlined />}
