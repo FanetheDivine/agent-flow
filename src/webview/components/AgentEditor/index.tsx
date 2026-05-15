@@ -98,6 +98,8 @@ export const AgentEditor: FC = () => {
         })),
       }
       form.setFieldsValue(newFormValue)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPreviewMode('preview')
     }
   }, [open, agent, form])
 
