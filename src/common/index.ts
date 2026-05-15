@@ -27,7 +27,7 @@ export const AgentSchema = z.object({
     .describe('AI 思考的努力程度，影响响应速度与质量的权衡'),
   agent_name: z.string().describe('Agent 名称，flow 内唯一'),
   agent_desc: z.string().optional().describe('Agent 简介，简要描述该 Agent 的职责与定位'),
-  agent_prompt: z.string().describe('系统提示词，定义 Agent 的行为与职责，要具体可执行'),
+  agent_prompt: z.string().describe('系统提示词，定义 Agent 的行为与职责，要具体可执行').optional(),
   outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
   auto_allowed_tools: z
     .union([z.literal(true), z.array(z.string())])
@@ -52,12 +52,14 @@ export const AgentSchema = z.object({
     .describe(
       '无输入启动：true 时节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）',
     ),
-  enable_share_values: z
-    .boolean()
+  allowed_read_share_values_keys: z
+    .array(z.string())
     .optional()
-    .describe(
-      '启用共享存储：true 时注入 setShareValues / getShareValues / getAllShareValues 工具与提示词；默认 false 时本 Agent 看不到也不会被告知共享存储',
-    ),
+    .describe('允许读取的 shareValues key 子集；Agent 仅能通过系统提示词看到这些 key 的当前值'),
+  allowed_write_share_values_keys: z
+    .array(z.string())
+    .optional()
+    .describe('允许写入的 shareValues key 子集；Agent 仅能在 AgentComplete 时写入这些 key'),
 })
 
 /** @see {@link AgentSchema} */
@@ -68,6 +70,7 @@ export const FlowSchema = z.object({
   id: z.string().describe('Flow 唯一标识'),
   name: z.string().describe('Flow 名称'),
   agents: z.array(AgentSchema).optional().describe('当前 Flow 内的 agent，其 outputs 定义了连接边'),
+  shareValuesKeys: z.array(z.string()).optional().describe('Flow 可用的共享数据 key 集合'),
 })
 
 /** @see {@link FlowSchema} */
@@ -228,89 +231,103 @@ export function buildAgentSystemPrompt(
     | 'agent_prompt'
     | 'outputs'
     | 'work_mode'
-    | 'enable_share_values'
+    | 'allowed_read_share_values_keys'
+    | 'allowed_write_share_values_keys'
     | 'no_input'
     | 'agent_name'
-    | 'agent_desc'
   >,
+  currentShareValues?: Record<string, string>,
 ): string {
   const {
-    agent_name,
-    agent_desc,
     agent_prompt,
     outputs = [],
     work_mode,
-    enable_share_values = false,
+    allowed_read_share_values_keys = [],
+    allowed_write_share_values_keys = [],
   } = agent
 
   const lines: string[] = [
     '始终使用**中文**进行思考和回复。',
     '信息不足时，**禁止**凭空推测，应当尝试读取文件、执行命令行或使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
-    '',
   ]
 
-  // Agent 简介（可选）
-  if (agent_desc) {
-    lines.push('# Agent 简介', `${agent_name}：${agent_desc}`, '')
+  // Flow 管控数据（可选，仅注入被授权读取的 key） 空值传入null
+  if (allowed_read_share_values_keys.length > 0) {
+    const visibleValues: Record<string, string | null> = {}
+    for (const key of allowed_read_share_values_keys) {
+      if (currentShareValues) {
+        const value = currentShareValues[key]
+        visibleValues[key] = value !== undefined && value !== '' ? value : null
+      } else {
+        visibleValues[key] = '<运行时替换>'
+      }
+    }
+    if (Object.keys(visibleValues).length > 0) {
+      lines.push(
+        '# 可用数据',
+        '用户会引用以下值',
+        '```json',
+        JSON.stringify(visibleValues, null, 2),
+        '```',
+      )
+    }
   }
 
-  // 共享存储（可选）
-  if (enable_share_values) {
+  // 可写数据：仅在「可完成」工作模式下出现（never_complete 不能调 AgentComplete）
+  if (allowed_write_share_values_keys.length > 0 && work_mode !== 'never_complete') {
     lines.push(
-      '# 共享存储',
-      '通过 AgentControllerMcp 提供的工具可以读写一份共享数据源（shareValues）：',
-      ' - getShareValues / getAllShareValues：按 key 读取 / 全量读取',
-      ' - setShareValues：写入键值对',
-      '该数据源**并非由你独占**，外部随时可能修改其中的值。当你需要最新数据时，应当**重新调用** getShareValues / getAllShareValues 获取，而不是依赖之前读到的快照。',
-      '',
+      '# 可写数据',
+      '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `shareValues` 参数输出，仅在 `content` 里描述不算写入。',
+      ...allowed_write_share_values_keys.map((k) => `  - "${k}"`),
+      '## 写入说明：',
+      '- 仅可写入上述列出的 key',
+      '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
+      '- `content` 是本次任务的结果；`shareValues` 用于按 key 记录用户要求保存的值',
     )
   }
 
   // 对话规则：长期对话规则 / 围绕任务描述完成任务（含完成任务、输出分支）
-  match(work_mode)
-    .with('never_complete', () => {
-      lines.push('# 对话规则', agent_prompt, '')
-    })
-    .with(P.union('auto_complete', 'require_confirm'), (mode) => {
-      lines.push(
-        '# 对话规则',
-        '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
-        '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
-        '',
-        '## 任务描述',
-        agent_prompt,
-        '',
-        '## 完成任务',
-      )
-      match(mode)
-        .with('auto_complete', () =>
-          lines.push(
-            '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-            '直接调用 AgentComplete，无需向用户额外确认。',
-          ),
+  if (agent_prompt) {
+    match(work_mode)
+      .with('never_complete', () => {
+        lines.push('# 对话规则', agent_prompt)
+      })
+      .with(P.union('auto_complete', 'require_confirm'), (mode) => {
+        lines.push(
+          '# 对话规则',
+          '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
+          '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
+          '## 任务描述',
+          agent_prompt,
+          '## 完成任务',
         )
-        .with('require_confirm', () =>
-          lines.push(
-            '如果「任务描述」规定的结束条件已经达成时，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-            '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
-          ),
+        match(mode)
+          .with('auto_complete', () =>
+            lines.push(
+              '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
+              '直接调用 AgentComplete，无需向用户额外确认。',
+            ),
+          )
+          .with('require_confirm', () =>
+            lines.push(
+              '如果「任务描述」规定的结束条件已经达成时，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
+              '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
+            ),
+          )
+          .exhaustive()
+
+        lines.push(
+          '## 输出分支',
+          match(outputs.length)
+            .with(0, () => '此任务没有输出分支。')
+            .otherwise(() =>
+              outputs
+                .map((o) => `  - "${o.output_name}"${o.output_desc ? `: ${o.output_desc}` : ''}`)
+                .join('\n'),
+            ),
         )
-        .exhaustive()
-
-      lines.push(
-        '',
-        '## 输出分支',
-        match(outputs.length)
-          .with(0, () => '此任务没有输出分支。')
-          .otherwise(() =>
-            outputs
-              .map((o) => `  - "${o.output_name}"${o.output_desc ? `: ${o.output_desc}` : ''}`)
-              .join('\n'),
-          ),
-        '',
-      )
-    })
-    .exhaustive()
-
+      })
+      .exhaustive()
+  }
   return lines.join('\n')
 }

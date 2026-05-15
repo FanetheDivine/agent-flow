@@ -38,6 +38,8 @@ type StoreState = {
   flowListCollapsed: boolean
   /** 当前正在编辑的 agent */
   editingAgent?: { flowId: string; agentId: string }
+  /** 当前正在编辑的 flow（用于打开 FlowEditor Drawer） */
+  editingFlowId?: string
 }
 
 export type ChatDrawerState = {
@@ -136,6 +138,7 @@ type FlowStoreType = StoreState & {
   openChatDrawer: (flowId: string, agentId: string, agentName: string) => void
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
+  setEditingFlowId: (id?: string) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
 
@@ -262,6 +265,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     chatDrawer: undefined,
     flowRunStates: {},
     flowListCollapsed: false,
+    editingFlowId: undefined,
 
     init: (app) => {
       notificationApi = app.notification
@@ -388,6 +392,11 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         draft.editingAgent = agent
       })
     },
+    setEditingFlowId: (id) => {
+      immerSet((draft) => {
+        draft.editingFlowId = id
+      })
+    },
     save: (updateFn) => {
       immerSet((draft) => {
         updateFn(draft.flows)
@@ -454,12 +463,9 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     setShareValues: (flowId, values) => {
-      const { flowRunStates } = get()
-      const fs = flowRunStates[flowId]
-      if (!fs?.runId) return false
       dispatchCommand({
         type: 'flow.command.setShareValues',
-        data: { flowId, runId: fs.runId, values },
+        data: { flowId, values },
       })
       return true
     },

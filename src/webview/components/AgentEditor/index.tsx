@@ -59,6 +59,7 @@ export const AgentEditor: FC = () => {
   const flows = useFlowStore((s) => s.flows)
   const save = useFlowStore((s) => s.save)
   const setEditingAgent = useFlowStore((s) => s.setEditingAgent)
+  const setEditingFlowId = useFlowStore((s) => s.setEditingFlowId)
 
   const open = !!editingAgent
   const agent = (() => {
@@ -75,7 +76,11 @@ export const AgentEditor: FC = () => {
   const [expanded, setExpanded] = useState(false)
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
 
-  const watchedValues = Form.useWatch([], form) as Agent | undefined | object
+  const watchedValues = Form.useWatch([], form)
+  const activeFlowId = useFlowStore((s) => s.activeFlowId)
+  const flowRunState = useFlowStore((s) =>
+    activeFlowId ? s.flowRunStates[activeFlowId] : undefined,
+  )
 
   useEffect(() => {
     if (open && agent) {
@@ -89,7 +94,8 @@ export const AgentEditor: FC = () => {
         must_confirm_tools: agent.must_confirm_tools,
         work_mode: agent.work_mode ?? 'auto_complete',
         no_input: agent.no_input ?? false,
-        enable_share_values: agent.enable_share_values ?? false,
+        allowed_read_share_values_keys: agent.allowed_read_share_values_keys ?? [],
+        allowed_write_share_values_keys: agent.allowed_write_share_values_keys ?? [],
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -103,9 +109,13 @@ export const AgentEditor: FC = () => {
     }
   }, [open, agent, form])
 
-  // 完整系统提示词
-  const fullPrompt =
-    watchedValues && 'agent_prompt' in watchedValues ? buildAgentSystemPrompt(watchedValues) : ''
+  const isValidAgent = (v: any): v is Agent => v && typeof v.agent_name === 'string'
+  const fullPrompt = isValidAgent(watchedValues) ? buildAgentSystemPrompt(watchedValues) : ''
+
+  // 从 Flow 定义中提取全部可用 key 选项
+  const currentFlow = editingAgent ? flows.find((f) => f.id === editingAgent.flowId) : undefined
+  const shareValueKeys = currentFlow?.shareValuesKeys ?? []
+  const shareValueKeyOptions = shareValueKeys.map((k) => ({ label: k, value: k }))
 
   return (
     <Drawer
@@ -160,11 +170,7 @@ export const AgentEditor: FC = () => {
                 <Input />
               </FormItem>
 
-              <FormItem
-                name='agent_desc'
-                label='Agent 简介'
-                tooltip='简要描述该 Agent 的职责与定位，会在系统提示词中作为任务上下文注入'
-              >
+              <FormItem name='agent_desc' label='Agent 简介'>
                 <Input placeholder='例如：负责代码评审，检查潜在 bug 与性能问题' />
               </FormItem>
 
@@ -242,6 +248,7 @@ export const AgentEditor: FC = () => {
                   tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
                 >
                   <Select
+                    className='w-40'
                     options={[
                       { value: 'auto_complete', label: '自动完成' },
                       { value: 'require_confirm', label: '用户确认后完成' },
@@ -258,16 +265,41 @@ export const AgentEditor: FC = () => {
                 >
                   <Switch />
                 </FormItem>
-
-                <FormItem
-                  name='enable_share_values'
-                  label='共享存储'
-                  tooltip='开启后才会注入 setShareValues / getShareValues / getAllShareValues 工具，并在系统提示词中告知 Agent 共享存储的存在；关闭时本 Agent 完全无感知'
-                  valuePropName='checked'
-                >
-                  <Switch />
-                </FormItem>
               </Flex>
+
+              <FormItem
+                name='allowed_read_share_values_keys'
+                label={
+                  <div className='flex items-center gap-2'>
+                    <span>可读共享数据</span>
+                    <Button
+                      size='small'
+                      type='link'
+                      onClick={() => editingAgent && setEditingFlowId(editingAgent.flowId)}
+                    >
+                      编辑共享存储
+                    </Button>
+                  </div>
+                }
+                tooltip='Agent 在系统提示词中可看到的 shareValues key 子集'
+              >
+                <Select
+                  mode='multiple'
+                  placeholder='从 Flow 共享数据中选择 key'
+                  options={shareValueKeyOptions}
+                />
+              </FormItem>
+              <FormItem
+                name='allowed_write_share_values_keys'
+                label='可写共享数据'
+                tooltip='Agent 完成时通过 AgentComplete 可写入的 shareValues key 子集'
+              >
+                <Select
+                  mode='multiple'
+                  placeholder='从 Flow 共享数据中选择 key'
+                  options={shareValueKeyOptions}
+                />
+              </FormItem>
 
               {/* 提示词：只展示标题 + 展开/收起 Switch */}
               <div className='flex items-center gap-2 py-1'>
@@ -366,37 +398,39 @@ export const AgentEditor: FC = () => {
         </div>
 
         {/* 右侧提示词面板（仅展开态）— 独立滚动 */}
-        {expanded && (
-          <div className='flex h-full w-150 flex-col overflow-hidden border-l border-[#313244]'>
-            <div className='flex items-center gap-2 px-3 py-2'>
-              <span className='text-[12px] text-[#a6adc8]'>提示词</span>
-              <Switch
-                size='small'
-                checked={previewMode === 'preview'}
-                onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
-                checkedChildren={<EyeOutlined />}
-                unCheckedChildren={<EditOutlined />}
-              />
-            </div>
-
-            <div className={cn('flex-1 overflow-hidden', { 'px-2': previewMode === 'edit' })}>
-              <FormItem name='agent_prompt' noStyle>
-                <Input.TextArea
-                  className={cn('hidden h-full w-full overflow-auto', {
-                    block: previewMode === 'edit',
-                  })}
-                  placeholder='请输入提示词'
-                />
-              </FormItem>
-
-              {previewMode === 'preview' && (
-                <div className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'>
-                  <XMarkdown className='x-markdown-dark'>{fullPrompt || '_暂无提示词_'}</XMarkdown>
-                </div>
-              )}
-            </div>
+        <div
+          className={cn('flex h-full w-150 flex-col overflow-hidden border-l border-[#313244]', {
+            hidden: !expanded,
+          })}
+        >
+          <div className='flex items-center gap-2 px-3 py-2'>
+            <span className='text-[12px] text-[#a6adc8]'>提示词</span>
+            <Switch
+              size='small'
+              checked={previewMode === 'preview'}
+              onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
+              checkedChildren={<EyeOutlined />}
+              unCheckedChildren={<EditOutlined />}
+            />
           </div>
-        )}
+
+          <div className={cn('flex-1 overflow-hidden', { 'px-2': previewMode === 'edit' })}>
+            <FormItem name='agent_prompt' noStyle>
+              <Input.TextArea
+                className={cn('hidden h-full w-full resize-none overflow-auto', {
+                  block: previewMode === 'edit',
+                })}
+                placeholder='请输入提示词'
+              />
+            </FormItem>
+
+            {previewMode === 'preview' && (
+              <div className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'>
+                <XMarkdown className='x-markdown-dark'>{fullPrompt}</XMarkdown>
+              </div>
+            )}
+          </div>
+        </div>
       </Form>
     </Drawer>
   )

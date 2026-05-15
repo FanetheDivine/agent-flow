@@ -87,7 +87,13 @@ export const FlowListPanel: FC = () => {
   }
 
   return (
-    <div className='absolute bottom-2 left-2 z-50' onKeyDown={(e) => e.stopPropagation()}>
+    <div
+      className='absolute bottom-2 left-2 z-50'
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape') e.stopPropagation()
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <AnimatePresence mode='wait'>
         {flowListCollapsed ? (
           <motion.div

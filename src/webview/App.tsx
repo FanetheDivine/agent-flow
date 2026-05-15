@@ -6,6 +6,7 @@ import { FlowSchema } from '@/common'
 import { AgentEditor } from './components/AgentEditor'
 import { AgentFlow } from './components/AgentFlow'
 import { ChatDrawer } from './components/ChatDrawer'
+import { FlowEditor } from './components/FlowEditor'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
 
@@ -45,6 +46,7 @@ export const App: FC = () => {
       </div>
       <ChatDrawer />
       <AgentEditor />
+      <FlowEditor />
     </div>
   )
 }

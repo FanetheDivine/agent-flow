@@ -158,7 +158,7 @@ export type PendingToolPermission = {
  */
 export type FlowRunState = {
   /** webview 生成，用于防止多次 run的竞态问题 仅在flowStart使用 */
-  runKey: string
+  runKey?: string
   /** extension 生成的唯一ID 在校验runKey后生成 */
   runId?: string
   phase: FlowPhase
@@ -229,7 +229,22 @@ export function updateFlowRunState(
         answeredToolPermissions: {},
         currentAgentId: msg.data.agentId,
         pendingQuestions: [],
-        shareValues: {},
+        shareValues: state?.shareValues ?? {},
+      },
+      effects,
+    }
+  }
+
+  if (msg.type === 'flow.command.setShareValues') {
+    return {
+      state: {
+        phase: 'idle',
+        sessions: [],
+        answeredQuestions: {},
+        answeredToolPermissions: {},
+        pendingQuestions: [],
+        ...state,
+        shareValues: msg.data.values,
       },
       effects,
     }
@@ -296,8 +311,8 @@ export function updateFlowRunState(
     const session = draft?.sessions?.find((s) => !s.completed)
     const currentAgentId = draft.currentAgentId
 
-    // signal 统一追加到当前 session 的消息流（shareValuesChanged 除外，不进 ChatPanel）
-    if (msg.type.startsWith('flow.signal.') && msg.type !== 'flow.signal.shareValuesChanged') {
+    // signal 统一追加到当前 session 的消息流
+    if (msg.type.startsWith('flow.signal.')) {
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
@@ -339,6 +354,10 @@ export function updateFlowRunState(
         }
       })
       .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
+        // 合并 agentComplete 携带的 shareValues
+        if (data.shareValues) {
+          draft.shareValues = { ...draft.shareValues, ...data.shareValues }
+        }
         if (session) {
           session.completed = true
           session.outputName = data.output?.name
@@ -361,6 +380,7 @@ export function updateFlowRunState(
           })
         } else {
           draft.phase = 'completed'
+          draft.shareValues = {}
           if (currentAgentId) {
             pushEffect({ flowId, agentId: currentAgentId, reason: 'flow-completed' })
           }
@@ -390,9 +410,6 @@ export function updateFlowRunState(
       .with({ type: 'flow.signal.error' }, () => {
         draft.phase = 'error'
         clearPendings()
-      })
-      .with({ type: 'flow.signal.shareValuesChanged' }, ({ data }) => {
-        draft.shareValues = data.shareValues
       })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
@@ -430,9 +447,6 @@ export function updateFlowRunState(
           draft.pendingToolPermission = undefined
         }
         draft.phase = 'running'
-      })
-      .with({ type: 'flow.command.setShareValues' }, ({ data }) => {
-        draft.shareValues = data.values
       })
       .exhaustive()
   })

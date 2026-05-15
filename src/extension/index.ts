@@ -151,7 +151,10 @@ export function activate(context: vscode.ExtensionContext) {
     })
   })
 
-  const runnerManager = new FlowRunnerManager(postMessageToWebview)
+  const runnerManager = new FlowRunnerManager(
+    postMessageToWebview,
+    (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.shareValues ?? {},
+  )
 
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     if (currentPanel) {
