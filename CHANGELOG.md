@@ -1,5 +1,43 @@
 # Change Log
 
+## [0.0.13] - 2026-05-16
+
+### 破坏性变更
+
+- **ShareValues 重构为按 key 授权读写**：废弃 Agent 级 `enable_share_values` 开关，改为：
+  - **Flow 级声明**：`Flow.shareValuesKeys: string[]` 列出本 Flow 全部可用 key（在 FlowEditor 抽屉中维护）。
+  - **Agent 级授权**：Agent 配置 `allowed_read_share_values_keys` / `allowed_write_share_values_keys` 分别声明可读 / 可写 key 子集。无授权时 Agent 完全感知不到 shareValues 的存在。
+  - **读路径**：可读 key 与当前值以 JSON 形式注入到 Agent 系统提示词「# 可用数据」节（prompt 时点的快照，本会话内不再重读，运行中改值需切到下一个 Agent 才生效）。
+  - **写路径**：仅能通过 `AgentComplete` 工具的 `shareValues` 参数一次性提交，未授权 key 静默丢弃；`never_complete` 模式无 AgentComplete 因此无法写入。
+  - **删除的 MCP 工具**：`setShareValues` / `getShareValues` / `getAllShareValues` 三个工具不再注入到任何 Agent。
+  - **删除的事件**：`flow.signal.shareValuesChanged` 移除；`flow.signal.agentComplete` 现携带 `shareValues` 字段统一同步。
+  - **Flow 完成清空**：reducer 在 phase 转 `completed` 时把 `shareValues` 清空，避免污染下一次启动；`flowStart` 改为保留未运行时编辑的值带入新 run。
+
+### 新增
+
+- **FlowEditor 抽屉**：Flow 列表项的数据库按钮打开 FlowEditor 抽屉（替换旧的 ShareValues Modal），集中编辑工作流名称、`shareValuesKeys`（声明可用 key）以及运行中各 key 的当前值。删除 key 时自动从所有 Agent 的 `allowed_read/write_share_values_keys` 中清理引用。未运行时也能编辑 shareValues 值，会带入下一次 run。
+- **AgentEditor 多选授权 UI**：Agent 配置弹窗新增两个 multi-select，分别管理 `allowed_read_share_values_keys` / `allowed_write_share_values_keys`，选项来自当前 Flow 的 `shareValuesKeys`。
+- **AskUserQuestion 多问题排队**：同一回合内 AI 抛出多张提问卡片时按顺序排队，回答完一张自动滚到下一张，回答全部完成后才切回 running 状态；提问卡片支持测量高度自适应容器。
+- **AgentComplete 写入 shareValues**：可完成模式（auto_complete / require_confirm）下 `AgentComplete` 工具新增可选 `shareValues` 参数，schema 由 `allowed_write_share_values_keys` 动态生成；MCP 端按白名单过滤未授权 key 后写入并通过 `agentComplete` signal 同步到 webview。
+- **MCP `getFlowJSONSchema` 工具**：每个 Agent 的 MCP server 新增 `getFlowJSONSchema` 工具，方便 Agent 在生成或修改工作流前直接获取 Flow 的 JSON Schema。
+- **回合 / Agent 级费用 breakdown**：基于 SDK `result.modelUsage` 镜像 `ModelTokenUsage` 类型，计算回合增量并在 `agent_complete` 项上展示 session 累计 breakdown，使用 SDK 实际 `costUSD` 而非估算。
+
+### 优化
+
+- **AgentEditor 独立成顶层组件**：从 `AgentFlow/AgentNode/AgentEditor` 抽出移到 `src/webview/components/AgentEditor/`，结构与样式重新整理。
+- **ToolUseDetails 拆分**：从 `MessageBubble.tsx` 拆出独立组件（约 424 行），承接所有工具调用详情展示逻辑。
+- **公共文本组件抽取**：新增 `text-components/`（`Md`、`CodeRefChip` / `FileRefChip` 等），多处重复代码归一。
+- **buildRenderItems 重写**：渲染管线整体精简，移除多处冗余分支；保留 trailing streaming items 移除与 `stop_reason` 标记 streaming 的逻辑。
+- **ClaudeExecutor 自带 (runId, sessionId) 校验**：暴露 `runId` / `sessionId` getter 与 `matches(runId, sessionId)` 方法，`FlowRunner` 不再维护 `currentRunId/currentSessionId/currentAgentId` 字段，`checkSession` 直接转发到 executor，避免切换过渡期把旧 sessionId 的 interrupt/userMessage 误派发到新 executor。
+- **系统提示词调整**：`agent_prompt` 改为 optional；提示词不再注入 Agent 简介段落（简介只在 UI 展示，不进 prompt）；新增「# 可用数据」与「# 可写数据」两节配合 shareValues 授权读写。
+- **默认工作流全面重写**：内置示例工作流根据新的 shareValues 授权模型重新组织，去掉 `enable_share_values` 字段，改用 `shareValuesKeys` + 读写白名单声明。
+- **Flow 列表项简化**：`SortableFlowItem` 去掉旧的 ShareValues Modal 与相关状态，改为打开 FlowEditor 抽屉。
+
+### 修复
+
+- **assistant 消息跨 ID 重复**：某些模型（如 glm-5.1）会发 `stop_reason: null` 的完整重述消息，其 `message.id` 与 streaming 事件不同，导致流式片段与完整消息同时显示。`buildRenderItems` 通过移除 trailing streaming items + 按 `stop_reason` 标记 streaming 状态修复。
+- **Flow 复制按钮**：`SortableFlowItem` 的复制改用 `copyable.text` 函数式取值，避免点击触发拖拽。
+
 ## [0.0.12] - 2026-05-13
 
 ### 修复

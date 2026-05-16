@@ -232,7 +232,7 @@ const BashInput: FC<{ input: Record<string, unknown> }> = ({ input }) => {
     <div className='space-y-1.5'>
       {description ? <div className='text-[10px] text-[#a6adc8]'>{description}</div> : null}
       <pre className='m-0 max-h-40 overflow-auto rounded bg-[#181825] p-1.5 text-[11px] break-all whitespace-pre-wrap text-[#a6e3a1]'>
-        <span className='select-none text-[#6c7086]'>$ </span>
+        <span className='text-[#6c7086] select-none'>$ </span>
         {command}
       </pre>
       {(timeout || runInBg) && (
@@ -374,9 +374,7 @@ export const ToolUseDetails: FC<Props> = ({
           >
             {server ?? name}
           </Tag>
-          {server ? (
-            <span className='shrink-0 font-medium text-[#cdd6f4]'>{name}</span>
-          ) : null}
+          {server ? <span className='shrink-0 font-medium text-[#cdd6f4]'>{name}</span> : null}
           {summaryArg && (
             <span className='min-w-0 flex-1 truncate text-[#7f849c]'>{summaryArg}</span>
           )}

@@ -57,12 +57,13 @@ pnpm build-extension   # 生成 .vsix 文件
 - **流式传输**：AI 回复的文本块 / thinking 块实时显示，无需等待整段消息生成完毕。
 - **工具调用可视化**：消息气泡中显示工具调用摘要（读取的文件、执行的命令等），未完成时 loading，完成后可展开查看参数与执行结果。
 - **AskUserQuestion 富文本**：AI 向你提问的内容通过 Markdown 渲染，支持代码、链接、列表等格式。
+- **多问题自动排队**：同一回合内 AI 抛出多张提问卡片时按顺序排队，回答完一张自动滚动到下一张，全部回答完毕后才回到 running 状态；提问卡片高度自适应容器。
 - **Mermaid 图表**：聊天消息中支持渲染 Mermaid 流程图/时序图，AI 可生成可视化图表。
 - **可拖拽聊天 Drawer**：支持拖拽调整宽度、`Esc` 关闭。
 - **智能通知**：Agent 等待回复或工作流完成时，若面板不在前台，自动弹出 VSCode 系统通知，点击即可跳转回对应聊天。
 - **关闭面板不打断运行**：关闭 Webview 后 Agent 继续在后台执行，重新打开时自动恢复全部历史消息与运行态，等待用户回复 / 完成等通知照常送达。
 - **ShareValues 编辑器**：Flow 列表项的数据库按钮打开 FlowEditor 抽屉，集中编辑工作流名称、`shareValuesKeys`（声明可用 key）以及运行中各 key 的当前值；删除 key 时自动清理所有 Agent 的 `allowed_read/write_share_values_keys` 引用。
-- **Token 消耗可视化**：消息级、回合级、Flow 级三层展示 token 用量与费用，AI 气泡自动回填实际消耗，优先显示 SDK 实际费用而非估算。
+- **Token 消耗可视化**：消息级、回合级、Flow 级三层展示 token 用量与费用，AI 气泡自动回填实际消耗，优先显示 SDK 实际费用而非估算；`agent_complete` 时展示按模型分组的 session 累计 breakdown。
 - **Starting 阶段节点高亮与红点**：启动阶段（session 尚未建立）Agent 节点也能正确高亮显示，对话框同步展示红点提示。
 - **AskUserQuestion 字体优化**：调整提问卡片字体样式，提升可读性。
 

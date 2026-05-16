@@ -265,14 +265,10 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       const delta = event.delta
       if (!delta) continue
       const blockType: 'text' | 'thinking' | null =
-        delta.type === 'text_delta'
-          ? 'text'
-          : delta.type === 'thinking_delta'
-            ? 'thinking'
-            : null
+        delta.type === 'text_delta' ? 'text' : delta.type === 'thinking_delta' ? 'thinking' : null
       if (!blockType) continue
       const deltaText: string =
-        delta.type === 'text_delta' ? delta.text ?? '' : delta.thinking ?? ''
+        delta.type === 'text_delta' ? (delta.text ?? '') : (delta.thinking ?? '')
       if (!deltaText) continue
       // 累加到最后一条同类型 streaming 项；否则新建
       const last = items[items.length - 1]

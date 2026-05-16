@@ -133,7 +133,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
 
   // 合并所有 pending questions 的 questions 数组到一张卡片
   const mergedInput = useMemo(() => {
-    if (pendingQuestions.length === 0) return { questions: [] as import('@/common').AskUserQuestionItem[], toolUseIds: [] as string[] }
+    if (pendingQuestions.length === 0)
+      return {
+        questions: [] as import('@/common').AskUserQuestionItem[],
+        toolUseIds: [] as string[],
+      }
     const allQuestions: import('@/common').AskUserQuestionItem[] = []
     const toolUseIds: string[] = []
     for (const pq of pendingQuestions) {
@@ -212,8 +216,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const pendingToolUseId = showCard ? mergedInput.toolUseIds[0] : undefined
   const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
   const pendingToolUseIds = useMemo(
-    () =>
-      mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined,
+    () => (mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined),
     [mergedInput.toolUseIds],
   )
   const ctx = useMemo<BubbleCtx>(

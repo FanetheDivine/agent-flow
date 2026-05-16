@@ -304,11 +304,7 @@ export class FlowRunner {
     this.currentExecutor = executor
   }
 
-  private onAgentComplete(
-    executor: ClaudeExecutor,
-    agent: Agent,
-    result: ExecutorResult,
-  ): void {
+  private onAgentComplete(executor: ClaudeExecutor, agent: Agent, result: ExecutorResult): void {
     try {
       this.doOnAgentComplete(executor, agent, result)
     } catch (err) {
@@ -321,11 +317,7 @@ export class FlowRunner {
     }
   }
 
-  private doOnAgentComplete(
-    executor: ClaudeExecutor,
-    agent: Agent,
-    result: ExecutorResult,
-  ): void {
+  private doOnAgentComplete(executor: ClaudeExecutor, agent: Agent, result: ExecutorResult): void {
     const { outputName, content } = result
     const runId = executor.runId
     // 切到下一个 agent 前要先 kill 当前 executor，sessionId 在 kill 后还要带进
