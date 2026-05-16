@@ -278,7 +278,7 @@ export function buildAgentSystemPrompt(
     lines.push(
       '# 可写数据',
       '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `shareValues` 参数输出，仅在 `content` 里描述不算写入。',
-      ...allowed_write_share_values_keys.map((k) => `  - "${k}"`),
+      ...allowed_write_share_values_keys.map((k) => `  - ${k}`),
       '## 写入说明：',
       '- 仅可写入上述列出的 key',
       '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
