@@ -1,9 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FC } from 'react'
 import { Button, Checkbox, Input, Popover, Radio, Tag } from 'antd'
 import { CheckOutlined, QuestionCircleOutlined } from '@ant-design/icons'
-import { XMarkdown } from '@ant-design/x-markdown'
 import { useMemoizedFn } from 'ahooks'
 import type { AskUserQuestionInput, AskUserQuestionItem, AskUserQuestionOutput } from '@/common'
+import { Md } from '../../text-components'
 
 type Props = {
   input: AskUserQuestionInput
@@ -219,13 +219,7 @@ export const AskUserQuestionCard: FC<Props> = ({
             className='flex flex-col gap-1.5'
           >
             <div className='flex items-start justify-between gap-2'>
-              <XMarkdown
-                className='x-markdown-dark text-sm text-[#cdd6f4]'
-                content={q.question}
-                openLinksInNewTab
-                escapeRawHtml
-                components={EMPTY_COMPONENTS}
-              />
+              <Md content={q.question} className='text-sm text-[#cdd6f4]'></Md>
               {q.header && (
                 <Tag color='processing' className='m-0 shrink-0 text-xs'>
                   {q.header}

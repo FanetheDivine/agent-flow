@@ -4,6 +4,7 @@ import { CloseOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
+import { Md } from '../text-components'
 
 type FormValues = {
   name: string
@@ -199,9 +200,10 @@ export const FlowEditor: FC = () => {
                 />
               </Form.Item>
               {previewMode === 'preview' && (
-                <div className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'>
-                  <XMarkdown className='x-markdown-dark'>{editingValue}</XMarkdown>
-                </div>
+                <Md
+                  content={editingValue}
+                  className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'
+                ></Md>
               )}
             </div>
           </div>

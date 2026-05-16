@@ -13,6 +13,7 @@ import type { Agent } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
+import { Md } from '../text-components'
 
 const FormItem = Form.Item<Agent>
 
@@ -404,9 +405,10 @@ export const AgentEditor: FC = () => {
             </FormItem>
 
             {previewMode === 'preview' && (
-              <div className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'>
-                <XMarkdown className='x-markdown-dark'>{fullPrompt}</XMarkdown>
-              </div>
+              <Md
+                className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'
+                content={fullPrompt}
+              ></Md>
             )}
           </div>
         </div>

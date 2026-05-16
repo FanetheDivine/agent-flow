@@ -1,22 +1,12 @@
-import {
-  isValidElement,
-  memo,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type FC,
-  type ReactNode,
-} from 'react'
-import { Spin, Tag } from 'antd'
-import { CheckCircleOutlined, CheckOutlined, CopyOutlined } from '@ant-design/icons'
+import { memo, type FC, type ReactNode } from 'react'
+import { Tag } from 'antd'
+import { CheckCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
-import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
-import mermaid from 'mermaid'
 import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
+import { Copyable, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 import { ToolUseDetails } from './ToolUseDetails'
@@ -54,137 +44,6 @@ type RenderedBubble = {
   role: 'user' | 'ai' | 'system' | 'divider'
   content: ReactNode
 }
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-  securityLevel: 'loose',
-})
-
-const getTextContent = (node: ReactNode): string => {
-  if (node == null || typeof node === 'boolean') return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(getTextContent).join('')
-  if (isValidElement(node)) {
-    const children = (node.props as { children?: ReactNode }).children
-    return getTextContent(children)
-  }
-  return ''
-}
-
-const PreBlock: FC<XMarkdownComponentProps> = ({ children, className }) => {
-  const text = getTextContent(children)
-  return (
-    <div className='group relative'>
-      <div className='absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity group-hover:opacity-100'>
-        <CopyButton text={text} />
-      </div>
-      <pre className={className}>{children}</pre>
-    </div>
-  )
-}
-
-const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState<string>('')
-  const id = useId()
-
-  useEffect(() => {
-    let cancelled = false
-    const render = async () => {
-      try {
-        const { svg } = await mermaid.render(id, code)
-        if (!cancelled) setSvg(svg)
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? 'Mermaid render error')
-      }
-    }
-    render()
-    return () => {
-      cancelled = true
-    }
-  }, [code, id])
-
-  if (error) {
-    return (
-      <div className='rounded border border-[#f38ba8]/30 bg-[#f38ba8]/5 p-2 text-[12px] text-[#f38ba8]'>
-        Mermaid 渲染失败：{error}
-        <details className='mt-1'>
-          <summary className='cursor-pointer'>查看源码</summary>
-          <pre className='mt-1 max-h-40 overflow-auto text-[10px]'>{code}</pre>
-        </details>
-      </div>
-    )
-  }
-
-  if (!svg) {
-    return (
-      <div className='flex items-center gap-2 py-2 text-[12px] text-[#6c7086]'>
-        <Spin size='small' /> 渲染中...
-      </div>
-    )
-  }
-
-  return (
-    <div ref={containerRef} className='overflow-auto' dangerouslySetInnerHTML={{ __html: svg }} />
-  )
-}
-
-const CodeBlock: FC<XMarkdownComponentProps> = ({ children, lang, block, streamStatus }) => {
-  if (block && lang === 'mermaid' && streamStatus === 'done') {
-    const code = getTextContent(children)
-    return <MermaidDiagram code={code} />
-  }
-  // 流式进行中 mermaid 代码尚未完整，先按普通代码块展示
-  if (block && lang === 'mermaid' && streamStatus === 'loading') {
-    const code = getTextContent(children)
-    return (
-      <pre className='overflow-auto'>
-        <code>{code}</code>
-      </pre>
-    )
-  }
-  return <code>{children}</code>
-}
-
-const MD_COMPONENTS = { pre: PreBlock, code: CodeBlock }
-
-const Md: FC<{ content: string }> = memo(({ content }) => (
-  <XMarkdown
-    className='x-markdown-dark'
-    content={content}
-    components={MD_COMPONENTS}
-    openLinksInNewTab
-    escapeRawHtml
-  />
-))
-
-const CopyButton: FC<{ text: string }> = ({ text }) => {
-  const [copied, setCopied] = useState(false)
-  return (
-    <span
-      className='cursor-pointer text-[11px] text-[#6c7086] transition-colors hover:text-[#cdd6f4]'
-      onClick={() => {
-        navigator.clipboard.writeText(text).then(() => {
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        })
-      }}
-    >
-      {copied ? <CheckOutlined /> : <CopyOutlined />}
-    </span>
-  )
-}
-
-const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children }) => (
-  <div className='flex'>
-    {children}
-    <div className='ml-1'>
-      <CopyButton text={text} />
-    </div>
-  </div>
-)
 
 // ChatInput 把代码片段 / 文件引用 / 附件序列化为下列 XML：
 //   <code_snippet path="..." lines="N[-M]" language="...">\n...body...\n</code_snippet>
@@ -464,9 +323,7 @@ function renderItemToBubble(
             toolName={item.toolName}
             input={item.input}
             result={item.result}
-            treatNoResultAsSuccess={
-              sessionCompleted && item.toolName.includes('AgentComplete')
-            }
+            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('AgentComplete')}
           />
         ),
       }
