@@ -159,7 +159,10 @@ export const FlowEditor: FC = () => {
                           onClose()
                           if (editingKey === key) setEditingKey(null)
                         }}
-                        onClick={() => setEditingKey(key)}
+                        onClick={() => {
+                          setEditingKey(key)
+                          setPreviewMode('preview')
+                        }}
                         color={isActive ? 'blue' : undefined}
                         style={{ cursor: 'pointer', marginInlineEnd: 4 }}
                       >
