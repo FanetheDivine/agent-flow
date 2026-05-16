@@ -4,7 +4,7 @@
 
 ## 项目性质
 
-VSCode 插件 `agent-flow`：**用 Agent 编排工作流**。工作流（Flow）是 Agent 作为节点的有向图，每个 Agent 通过 `@anthropic-ai/claude-agent-sdk` 独立运行，拥有自己的上下文；Agent 之间通过 `shareValues`（MCP 工具）共享数据，通过 `outputs[i].next_agent` 决定下一跳。
+VSCode 插件 `agent-flow`：**用 Agent 编排工作流**。工作流（Flow）是 Agent 作为节点的有向图，每个 Agent 通过 `@anthropic-ai/claude-agent-sdk` 独立运行，拥有自己的上下文；Agent 之间通过 `shareValues`（按 key 授权的只读注入 + `AgentComplete` 写入）共享数据，通过 `outputs[i].next_agent` 决定下一跳。
 
 ## 代码风格
 
@@ -50,18 +50,21 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - [FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) —— 全局唯一，持有当前活跃的 `FlowRunner`
 - [FlowRunner](src/extension/FlowRunnerManager/FlowRunner/index.ts) —— 一个 Flow 的一次运行，按 `outputs[i].next_agent` 编排 Agent 切换，为每个 Agent 创建/销毁 `ClaudeExecutor`
 - [ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) —— 封装 `@anthropic-ai/claude-agent-sdk` 的 `query`，负责单个 Agent 的 prompt 流、消息收发、interrupt/resume、canUseTool 判定
-- [AgentControllerMcp](src/common/extension.ts) —— per-Agent 的 MCP server，作为 SDK `mcpServers` 配置注入；提供 `AgentComplete` / `setShareValues` / `getShareValues` / `getAllShareValues` / `validateFlow` 工具
+- [AgentControllerMcp](src/common/extension.ts) —— per-Agent 的 MCP server，作为 SDK `mcpServers` 配置注入；提供 `AgentComplete`（含可选 `shareValues` 参数）/ `validateFlow` / `getFlowJSONSchema` 工具
 
 **webview 端**：组件树由 [App](src/webview/App.tsx) 起，`<AgentFlow>`（xyflow 画布）+ `<ChatDrawer>`（右侧对话抽屉）为两块主区域。所有状态收敛到单一 zustand store [useFlowStore](src/webview/store/flow.ts)（用 `immer` 写 reducer），同时持有持久化的 Flow 定义和运行时 `RunState`；从 extension 来的 signal 也由 store 收敛处理（含上述通知/自动打开 ChatPanel 的副作用）。
 
-`shareValues` 对象在整个 Run 内**以引用**贯穿所有 Agent 的 `AgentControllerMcp`，写入即时对后续 Agent 可见。
+`shareValues` **不再以引用贯穿**所有 Agent。它是 reducer（webview store / extension `FlowRunStateManager`）维护的运行时数据：
+- **读**：构造 `ClaudeExecutor` 时，从 reducer 取最新值，按 `allowed_read_share_values_keys` 过滤后注入到系统提示词「# 可用数据」节，**写死在 prompt 里**，Agent 在本次会话内看到的就是这个快照（中途换值也不会重读）
+- **写**：Agent 调用 `AgentComplete` 时通过 `shareValues` 参数一次性提交，未列在 `allowed_write_share_values_keys` 的 key 会被静默丢弃；写入随 `flow.signal.agentComplete` 一并广播，由 reducer 合并到 state.shareValues
+- **手动叠加**：`FlowRunner.doOnAgentComplete` 切到下一个 agent 时，reducer 此刻还没收到 signal，因此手动 `{ ...getLatestShareValues(), ...result.shareValues }` 给 nextAgent 的 systemPrompt（这是临时计算，FlowRunner 自身不持有 shareValues 字段）
 
 ## 状态机（[src/common/flowState.ts](src/common/flowState.ts)）
 
 [updateFlowRunState](src/common/flowState.ts) 是统管 Flow 运行态的**单一 reducer**：signal 路径上 extension 发出前 / webview 收到后各 reduce 一次，command 路径上 webview 发出前 / extension 收到后各 reduce 一次，两端走同一份 reducer 保证状态推进同步。
 
 - **`FlowPhase` / `AgentPhase`**：`idle | starting | running | result | awaiting-question | awaiting-tool-permission | completed | stopped | error`。`AgentPhase` 与 `FlowPhase` 同构，仅在非活跃 agent 上根据是否完成投影为 `idle`/`completed`
-- **`FlowRunState`** 字段：`runKey`（防竞态）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission` / `shareValues`（跨 Agent 共享数据，以引用贯穿整个 Run）
+- **`FlowRunState`** 字段：`runKey`（防竞态，可选）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission` / `shareValues`（跨 Agent 共享数据，由 reducer 维护，**非引用贯穿**）
 - **守卫**：终态（`stopped` / `completed` / `error`）下除 `flowStart` / `killFlow` 外的消息直接忽略；非 `flowStart` 的消息要求 `state.runId === msg.data.runId`
 - **特殊入口**：`flow.command.flowStart` 覆盖式初始化（state 可为 `undefined`）；`flow.command.killFlow` 任意状态下幂等强制置 `stopped`
 - **`MessageEffect`** 的 5 个 `reason`：`result` / `awaiting-question` / `awaiting-tool-permission` / `flow-completed` / `agent-error`，由 reducer 与新 state 一并产出，调用方负责消费（见下节）
@@ -83,13 +86,22 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - **ChatPanel 的"开始运行"**：`phase === 'idle'` 直接启动，非 idle 非 awaiting 要 modal 确认（会清空运行数据），见 [ChatDrawer.onSend](src/webview/components/ChatDrawer.tsx)
 - **webview 粘贴双路径**：`<AgentFlow>` 内粘贴 = 粘贴 Agent（保留内部连接、ID 重映射）；画布空白 / App 层粘贴 = 作为 Flow JSON 导入
 - **代码片段（CodeRef）的 `line`**：`line?: [number, number]`，整个文件时为 `undefined`。Tag 仅在 `line` 存在时展示行范围；点击 Tag 触发 `openFile`，`line` 为 `undefined` 时只打开文件不选中行。快捷键 `Ctrl+Shift+L`（Mac: `Cmd+Shift+L`）：有选中文字时注入带行范围的片段，**无选中时注入整个文件**(`line` 省略)。
+- **assistant 消息跨 ID 重复**：某些模型（如 glm-5.1）会发 `stop_reason: null` 的完整重述消息，其 `message.id` 与 streaming 事件的 ID 不同。[buildRenderItems.ts](src/webview/components/ChatDrawer/ChatPanel/buildRenderItems.ts) 已处理：移除 trailing streaming items + 按 `stop_reason` 标记 streaming 状态。修改该文件时务必保留此逻辑。
+- **shareValues 是 prompt 快照不是实时变量**：值在构造 `ClaudeExecutor` 时注入到系统提示词后就**不再重读**。Agent 切换时 reducer 还没收到 `agentComplete` signal，[FlowRunner.doOnAgentComplete](src/extension/FlowRunnerManager/FlowRunner/index.ts) 必须手动 `{ ...getLatestShareValues(), ...result.shareValues }` 给下一个 Agent 的 systemPrompt，否则 nextAgent 看到的是合并前的旧快照。
+- **ClaudeExecutor 自带 (runId, sessionId) 校验**：[ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) 暴露 `runId` / `sessionId` getter 与 `matches(runId, sessionId)` 方法。`FlowRunner` 不再维护 `currentRunId/currentSessionId/currentAgentId` 字段，`checkSession` 直接转发到 `currentExecutor?.matches(...)`，避免过渡期切换时 webview 的旧 sessionId 把 interrupt/userMessage 误派发到新 executor。
 
-## ShareValues 双向同步
+## ShareValues 授权读写
 
-- **事件契约**：`flow.command.setShareValues`（webview→extension，full replace）和 `flow.signal.shareValuesChanged`（extension→webview，full replace）
-- **MCP 工具**：Agent 通过 `AgentControllerMcp` 的 `setShareValues` / `getShareValues` / `getAllShareValues` 读写，需开启 `enable_share_values`
-- **UI**：SortableFlowItem 提供 DatabaseOutlined 按钮，Modal 支持增删改 key-value pairs，空 key 自动生成占位名
-- **验证**：排除 `shareValuesChanged` signal 追加到 session.messages，避免污染 ChatPanel；未运行时保存给出 warning
+shareValues 不再是「Agent 自由读写的全局变量」，而是**按 key 授权的契约**：
+
+- **Flow 级声明**：`Flow.shareValuesKeys: string[]` 列出本 Flow 全部可用 key（FlowEditor UI 维护）。删除 key 时自动从所有 Agent 的 `allowed_read/write_share_values_keys` 中清理引用
+- **Agent 级授权**：`allowed_read_share_values_keys` 和 `allowed_write_share_values_keys` 分别声明本 Agent 可读 / 可写的 key 子集。无授权时 Agent **完全感知不到** shareValues 的存在
+- **读路径**：[buildAgentSystemPrompt](src/common/index.ts) 把可读 key 与当前值（缺失为 `null`）以 JSON 形式注入到「# 可用数据」节。**这是 prompt 时点的快照**，Agent 在本会话内不会重新读，运行中改值需要切到下一个 Agent 才生效
+- **写路径**：仅通过 [AgentComplete](src/common/extension.ts) 工具的 `shareValues` 参数提交，schema 由 `allowed_write_share_values_keys` 动态生成；MCP 端按白名单过滤，未授权 key 静默丢弃。`never_complete` 模式无 AgentComplete，因此也无法写入
+- **事件契约**：`flow.signal.agentComplete` 携带 `shareValues` 字段（reducer 合并到 state）；`flow.command.setShareValues`（webview→extension，full replace，**无 runId 字段**，未运行时也能编辑）。**已删除** `flow.signal.shareValuesChanged` 与 `getShareValues` / `setShareValues` / `getAllShareValues` 三个 MCP 工具
+- **运行时取值**：[FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) 构造时接收 `getLatestShareValues(flowId)` 回调，最终指向 `FlowRunStateManager.getFlowRunStates()[flowId]?.shareValues`。`FlowRunner` 不再持有 shareValues 副本
+- **UI**：[FlowEditor](src/webview/components/FlowEditor/index.tsx) 抽屉编辑 Flow 名称、`shareValuesKeys`、运行中各 key 当前值；[AgentEditor](src/webview/components/AgentEditor/index.tsx) 用 multi-select 维护两个授权列表，选项来自当前 Flow 的 `shareValuesKeys`
+- **Flow 完成清空**：reducer 在 phase 转 `completed` 时把 `state.shareValues = {}`，避免污染下一次启动；`flowStart` 改为保留 `state?.shareValues ?? {}` 以便 webview 在未运行时编辑的值能带入新 run
 
 ## Token 追踪
 
@@ -97,3 +109,11 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - **buildRenderItems.ts**：从 assistant 消息提取 usage 生成 message_usage 项；从 result 消息计算回合增量 usage 附加到 turn_end；以 sessionId 为 key 的 Map 缓存机制
 - **MessageBubble.tsx**：`TokenUsageBadge` 组件展示 input/output/cache+/cache→ 标签；turn_end 增强 usage 展示
 - **ChatPanel**：从 sessions 计算 Flow 级累计 usage，header 中以 Tag 展示总量；优先使用 SDK 实际 `total_cost_usd`
+
+## 重点代码速查
+
+- 状态 reducer：**[updateFlowRunState](src/common/flowRunState.ts)**、**[useFlowStore](src/webview/store/flow.ts)**、**[FlowRunStateManager](src/extension/FlowRunStateManager.ts)**
+- 消息渲染：**[buildRenderItems.ts](src/webview/components/ChatDrawer/ChatPanel/buildRenderItems.ts)**、**[ExtensionMessage.ts](src/webview/utils/ExtensionMessage.ts)**、**[MessageBubble.tsx](src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx)**、**[buildRenderItems 文档](docs/assistant-message-cross-id-dedup.md)**
+- 领域模型与校验：**[src/common/index.ts](src/common/index.ts)**（Flow/Agent/Output 定义、validateFlow、matchTool、buildAgentSystemPrompt）
+- Flow 布局：**[flowUtils.ts](src/webview/components/AgentFlow/flowUtils.ts)**（DAG → ReactFlow 层次布局）
+- Token 追踪：**[src/common/flowRunState.ts](src/common/flowRunState.ts)**（TokenUsage 类型、费用计算）、**[buildRenderItems.ts](src/webview/components/ChatDrawer/ChatPanel/buildRenderItems.ts)**（增量 usage 累计）

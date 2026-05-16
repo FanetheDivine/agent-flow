@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react'
+import { memo } from 'react'
 import type { FC } from 'react'
 import { App, Badge, Tag, Tooltip, Typography } from 'antd'
 import { EditOutlined, MessageOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons'
@@ -8,7 +8,6 @@ import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import type { AgentNode } from '../flowUtils'
-import { AgentEditor } from './AgentEditor'
 
 const handleStyle = {
   height: 16,
@@ -24,7 +23,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
   const flowPhase = useFlowStore((s) => s.flowRunStates[flowId]?.phase)
-  const save = useFlowStore((s) => s.save)
 
   const { message } = App.useApp()
   const startFlow = useStartFlow()
@@ -36,23 +34,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
     return fs?.currentAgentId === agentId
   })
   const outputs = agent?.outputs ?? []
-  const allAgents = (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
-
-  // ── Handlers ──
-  const handleSaveAgent = useCallback(
-    (originalId: string, updated: Agent) => {
-      save((flows) => {
-        const f = flows.find((f) => f.id === flowId)
-        if (!f) return
-        f.agents = (f.agents ?? []).map((a) => (a.id === originalId ? updated : a))
-      })
-    },
-    [flowId, save],
-  )
-
-  const editOpen = useFlowStore(
-    (s) => s.editingAgent?.flowId === flowId && s.editingAgent?.agentId === agentId,
-  )
 
   return (
     <>
@@ -194,17 +175,6 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
           />
         )}
       </div>
-
-      <AgentEditor
-        open={editOpen}
-        agent={agent ?? null}
-        allAgents={allAgents}
-        onSave={(updated) => {
-          handleSaveAgent(agentId, updated)
-          useFlowStore.getState().setEditingAgent(undefined)
-        }}
-        onCancel={() => useFlowStore.getState().setEditingAgent(undefined)}
-      />
     </>
   )
 }

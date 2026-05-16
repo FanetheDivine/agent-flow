@@ -15,7 +15,8 @@ type Props = {
 const roleMap = {
   user: {
     placement: 'end' as const,
-    variant: 'filled' as const,
+    variant: 'outlined' as const,
+    styles: { content: { background: '#2a2d4a', borderColor: '#585b70' } },
   },
   ai: {
     placement: 'start' as const,

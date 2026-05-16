@@ -21,6 +21,7 @@ import { logError } from '../../logger'
 export type ExecutorResult = {
   outputName?: string
   content: string
+  shareValues?: Record<string, string>
 }
 
 export type ExecutorEvents = {
@@ -32,8 +33,6 @@ export type ExecutorEvents = {
   onComplete: (result: ExecutorResult) => void
   /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
   onToolPermissionRequest: (req: { toolUseId: string; toolName: string; input: unknown }) => void
-  /** shareValues 被 Agent MCP 写入后触发 */
-  onShareValuesChanged: (shareValues: Record<string, string>) => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -47,8 +46,10 @@ export type ExecutorEvents = {
  * - 在首次获取到 session_id 后通知外部，然后才转发 AI 消息
  */
 export class ClaudeExecutor {
+  readonly runId: string
+  readonly agentId: string
+
   private readonly agent: Agent
-  private readonly shareValues: Record<string, string>
   private readonly prompt: string
   private mcpServer: ReturnType<typeof buildAgentMcpServer> | null = null
   private readonly userInputStream: ReturnType<typeof createMessageChannel<SDKUserMessage>>
@@ -56,9 +57,25 @@ export class ClaudeExecutor {
   private queryInstance: Query | null = null
   private completed = false
   private disposed = false
+  /**
+   * MCP 端 AgentComplete 工具触发后暂存 result，等本回合的 SDK result 消息到达再
+   * fire onComplete。否则上层立即 killCurrentExecutor，最后一条 result（含
+   * modelUsage / total_cost_usd）会被吞掉。
+   */
+  private pendingCompleteResult: ExecutorResult | null = null
 
-  private sessionId: string | null = null
+  private _sessionId: string | null = null
   private events: ExecutorEvents
+
+  /** SDK 在首条消息中分配的会话 ID；`null` 表示尚未建立会话 */
+  get sessionId(): string | null {
+    return this._sessionId
+  }
+
+  /** 比对外部携带的 (runId, sessionId) 是否绑定到当前 executor */
+  matches(runId: string, sessionId: string): boolean {
+    return runId === this.runId && sessionId === this._sessionId
+  }
 
   /** 挂起中的 AskUserQuestion 权限请求：toolUseId -> resolver */
   private pendingPermissions = new Map<string, (result: PermissionResult) => void>()
@@ -70,21 +87,25 @@ export class ClaudeExecutor {
   >()
 
   /**
-   * @param agent - Agent 定义（model、outputs、prompt 等）
-   * @param shareValues - Flow 全局共享上下文（引用传递，MCP 工具直接读写）
-   * @param previousOutput - 上一个 Agent 的输出，用于注入 prompt 上下文
+   * @param runId - FlowRunner 分配的本次运行 ID,贯穿整个 Flow 直到结束
+   * @param agent - Agent 定义(model、outputs、prompt 等)
+   * @param currentShareValues - Flow 全局共享上下文(仅用于注入系统提示词)
+   * @param previousOutput - 上一个 Agent 的输出,用于注入 prompt 上下文
    */
   constructor(
+    runId: string,
     initMessage: UserMessageType,
     agent: Agent,
-    shareValues: Record<string, string>,
+    currentShareValues: Record<string, string>,
     events: ExecutorEvents,
   ) {
+    this.runId = runId
+    this.agentId = agent.id
     this.agent = agent
-    this.shareValues = shareValues
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
-    this.prompt = buildAgentSystemPrompt(agent)
+    // shareValues是写在系统提示词里的 不能即时读写 可以直接构造
+    this.prompt = buildAgentSystemPrompt(agent, currentShareValues)
     this.createQuery(initMessage)
   }
 
@@ -109,6 +130,9 @@ export class ClaudeExecutor {
    */
   async interrupt() {
     if (!this.queryInstance) return
+    // 中断时丢弃尚未通知上层的 AgentComplete pending —— 用户主动打断意味着
+    // 不要继续切到下一个 agent / 完成 flow。
+    this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('interrupted')
     await this.queryInstance.interrupt()
     // 关闭进程
@@ -119,6 +143,7 @@ export class ClaudeExecutor {
   /** 终止执行，销毁 executor */
   kill(): void {
     this.disposed = true
+    this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
     this.mcpServer?.instance.close().catch((err) => {
@@ -222,18 +247,13 @@ export class ClaudeExecutor {
     }
     this.mcpServer = buildAgentMcpServer({
       agent: this.agent,
-      shareValues: this.shareValues,
       onComplete: (result) => {
-        // 首次 AgentComplete 触发后置 completed，防止模型重复调用或
-        // 旧 query 残存事件再次触发 onAgentComplete。
-        // 注意顺序：先调 events.onComplete，成功后才设 completed —— 否则
-        // 上层抛错时 completed 已为 true，AI 重试会被直接 return 静默吞掉。
+        // AgentComplete 触发后不立即通知上层。等 SDK 的 result 消息到达后再 fire，
+        // 否则上层会立刻 killCurrentExecutor，把后续的 result（含 modelUsage /
+        // total_cost_usd）切掉，token 统计就丢了。
         if (this.completed || this.disposed) return
-        this.events.onComplete(result)
-        this.completed = true
-      },
-      onShareValuesChanged: (shareValues) => {
-        this.events.onShareValuesChanged(shareValues)
+        if (this.pendingCompleteResult) return
+        this.pendingCompleteResult = result
       },
     })
     const options: Options = {
@@ -247,8 +267,8 @@ export class ClaudeExecutor {
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
       includePartialMessages: true,
     }
-    if (this.sessionId) {
-      options.resume = this.sessionId
+    if (this._sessionId) {
+      options.resume = this._sessionId
     }
     try {
       this.queryInstance = query({
@@ -258,16 +278,25 @@ export class ClaudeExecutor {
       this.userInputStream.push(message)
       for await (const msg of this.queryInstance) {
         if (this.disposed) break
-        if (!this.sessionId) {
+        if (!this._sessionId) {
           if (!msg.session_id) {
             this.events.onError(new Error(JSON.stringify(msg)))
             break
           }
-          this.sessionId = msg.session_id
+          this._sessionId = msg.session_id
           this.events.onSessionId(msg.session_id)
           this.events.onMessage(message)
         }
         this.events?.onMessage(msg)
+        // result 是本回合最后一条消息（带 modelUsage / total_cost_usd）。如果
+        // 之前 AgentComplete 触发过 onComplete 暂存 pending，此刻才把它通知
+        // 给上层，让 token 信息进入 webview 后再切换/结束。
+        if (msg.type === 'result' && this.pendingCompleteResult && !this.completed) {
+          const pending = this.pendingCompleteResult
+          this.pendingCompleteResult = null
+          this.events.onComplete(pending)
+          this.completed = true
+        }
       }
     } catch (err) {
       if (!this.disposed) {

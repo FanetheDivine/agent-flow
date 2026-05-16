@@ -9,9 +9,11 @@ import { type Agent, AgentSchema, FlowSchema, OutputSchema, validateFlow } from 
 
 export type AgentMcpServerOptions = {
   agent: Agent
-  shareValues: Record<string, string>
-  onComplete: (output: { content: string; outputName?: string }) => void
-  onShareValuesChanged?: (shareValues: Record<string, string>) => void
+  onComplete: (output: {
+    content: string
+    outputName?: string
+    shareValues?: Record<string, string>
+  }) => void
 }
 
 type ToolContent = { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
@@ -41,19 +43,11 @@ function withErrorBoundary<TArgs>(
  * 构建 Agent 控制用 MCP Server
  *
  * 内置工具：
- * - `AgentComplete` — 完成任务并选择输出分支
- * - `setShareValues` — 批量写入 Flow 共享上下文
- * - `getShareValues` — 按键读取共享上下文
- * - `getAllShareValues` — 读取全部共享上下文
+ * - `AgentComplete` — 完成任务并选择输出分支（可选写入 shareValues）
  * - `validateFlow` — 校验工作流定义是否合法
  * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
-export function buildAgentMcpServer({
-  agent,
-  shareValues,
-  onComplete,
-  onShareValuesChanged,
-}: AgentMcpServerOptions) {
+export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
   if (agent.work_mode !== 'never_complete') {
     const outputs = agent.outputs ?? []
@@ -70,83 +64,142 @@ export function buildAgentMcpServer({
       .join('\n')
 
     const hasOutputs = outputNames.length > 0
+    const writeKeys = agent.allowed_write_share_values_keys ?? []
+    const shareValuesSchema =
+      writeKeys.length > 0
+        ? z.object(
+            Object.fromEntries(
+              writeKeys.map((k) => [k, z.string().optional().describe(`key: ${k}`)]),
+            ),
+          )
+        : undefined
+
+    // 共享部分：调用语义 + shareValues 提示。两边（systemPrompt 与本工具描述）措辞一致，
+    // 让 AI 在 systemPrompt 里读过一遍后，工具描述这里再次强化要点。
+    const callSemantics = [
+      '## 调用约束',
+      '- 调用此工具会**立即终止本 Agent**，不可撤销；只在「任务描述」的结束条件已经达成、且与用户对齐之后调用',
+      ...(agent.work_mode === 'require_confirm'
+        ? [
+            '- **必须**先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用本工具',
+          ]
+        : []),
+    ].join('\n')
+
+    const shareValuesNotes =
+      writeKeys.length > 0
+        ? [
+            '## shareValues',
+            '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 `shareValues` 参数输出，仅在 `content` 里描述不算写入：',
+            ...writeKeys.map((k) => `  - "${k}"`),
+            '- 仅可写入上述列出的 key',
+            '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
+            '- `content` 是本次任务的结果文本；`shareValues` 用于按 key 记录用户要求保存的值',
+          ].join('\n')
+        : ''
+
+    const baseDesc = hasOutputs
+      ? `当前任务已完成时调用此工具：选择输出分支并提交任务结果。\n## 可选分支\n${outputDescs}`
+      : '当前任务已完成时调用此工具，提交任务结果。无输出分支。'
+
+    const completeDesc = [baseDesc, callSemantics, shareValuesNotes].filter(Boolean).join('\n\n')
 
     const agentCompleteTool = hasOutputs
       ? tool(
           'AgentComplete',
-          `当前任务已完成时调用此工具。选择输出分支并提交任务结果。\n可选分支：\n${outputDescs}`,
+          completeDesc,
           {
             output_name: z.enum(outputNames as [string, ...string[]]).describe('选择的输出分支名'),
-            content: z.string().describe('输出任务结果，将传递给下一个 Agent 或作为最终结果'),
+            content: z
+              .string()
+              .describe(
+                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 shareValues 的职责',
+              ),
+            ...(shareValuesSchema
+              ? {
+                  shareValues: shareValuesSchema
+                    .optional()
+                    .describe(
+                      '按 key 记录用户要求保存的值；只能写入 allowed_write_share_values_keys 列出的 key。未变化的 key 省略不传',
+                    ),
+                }
+              : {}),
           },
-          withErrorBoundary('AgentComplete', async ({ output_name, content }) => {
-            onComplete({ outputName: output_name, content })
+          withErrorBoundary('AgentComplete', async ({ output_name, content, shareValues }) => {
+            const filteredSv: Record<string, string> = {}
+            if (shareValues && writeKeys.length > 0) {
+              for (const key of writeKeys) {
+                if (key in shareValues) {
+                  filteredSv[key] = shareValues[key]
+                }
+              }
+            }
+            onComplete({
+              outputName: output_name,
+              content,
+              ...(Object.keys(filteredSv).length > 0 ? { shareValues: filteredSv } : {}),
+            })
             return {
-              content: [{ type: 'text', text: `任务完成，输出分支：${output_name}` }],
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    `任务完成，输出分支：${output_name}` +
+                    (Object.keys(filteredSv).length > 0
+                      ? `，写入 shareValues：${JSON.stringify(filteredSv)}`
+                      : ''),
+                },
+              ],
             }
           }),
         )
       : tool(
           'AgentComplete',
-          '当前任务已完成时调用此工具。提交任务结果。无输出分支。',
+          completeDesc,
           {
-            content: z.string().describe('任务结果'),
+            content: z
+              .string()
+              .describe(
+                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 shareValues 的职责',
+              ),
+            ...(shareValuesSchema
+              ? {
+                  shareValues: shareValuesSchema
+                    .optional()
+                    .describe(
+                      '按 key 记录用户要求保存的值；只能写入 allowed_write_share_values_keys 列出的 key。未变化的 key 省略不传',
+                    ),
+                }
+              : {}),
           },
-          withErrorBoundary('AgentComplete', async ({ content }) => {
-            onComplete({ content })
+          withErrorBoundary('AgentComplete', async ({ content, shareValues }) => {
+            const filteredSv: Record<string, string> = {}
+            if (shareValues && writeKeys.length > 0) {
+              for (const key of writeKeys) {
+                if (key in shareValues) {
+                  filteredSv[key] = shareValues[key]
+                }
+              }
+            }
+            onComplete({
+              content,
+              ...(Object.keys(filteredSv).length > 0 ? { shareValues: filteredSv } : {}),
+            })
             return {
-              content: [{ type: 'text', text: '任务完成，无后续输出。' }],
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    '任务完成，无后续输出。' +
+                    (Object.keys(filteredSv).length > 0
+                      ? `，写入 shareValues：${JSON.stringify(filteredSv)}`
+                      : ''),
+                },
+              ],
             }
           }),
         )
     tools.push(agentCompleteTool)
-  }
-  if (agent.enable_share_values) {
-    const setShareValuesTool = tool(
-      'setShareValues',
-      '批量写入键值对到 Flow 全局共享上下文（shareValues），供后续 Agent 读取',
-      {
-        values: z
-          .record(z.string(), z.string())
-          .describe('要写入的键值对，例如：{ "result": "foo", "status": "done" }'),
-      },
-      withErrorBoundary('setShareValues', async ({ values }) => {
-        Object.assign(shareValues, values)
-        onShareValuesChanged?.(shareValues)
-        return {
-          content: [{ type: 'text', text: '写入成功' }],
-        }
-      }),
-    )
-
-    const getShareValuesTool = tool(
-      'getShareValues',
-      '按键列表读取 Flow 全局共享上下文中的值，缺失的键返回 null',
-      {
-        keys: z.array(z.string()).describe('要读取的键名数组，例如：["result", "status"]'),
-      },
-      withErrorBoundary('getShareValues', async ({ keys }) => {
-        const result: Record<string, string | null> = {}
-        for (const key of keys) {
-          result[key] = shareValues[key] ?? null
-        }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result) }],
-        }
-      }),
-    )
-
-    const getAllShareValuesTool = tool(
-      'getAllShareValues',
-      '读取 Flow 全局共享上下文的全部键值对',
-      {},
-      withErrorBoundary('getAllShareValues', async () => {
-        return {
-          content: [{ type: 'text', text: JSON.stringify(shareValues) }],
-        }
-      }),
-    )
-    tools.push(setShareValuesTool, getShareValuesTool, getAllShareValuesTool)
   }
   const validateFlowTool = tool(
     'validateFlow',

@@ -21,7 +21,7 @@ import {
   useFlowStore,
   selectAgentPhase,
   selectFlowPhase,
-  selectPendingQuestionFor,
+  selectPendingQuestionsFor,
   selectPendingToolPermissionFor,
   selectAnsweredToolPermissions,
   flowCanBeKilled,
@@ -68,7 +68,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
 
   const phase = useFlowStore(selectAgentPhase(flowId, agentId))
   const flowPhase = useFlowStore(selectFlowPhase(flowId))
-  const pending = useFlowStore(selectPendingQuestionFor(flowId, agentId))
+  const pendingQuestions = useFlowStore(selectPendingQuestionsFor(flowId, agentId))
   const pendingToolPerm = useFlowStore(selectPendingToolPermissionFor(flowId, agentId))
   const answeredToolPermissions = useFlowStore(selectAnsweredToolPermissions(flowId))
   const allSessions = useFlowStore((s) => s.flowRunStates[flowId]?.sessions)
@@ -124,12 +124,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
     return { totalTokens, totalCost, modelBreakdown }
   }, [allSessions])
 
-  // 当前 Agent 的模型
-  const model = useFlowStore((s) => {
-    const flow = s.flows.find((f) => f.id === flowId)
-    return flow?.agents?.find((a) => a.id === agentId)?.model
-  })
-
   const canKillFlow = flowCanBeKilled(flowPhase)
 
   // AskUserQuestionCard 容器高度,用户可上下拖动调整
@@ -137,12 +131,21 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const [dragging, setDragging] = useState(false)
   const answeredMap = useMemo(() => buildAnsweredMap(answeredQuestions ?? {}), [answeredQuestions])
 
-  const showCard = !!pending
+  // 合并所有 pending questions 的 questions 数组到一张卡片
+  const mergedInput = useMemo(() => {
+    if (pendingQuestions.length === 0) return { questions: [] as import('@/common').AskUserQuestionItem[], toolUseIds: [] as string[] }
+    const allQuestions: import('@/common').AskUserQuestionItem[] = []
+    const toolUseIds: string[] = []
+    for (const pq of pendingQuestions) {
+      toolUseIds.push(pq.toolUseId)
+      for (const q of pq.input.questions ?? []) {
+        allQuestions.push(q)
+      }
+    }
+    return { questions: allQuestions, toolUseIds }
+  }, [pendingQuestions])
 
-  const onActiveSubmit = useCallback(
-    (toolUseId: string, output: AskUserQuestionOutput) => answerQuestion(flowId, toolUseId, output),
-    [answerQuestion, flowId],
-  )
+  const showCard = mergedInput.questions.length > 0
   const onToolPermissionAllow = useCallback(
     (toolUseId: string) => answerToolPermission(flowId, toolUseId, true),
     [answerToolPermission, flowId],
@@ -150,31 +153,6 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const onToolPermissionDeny = useCallback(
     (toolUseId: string) => answerToolPermission(flowId, toolUseId, false),
     [answerToolPermission, flowId],
-  )
-
-  const pendingToolUseId = showCard ? pending?.toolUseId : undefined
-  const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
-  const ctx = useMemo<BubbleCtx>(
-    () => ({
-      pendingToolUseId,
-      answeredMap,
-      onActiveSubmit,
-      pendingToolPermissionToolUseId,
-      answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      model,
-    }),
-    [
-      pendingToolUseId,
-      answeredMap,
-      onActiveSubmit,
-      pendingToolPermissionToolUseId,
-      answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      model,
-    ],
   )
 
   // 消息列表自动滚动控制:默认贴底,用户向上滚后停止跟随,滚回底部时恢复
@@ -204,6 +182,62 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
       dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
     }, 0)
   }, [])
+
+  const onActiveSubmit = useCallback(
+    (_toolUseId: string, output: AskUserQuestionOutput) => {
+      // 把合并后的 answers 按原 pendingQuestions 的顺序拆分回每个 toolUseId
+      const answersPerQuestion: Record<string, string[]> = {}
+      for (const [qText, qAnswers] of Object.entries(output.answers ?? {})) {
+        answersPerQuestion[qText] = qAnswers
+          .split('\x1F')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      }
+
+      for (const pq of pendingQuestions) {
+        const pqAnswers: Record<string, string> = {}
+        for (const q of pq.input.questions ?? []) {
+          const ans = answersPerQuestion[q.question] ?? []
+          pqAnswers[q.question] = ans.join('\x1F')
+        }
+        answerQuestion(flowId, pq.toolUseId, { questions: pq.input.questions, answers: pqAnswers })
+      }
+
+      shouldScrollRef.current = true
+      scrollToBottom()
+    },
+    [answerQuestion, flowId, pendingQuestions, scrollToBottom],
+  )
+
+  const pendingToolUseId = showCard ? mergedInput.toolUseIds[0] : undefined
+  const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
+  const pendingToolUseIds = useMemo(
+    () =>
+      mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined,
+    [mergedInput.toolUseIds],
+  )
+  const ctx = useMemo<BubbleCtx>(
+    () => ({
+      pendingToolUseId,
+      pendingToolUseIds,
+      answeredMap,
+      onActiveSubmit,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    }),
+    [
+      pendingToolUseId,
+      pendingToolUseIds,
+      answeredMap,
+      onActiveSubmit,
+      pendingToolPermissionToolUseId,
+      answeredToolPermissions,
+      onToolPermissionAllow,
+      onToolPermissionDeny,
+    ],
+  )
 
   useImperativeHandle(
     ref,
@@ -320,9 +354,9 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
 
       {/* Pending AskUserQuestion — 固定在输入框上方,不随消息滚动;顶部 handle 可上下拖动调整高度 */}
       <AnimatePresence>
-        {showCard && pending && (
+        {showCard && (
           <motion.div
-            key={`ask-card-${pending.toolUseId}`}
+            key={`ask-card-${mergedInput.toolUseIds.join('-')}`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: cardHeight, opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -349,12 +383,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
             </motion.div>
             <div className='flex-1 overflow-auto px-3 py-2'>
               <AskUserQuestionCard
-                input={pending.input}
+                input={mergedInput}
                 mode='active'
-                onSubmit={(output) => {
-                  answerQuestion(flowId, pending.toolUseId, output)
-                  shouldScrollRef.current = true
-                  scrollToBottom()
+                onSubmit={(output) => onActiveSubmit(mergedInput.toolUseIds[0], output)}
+                onChangeHeight={(h) => {
+                  setCardHeight(Math.max(80, Math.min(600, h)))
                 }}
               />
             </div>

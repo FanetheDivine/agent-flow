@@ -3,13 +3,16 @@ import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from
 import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
+type GetLatestShareValues = (flowId: string) => Record<string, string>
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
   private postMessage: PostMessage
+  private getLatestShareValues: GetLatestShareValues
 
-  constructor(postMessage: PostMessage) {
+  constructor(postMessage: PostMessage, getLatestShareValues: GetLatestShareValues) {
     this.postMessage = postMessage
+    this.getLatestShareValues = getLatestShareValues
   }
 
   handleCommand(type: string, data: any): void {
@@ -18,7 +21,9 @@ export class FlowRunnerManager {
         const { flowId, runKey, agentId, flow, initMessage } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
-        const runner = new FlowRunner(flow)
+        const runner = new FlowRunner(flow, {
+          getLatestShareValues: () => this.getLatestShareValues(flowId),
+        })
         runner.listenAllSignals((eventType, signalData) => {
           this.postMessage({
             type: eventType,

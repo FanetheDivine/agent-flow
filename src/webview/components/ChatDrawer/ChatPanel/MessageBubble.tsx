@@ -1,37 +1,20 @@
-import {
-  isValidElement,
-  memo,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type FC,
-  type ReactNode,
-} from 'react'
-import { Spin, Tag } from 'antd'
-import {
-  CheckCircleFilled,
-  CheckCircleOutlined,
-  CheckOutlined,
-  CloseCircleFilled,
-  CopyOutlined,
-  LoadingOutlined,
-} from '@ant-design/icons'
+import { memo, type FC, type ReactNode } from 'react'
+import { Tag } from 'antd'
+import { CheckCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
-import { XMarkdown, type ComponentProps as XMarkdownComponentProps } from '@ant-design/x-markdown'
-import mermaid from 'mermaid'
-import type { AskUserQuestionOutput, ExtensionToWebviewMessage, TokenUsage } from '@/common'
-import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
+import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
+import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
+import { Copyable, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
+import { ToolUseDetails } from './ToolUseDetails'
 import {
   buildRenderItems,
   clearBuildCache,
   clearBuildCacheForSessions,
   type RenderItem,
-  type ToolResult,
 } from './buildRenderItems'
 
 type Props = {
@@ -44,6 +27,8 @@ export type AnsweredInfo = {
 
 export type BubbleCtx = {
   pendingToolUseId?: string
+  /** 所有未回答的 AskUserQuestion toolUseId 集合，用于从消息列表中隐藏 */
+  pendingToolUseIds?: Set<string>
   answeredMap: Map<string, AnsweredInfo>
   onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
   /** 当前挂起的工具权限请求 toolUseId（若有） */
@@ -52,8 +37,6 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
-  /** 当前 Agent 的模型，用于计算费用 */
-  model?: string
 }
 
 type RenderedBubble = {
@@ -61,137 +44,6 @@ type RenderedBubble = {
   role: 'user' | 'ai' | 'system' | 'divider'
   content: ReactNode
 }
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-  securityLevel: 'loose',
-})
-
-const getTextContent = (node: ReactNode): string => {
-  if (node == null || typeof node === 'boolean') return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(getTextContent).join('')
-  if (isValidElement(node)) {
-    const children = (node.props as { children?: ReactNode }).children
-    return getTextContent(children)
-  }
-  return ''
-}
-
-const PreBlock: FC<XMarkdownComponentProps> = ({ children, className }) => {
-  const text = getTextContent(children)
-  return (
-    <div className='group relative'>
-      <div className='absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity group-hover:opacity-100'>
-        <CopyButton text={text} />
-      </div>
-      <pre className={className}>{children}</pre>
-    </div>
-  )
-}
-
-const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState<string>('')
-  const id = useId()
-
-  useEffect(() => {
-    let cancelled = false
-    const render = async () => {
-      try {
-        const { svg } = await mermaid.render(id, code)
-        if (!cancelled) setSvg(svg)
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? 'Mermaid render error')
-      }
-    }
-    render()
-    return () => {
-      cancelled = true
-    }
-  }, [code, id])
-
-  if (error) {
-    return (
-      <div className='rounded border border-[#f38ba8]/30 bg-[#f38ba8]/5 p-2 text-[12px] text-[#f38ba8]'>
-        Mermaid 渲染失败：{error}
-        <details className='mt-1'>
-          <summary className='cursor-pointer'>查看源码</summary>
-          <pre className='mt-1 max-h-40 overflow-auto text-[10px]'>{code}</pre>
-        </details>
-      </div>
-    )
-  }
-
-  if (!svg) {
-    return (
-      <div className='flex items-center gap-2 py-2 text-[12px] text-[#6c7086]'>
-        <Spin size='small' /> 渲染中...
-      </div>
-    )
-  }
-
-  return (
-    <div ref={containerRef} className='overflow-auto' dangerouslySetInnerHTML={{ __html: svg }} />
-  )
-}
-
-const CodeBlock: FC<XMarkdownComponentProps> = ({ children, lang, block, streamStatus }) => {
-  if (block && lang === 'mermaid' && streamStatus === 'done') {
-    const code = getTextContent(children)
-    return <MermaidDiagram code={code} />
-  }
-  // 流式进行中 mermaid 代码尚未完整，先按普通代码块展示
-  if (block && lang === 'mermaid' && streamStatus === 'loading') {
-    const code = getTextContent(children)
-    return (
-      <pre className='overflow-auto'>
-        <code>{code}</code>
-      </pre>
-    )
-  }
-  return <code>{children}</code>
-}
-
-const MD_COMPONENTS = { pre: PreBlock, code: CodeBlock }
-
-const Md: FC<{ content: string }> = memo(({ content }) => (
-  <XMarkdown
-    className='x-markdown-dark'
-    content={content}
-    components={MD_COMPONENTS}
-    openLinksInNewTab
-    escapeRawHtml
-  />
-))
-
-const CopyButton: FC<{ text: string }> = ({ text }) => {
-  const [copied, setCopied] = useState(false)
-  return (
-    <span
-      className='cursor-pointer text-[11px] text-[#6c7086] transition-colors hover:text-[#cdd6f4]'
-      onClick={() => {
-        navigator.clipboard.writeText(text).then(() => {
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        })
-      }}
-    >
-      {copied ? <CheckOutlined /> : <CopyOutlined />}
-    </span>
-  )
-}
-
-const Copyable: FC<{ text: string; children: ReactNode }> = ({ text, children }) => (
-  <div className='flex'>
-    {children}
-    <div className='ml-1'>
-      <CopyButton text={text} />
-    </div>
-  </div>
-)
 
 // ChatInput 把代码片段 / 文件引用 / 附件序列化为下列 XML：
 //   <code_snippet path="..." lines="N[-M]" language="...">\n...body...\n</code_snippet>
@@ -352,112 +204,26 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   }
 }
 
-/** 根据工具名和输入参数生成一行摘要 */
-function getToolSummary(toolName: string, input: any): string {
-  if (!input || typeof input !== 'object') return toolName
-  const name = toolName.replace(/^mcp__\w+__/, '')
-  switch (name) {
-    case 'Read':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Write':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Edit':
-      return input.file_path ? `${name} ${input.file_path}` : name
-    case 'Bash':
-      return input.command ? `${name} ${input.command}` : name
-    case 'Grep':
-      return input.pattern ? `${name} ${input.pattern}` : name
-    case 'Glob':
-      return input.pattern ? `${name} ${input.pattern}` : name
-    case 'WebFetch':
-      return input.url ? `${name} ${input.url}` : name
-    case 'WebSearch':
-      return input.query ? `${name} ${input.query}` : name
-    case 'Agent':
-      return input.description ? `${name} ${input.description}` : name
-    case 'TodoWrite':
-      return name
-    default:
-      return name
-  }
-}
-
 // ── 渲染层 ───────────────────────────────────────────────────────────────
 // 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
 
-function TokenUsageBadge({
-  usage,
-  model,
-  cost,
-}: {
-  usage: TokenUsage
-  model?: string
-  cost?: number
-}) {
+/** 单条按模型 token 用量行：模型名 + in/out/cache write/cache read + cost */
+function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage }) {
   const parts: string[] = []
-  if (usage.input_tokens > 0) parts.push(`in ${formatTokenCount(usage.input_tokens)}`)
-  if (usage.output_tokens > 0) parts.push(`out ${formatTokenCount(usage.output_tokens)}`)
-  if (usage.cache_creation_input_tokens > 0)
-    parts.push(`cache write ${formatTokenCount(usage.cache_creation_input_tokens)}`)
-  if (usage.cache_read_input_tokens > 0)
-    parts.push(`cache read ${formatTokenCount(usage.cache_read_input_tokens)}`)
-  if (parts.length === 0) return null
-  const costStr =
-    cost !== undefined
-      ? formatTokenCost(cost)
-      : model
-        ? formatTokenCost(calculateTokenCost(usage, model))
-        : ''
+  if (usage.inputTokens > 0) parts.push(`in ${formatTokenCount(usage.inputTokens)}`)
+  if (usage.outputTokens > 0) parts.push(`out ${formatTokenCount(usage.outputTokens)}`)
+  if (usage.cacheCreationInputTokens > 0)
+    parts.push(`cache write ${formatTokenCount(usage.cacheCreationInputTokens)}`)
+  if (usage.cacheReadInputTokens > 0)
+    parts.push(`cache read ${formatTokenCount(usage.cacheReadInputTokens)}`)
+  const tokensText = parts.length > 0 ? `${parts.join(' · ')} tokens` : ''
+  const costStr = usage.costUSD > 0 ? formatTokenCost(usage.costUSD) : ''
   return (
-    <span className='text-[10px] text-[#6c7086]'>
-      {model && <span className='font-semibold text-[#a6adc8]'>{model}</span>}
-      {model ? ` · ${parts.join(' · ')} tokens` : parts.join(' · ')} tokens
+    <div className='text-[10px] text-[#6c7086]'>
+      <span className='font-semibold text-[#a6adc8]'>{model}</span>
+      {tokensText ? ` · ${tokensText}` : ''}
       {costStr ? ` · ${costStr}` : ''}
-    </span>
-  )
-}
-
-function renderToolUseDetails(
-  toolName: string,
-  input: unknown,
-  result: ToolResult | undefined,
-  /** 无 result 时是否视为成功——仅用于 AgentComplete：调用后 executor 立刻 kill，
-   *  正常情况下永远收不到 mcp_tool_result，需结合 session.completed 判断 */
-  treatNoResultAsSuccess = false,
-): ReactNode {
-  const summary = getToolSummary(toolName, input)
-  const hasInput = !!input && typeof input === 'object' && Object.keys(input as object).length > 0
-  return (
-    <details className='text-[11px] text-[#a6adc8]'>
-      <summary className='cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap'>
-        {result ? (
-          result.isError ? (
-            <CloseCircleFilled className='mr-1 text-[#f38ba8]' />
-          ) : (
-            <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
-          )
-        ) : treatNoResultAsSuccess ? (
-          <CheckCircleFilled className='mr-1 text-[#a6e3a1]' />
-        ) : (
-          <Spin
-            size='small'
-            indicator={<LoadingOutlined className='text-[10px]!' />}
-            className='mr-1'
-          />
-        )}
-        {summary}
-      </summary>
-      {hasInput ? (
-        <pre className='mt-1 max-h-40 overflow-auto text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      ) : null}
-      {result && (
-        <pre className='mt-1 max-h-60 overflow-auto border-t border-[#313244] pt-1 text-[10px] break-all whitespace-pre-wrap text-[#7f849c]'>
-          {result.text}
-        </pre>
-      )}
-    </details>
+    </div>
   )
 }
 
@@ -481,21 +247,16 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: item.usage ? (
-          <div>
-            {content}
-            <div className='mt-1'>
-              <TokenUsageBadge usage={item.usage} cost={item.cost} />
-            </div>
-          </div>
-        ) : (
-          content
-        ),
+        content,
       }
     }
     case 'thinking': {
       const inner = (
-        <Think title='思考中' defaultExpanded={item.streaming}>
+        <Think
+          title='思考中'
+          key={item.key + (item.streaming ? 'streaming' : 'completed')}
+          defaultExpanded={item.streaming}
+        >
           <Md content={item.text} />
         </Think>
       )
@@ -515,7 +276,9 @@ function renderItemToBubble(
           content: <AskUserQuestionCard input={item.input} mode='historical' />,
         }
       }
-      const isPending = ctx.pendingToolUseId === item.toolUseId
+      const isPending = ctx.pendingToolUseIds
+        ? ctx.pendingToolUseIds.has(item.toolUseId)
+        : ctx.pendingToolUseId === item.toolUseId
       // pending 卡片不在消息列表中渲染（改为固定在输入框上方），只渲染已回答的历史卡片
       if (isPending) return null
       const answered = ctx.answeredMap.get(item.toolUseId)
@@ -555,29 +318,31 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: renderToolUseDetails(
-          item.toolName,
-          item.input,
-          item.result,
-          sessionCompleted && item.toolName.includes('AgentComplete'),
+        content: (
+          <ToolUseDetails
+            toolName={item.toolName}
+            input={item.input}
+            result={item.result}
+            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('AgentComplete')}
+          />
         ),
       }
     }
     case 'turn_end': {
-      const displayModel = item.model ?? ctx?.model
+      const modelUsages = item.modelUsages ?? []
       return {
         key: item.key,
         role: 'divider',
         content: (
-          <span className='text-[10px] text-[#6c7086]'>
-            <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-            <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
-            {item.usage && (
-              <span className='ml-2'>
-                <TokenUsageBadge usage={item.usage} model={displayModel} cost={item.cost} />
-              </span>
-            )}
-          </span>
+          <div className='flex flex-col gap-0.5'>
+            {modelUsages.map((m) => (
+              <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
+            ))}
+            <span className='text-[10px] text-[#6c7086]'>
+              <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
+              <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+            </span>
+          </div>
         ),
       }
     }
@@ -588,6 +353,7 @@ function renderItemToBubble(
       ]
         .filter(Boolean)
         .join('\n')
+      const breakdown = item.modelBreakdown ?? []
       return {
         key: item.key,
         role: 'ai',
@@ -600,6 +366,19 @@ function renderItemToBubble(
               {item.displayContent && (
                 <div className='mt-2'>
                   <Md content={item.displayContent} />
+                </div>
+              )}
+              {(breakdown.length > 0 || item.totalCost !== undefined) && (
+                <div className='mt-2 border-t border-[#45475a] pt-2'>
+                  <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
+                  {breakdown.map((b) => (
+                    <ModelUsageRow key={b.model} model={b.model} usage={b.usage} />
+                  ))}
+                  {item.totalCost !== undefined && item.totalCost > 0 && (
+                    <div className='mt-1 text-[10px] text-[#a6adc8]'>
+                      合计 {formatTokenCost(item.totalCost)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

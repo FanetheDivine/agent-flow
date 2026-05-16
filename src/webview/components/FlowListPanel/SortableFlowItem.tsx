@@ -1,13 +1,6 @@
 import { useState, type FC } from 'react'
-import { App, Button, Typography, Modal, Input, Empty } from 'antd'
-import {
-  HolderOutlined,
-  DeleteOutlined,
-  BlockOutlined,
-  DatabaseOutlined,
-  PlusOutlined,
-  MinusCircleOutlined,
-} from '@ant-design/icons'
+import { Typography } from 'antd'
+import { HolderOutlined, DeleteOutlined, BlockOutlined, DatabaseOutlined } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Flow } from '@/common'
@@ -41,18 +34,9 @@ export type SortableFlowItemProps = {
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const { flow, isActive, phase, onClick, onDelete, onRename } = props
-  const { save, setActiveFlowId, setFlowListCollapsed, setShareValues, flowRunStates } =
-    useFlowStore()
-  const { message } = App.useApp()
+  const { save, setActiveFlowId, setFlowListCollapsed, setEditingFlowId } = useFlowStore()
   const { id, name } = flow
   const [editing, setEditing] = useState(false)
-  const [shareValuesModalOpen, setShareValuesModalOpen] = useState(false)
-  const [editValues, setEditValues] = useState<Record<string, string>>({})
-  const nextKeyIndex = (vs: Record<string, string>) => {
-    let i = 1
-    while (vs[`key_${i}`]) i++
-    return i
-  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   })
@@ -118,15 +102,13 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
           onClick={(e) => e.stopPropagation()}
         >
           <DatabaseOutlined
-            title='共享数据'
+            title='编辑工作流'
             onClick={(e) => {
-              const current = flowRunStates[id]?.shareValues ?? {}
-              setEditValues(structuredClone(current))
-              setShareValuesModalOpen(true)
+              setEditingFlowId(id)
             }}
             className={cn(
               'text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100',
-              Object.keys(flowRunStates[id]?.shareValues ?? {}).length > 0
+              (flow.shareValuesKeys?.length ?? 0) > 0
                 ? 'hover:text-[#a6e3a1]!'
                 : 'hover:text-[#89b4fa]!',
             )}
@@ -144,20 +126,9 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:text-[#89b4fa]!'
           />
           <Typography.Text
-            copyable={{
-              onCopy: async () => {
-                await navigator.clipboard.writeText(JSON.stringify(flow, null, 2))
-                message.success('复制成功')
-              },
-              tooltips: false,
-            }}
+            copyable={{ tooltips: false, text: () => JSON.stringify(flow, null, 2) }}
           />
-          <DeleteOutlined
-            className='text-[#a6adc8]! hover:text-[#f38ba8]!'
-            onClick={() => {
-              onDelete()
-            }}
-          />
+          <DeleteOutlined className='text-[#a6adc8]! hover:text-[#f38ba8]!' onClick={onDelete} />
         </span>
       </div>
 
@@ -173,86 +144,6 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
           <span>{statusConfig.label}</span>
         </div>
       )}
-
-      <Modal
-        title={`${name} - 共享数据`}
-        open={shareValuesModalOpen}
-        onCancel={() => setShareValuesModalOpen(false)}
-        onOk={() => {
-          const ok = setShareValues(id, editValues)
-          if (!ok) message.warning('Flow 未运行，无法保存共享数据')
-          setShareValuesModalOpen(false)
-        }}
-        okText='保存'
-        width={480}
-      >
-        {Object.keys(editValues).length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='暂无共享数据'>
-            <Button
-              type='dashed'
-              icon={<PlusOutlined />}
-              onClick={() =>
-                setEditValues((prev) => ({ ...prev, [`key_${nextKeyIndex(prev)}`]: '' }))
-              }
-            >
-              添加
-            </Button>
-          </Empty>
-        ) : (
-          <div className='flex flex-col gap-2'>
-            {Object.entries(editValues).map(([key, value], index) => (
-              <div key={index} className='flex items-center gap-2'>
-                <Input
-                  placeholder='Key'
-                  value={key}
-                  size='small'
-                  onChange={(e) => {
-                    const newValues: Record<string, string> = {}
-                    Object.entries(editValues).forEach(([k, v], i) => {
-                      newValues[i === index ? e.target.value : k] = v
-                    })
-                    setEditValues(newValues)
-                  }}
-                  className='flex-1'
-                />
-                <Input
-                  placeholder='Value'
-                  value={value}
-                  size='small'
-                  onChange={(e) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      [key]: e.target.value,
-                    }))
-                  }
-                  className='flex-1'
-                />
-                <Button
-                  type='text'
-                  size='small'
-                  danger
-                  icon={<MinusCircleOutlined />}
-                  onClick={() => {
-                    const newValues = { ...editValues }
-                    delete newValues[key]
-                    setEditValues(newValues)
-                  }}
-                />
-              </div>
-            ))}
-            <Button
-              type='dashed'
-              icon={<PlusOutlined />}
-              onClick={() =>
-                setEditValues((prev) => ({ ...prev, [`key_${nextKeyIndex(prev)}`]: '' }))
-              }
-              block
-            >
-              添加
-            </Button>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

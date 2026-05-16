@@ -114,6 +114,8 @@ type FlowSignalPayload = {
     sessionId: string
     content: string
     output?: { name: string; newSessionId: string }
+    /** Agent 通过 MCP setShareValues 写入的共享数据，作为完成信号的一部分同步给 webview */
+    shareValues?: Record<string, string>
   }
   /** Agent被中断了 */
   agentInterrupted: { runId: string; sessionId: string }
@@ -129,8 +131,6 @@ type FlowSignalPayload = {
     toolName: string
     input: unknown
   }
-  /** shareValues 变更通知（Agent MCP 写入或 webview 编辑后触发） */
-  shareValuesChanged: { runId: string; shareValues: Record<string, string> }
 }
 
 /** FlowRunner 内部信号（不含 flowId，由 FlowRunnerManager 外部注入） */
@@ -170,7 +170,7 @@ type FlowCommandPayload = {
   /** 彻底终止 Flow：销毁 FlowRunner，state 置终态。仅需 flowId，不要求 runId/sessionId */
   killFlow: object
   /** webview 编辑 shareValues 后同步到 extension */
-  setShareValues: { runId: string; values: Record<string, string> }
+  setShareValues: { values: Record<string, string> }
 }
 
 /** FlowRunner 内部指令（不含 flowId） */

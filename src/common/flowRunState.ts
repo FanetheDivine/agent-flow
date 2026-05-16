@@ -50,6 +50,60 @@ export const subtractTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => 
   cache_read_input_tokens: a.cache_read_input_tokens - b.cache_read_input_tokens,
 })
 
+// ── ModelTokenUsage ───────────────────────────────────────────────────────
+//
+// SDK result.modelUsage 是 Record<modelName, ModelUsage>（camelCase），自带
+// SDK 算好的 costUSD。webview 不直连 SDK，所以在 common 镜像等价类型 + helper：
+//   - 计算回合增量（当前 modelUsage 累计 - 上一回合累计）
+//   - 在 agent_complete 上展示 session 累计 breakdown
+
+export type ModelTokenUsage = {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  costUSD: number
+}
+
+export const emptyModelTokenUsage: ModelTokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  costUSD: 0,
+}
+
+export const extractModelTokenUsage = (u: {
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUSD?: number
+}): ModelTokenUsage => ({
+  inputTokens: u.inputTokens ?? 0,
+  outputTokens: u.outputTokens ?? 0,
+  cacheCreationInputTokens: u.cacheCreationInputTokens ?? 0,
+  cacheReadInputTokens: u.cacheReadInputTokens ?? 0,
+  costUSD: u.costUSD ?? 0,
+})
+
+export const subtractModelTokenUsage = (
+  a: ModelTokenUsage,
+  b: ModelTokenUsage,
+): ModelTokenUsage => ({
+  inputTokens: a.inputTokens - b.inputTokens,
+  outputTokens: a.outputTokens - b.outputTokens,
+  cacheCreationInputTokens: a.cacheCreationInputTokens - b.cacheCreationInputTokens,
+  cacheReadInputTokens: a.cacheReadInputTokens - b.cacheReadInputTokens,
+  costUSD: a.costUSD - b.costUSD,
+})
+
+export const isModelTokenUsageNonZero = (u: ModelTokenUsage): boolean =>
+  u.inputTokens > 0 ||
+  u.outputTokens > 0 ||
+  u.cacheCreationInputTokens > 0 ||
+  u.cacheReadInputTokens > 0
+
 // ── Token 定价与费用 ─────────────────────────────────────────────────────
 
 export type TokenPricing = {
@@ -158,7 +212,7 @@ export type PendingToolPermission = {
  */
 export type FlowRunState = {
   /** webview 生成，用于防止多次 run的竞态问题 仅在flowStart使用 */
-  runKey: string
+  runKey?: string
   /** extension 生成的唯一ID 在校验runKey后生成 */
   runId?: string
   phase: FlowPhase
@@ -166,8 +220,8 @@ export type FlowRunState = {
   sessions: AgentSession[]
   /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
   answeredQuestions: Record<string, AskUserQuestionOutput>
-  /** 当前未回答的 AskUserQuestion，显式存储（不从消息反推） */
-  pendingQuestion?: PendingQuestion
+  /** 当前未回答的 AskUserQuestion 队列（按出现顺序），显式存储（不从消息反推） */
+  pendingQuestions: PendingQuestion[]
   /** 已回答的工具权限请求：toolUseId -> allow，用于 UI 回显历史态 */
   answeredToolPermissions: Record<string, { allow: boolean }>
   /** 当前未回答的工具权限请求 */
@@ -228,7 +282,23 @@ export function updateFlowRunState(
         answeredQuestions: {},
         answeredToolPermissions: {},
         currentAgentId: msg.data.agentId,
-        shareValues: {},
+        pendingQuestions: [],
+        shareValues: state?.shareValues ?? {},
+      },
+      effects,
+    }
+  }
+
+  if (msg.type === 'flow.command.setShareValues') {
+    return {
+      state: {
+        phase: 'idle',
+        sessions: [],
+        answeredQuestions: {},
+        answeredToolPermissions: {},
+        pendingQuestions: [],
+        ...state,
+        shareValues: msg.data.values,
       },
       effects,
     }
@@ -253,7 +323,7 @@ export function updateFlowRunState(
   const next = produce(state, (draft) => {
     const flowId = msg.data.flowId
     const clearPendings = () => {
-      draft.pendingQuestion = undefined
+      draft.pendingQuestions = []
       draft.pendingToolPermission = undefined
     }
 
@@ -295,12 +365,12 @@ export function updateFlowRunState(
     const session = draft?.sessions?.find((s) => !s.completed)
     const currentAgentId = draft.currentAgentId
 
-    // signal 统一追加到当前 session 的消息流（shareValuesChanged 除外，不进 ChatPanel）
-    if (msg.type.startsWith('flow.signal.') && msg.type !== 'flow.signal.shareValuesChanged') {
+    // signal 统一追加到当前 session 的消息流
+    if (msg.type.startsWith('flow.signal.')) {
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
-    const prevPendingToolUseId = draft.pendingQuestion?.toolUseId
+    const prevPendingToolUseId = draft.pendingQuestions[0]?.toolUseId
 
     match(msg)
       // ── signals ──────────────────────────────────────────────
@@ -308,29 +378,40 @@ export function updateFlowRunState(
         const { message } = m.data
         if (message.type === 'result') {
           draft.phase = 'result'
-          if (!draft.pendingQuestion && currentAgentId) {
+          if (draft.pendingQuestions.length === 0 && currentAgentId) {
             pushEffect({ flowId, agentId: currentAgentId, reason: 'result' })
           }
           return
         }
         if (session) {
-          const found = extractPendingQuestion(m, draft.answeredQuestions, session.sessionId)
-          if (found) {
-            draft.pendingQuestion = found
+          const found = extractPendingQuestions(m, draft.answeredQuestions, session.sessionId)
+          if (found.length > 0) {
+            // 追加到队列尾部（去重：已存在的 toolUseId 不重复加入）
+            const existingIds = new Set(draft.pendingQuestions.map((q) => q.toolUseId))
+            for (const q of found) {
+              if (!existingIds.has(q.toolUseId)) {
+                draft.pendingQuestions.push(q)
+                existingIds.add(q.toolUseId)
+              }
+            }
             draft.phase = 'awaiting-question'
             // 只在从无 pending 或换到新 toolUseId 时才通知
-            if (found.toolUseId !== prevPendingToolUseId) {
+            if (found[0].toolUseId !== prevPendingToolUseId) {
               pushEffect({ flowId, agentId: session.agentId, reason: 'awaiting-question' })
             }
             return
           }
         }
         // 只在没有未回答的提问/权限请求时才设为 running
-        if (!draft.pendingQuestion && !draft.pendingToolPermission) {
+        if (draft.pendingQuestions.length === 0 && !draft.pendingToolPermission) {
           draft.phase = 'running'
         }
       })
       .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
+        // 合并 agentComplete 携带的 shareValues
+        if (data.shareValues) {
+          draft.shareValues = { ...draft.shareValues, ...data.shareValues }
+        }
         if (session) {
           session.completed = true
           session.outputName = data.output?.name
@@ -353,6 +434,7 @@ export function updateFlowRunState(
           })
         } else {
           draft.phase = 'completed'
+          draft.shareValues = {}
           if (currentAgentId) {
             pushEffect({ flowId, agentId: currentAgentId, reason: 'flow-completed' })
           }
@@ -383,9 +465,6 @@ export function updateFlowRunState(
         draft.phase = 'error'
         clearPendings()
       })
-      .with({ type: 'flow.signal.shareValuesChanged' }, ({ data }) => {
-        draft.shareValues = data.shareValues
-      })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
         // 把用户消息作为 aiMessage 回显追加到 session.messages，消费者侧统一
@@ -407,10 +486,14 @@ export function updateFlowRunState(
       })
       .with({ type: 'flow.command.answerQuestion' }, ({ data }) => {
         draft.answeredQuestions[data.toolUseId] = data.output
-        if (draft.pendingQuestion?.toolUseId === data.toolUseId) {
-          draft.pendingQuestion = undefined
+        // 从队列中移除已回答的问题
+        draft.pendingQuestions = draft.pendingQuestions.filter(
+          (q) => q.toolUseId !== data.toolUseId,
+        )
+        // 如果队列中还有待回答问题，保持 awaiting-question 状态
+        if (draft.pendingQuestions.length === 0) {
+          draft.phase = 'running'
         }
-        draft.phase = 'running'
       })
       .with({ type: 'flow.command.toolPermissionResult' }, ({ data }) => {
         draft.answeredToolPermissions[data.toolUseId] = { allow: data.allow }
@@ -418,9 +501,6 @@ export function updateFlowRunState(
           draft.pendingToolPermission = undefined
         }
         draft.phase = 'running'
-      })
-      .with({ type: 'flow.command.setShareValues' }, ({ data }) => {
-        draft.shareValues = data.values
       })
       .exhaustive()
   })
@@ -430,24 +510,25 @@ export function updateFlowRunState(
 
 // ── 内部辅助 ─────────────────────────────────────────────────────────────────
 
-/** 从 assistant 消息中抽取首个未回答的 AskUserQuestion */
-function extractPendingQuestion(
+/** 从 assistant 消息中抽取所有未回答的 AskUserQuestion */
+function extractPendingQuestions(
   msg: Extract<ExtensionToWebviewMessage, { type: 'flow.signal.aiMessage' }>,
   answered: Record<string, AskUserQuestionOutput>,
   sessionId: string,
-): PendingQuestion | undefined {
+): PendingQuestion[] {
   const m = msg.data.message
-  if (m.type !== 'assistant') return undefined
+  if (m.type !== 'assistant') return []
   const blocks = m.message.content
-  if (!Array.isArray(blocks)) return undefined
+  if (!Array.isArray(blocks)) return []
+  const result: PendingQuestion[] = []
   for (const block of blocks) {
     if (block.type !== 'tool_use' || block.name !== 'AskUserQuestion') continue
     if (answered[block.id]) continue
     const input = block.input as AskUserQuestionInput | undefined
     if (!input || !Array.isArray(input.questions)) continue
-    return { toolUseId: block.id, input, sessionId }
+    result.push({ toolUseId: block.id, input, sessionId })
   }
-  return undefined
+  return result
 }
 
 // ── UI helper ────────────────────────────────────────────────────────────────

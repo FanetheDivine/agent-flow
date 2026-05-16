@@ -3,8 +3,10 @@ import { App as AntdApp, Spin } from 'antd'
 import { useEventListener } from 'ahooks'
 import { z } from 'zod'
 import { FlowSchema } from '@/common'
+import { AgentEditor } from './components/AgentEditor'
 import { AgentFlow } from './components/AgentFlow'
 import { ChatDrawer } from './components/ChatDrawer'
+import { FlowEditor } from './components/FlowEditor'
 import { FlowListPanel } from './components/FlowListPanel'
 import { useFlowStore } from './store/flow'
 
@@ -12,6 +14,7 @@ export const App: FC = () => {
   const { notification } = AntdApp.useApp()
   const { loading, flows, init } = useFlowStore()
   const globalError = useFlowStore((s) => s.globalError)
+
   useEffect(() => init({ notification }), [init, notification])
 
   useEffect(() => {
@@ -42,6 +45,8 @@ export const App: FC = () => {
         <FlowListPanel />
       </div>
       <ChatDrawer />
+      <AgentEditor />
+      <FlowEditor />
     </div>
   )
 }

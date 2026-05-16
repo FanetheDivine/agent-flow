@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { FC } from 'react'
-import { Drawer, Form, Input, Switch, Select, Button, Flex } from 'antd'
+import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex } from 'antd'
 import {
   PlusOutlined,
   MinusCircleOutlined,
@@ -11,16 +11,11 @@ import {
 import { XMarkdown } from '@ant-design/x-markdown'
 import type { Agent } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
+import { useFlowStore } from '@/webview/store/flow'
+import { cn } from '@/webview/utils'
+import { Md } from '../text-components'
 
 const FormItem = Form.Item<Agent>
-
-export type AgentEditorProps = {
-  open: boolean
-  agent: Agent | null
-  allAgents: { id: string; agent_name: string }[]
-  onSave: (agent: Agent) => void
-  onCancel: () => void
-}
 
 const TOOL_OPTIONS = [
   { label: `${MCP_WILDCARD} — 匹配所有 mcp__* 工具`, value: MCP_WILDCARD },
@@ -60,16 +55,27 @@ const AutoAllowedToolsField: FC<{
   )
 }
 
-const SCROLLBAR_STYLE = {
-  scrollbarWidth: 'thin' as const,
-  scrollbarColor: '#45475a transparent',
-}
+export const AgentEditor: FC = () => {
+  const editingAgent = useFlowStore((s) => s.editingAgent)
+  const flows = useFlowStore((s) => s.flows)
+  const save = useFlowStore((s) => s.save)
+  const setEditingAgent = useFlowStore((s) => s.setEditingAgent)
+  const setEditingFlowId = useFlowStore((s) => s.setEditingFlowId)
 
-export const AgentEditor: FC<AgentEditorProps> = (props) => {
-  const { open, agent, allAgents, onSave, onCancel } = props
+  const open = !!editingAgent
+  const agent = (() => {
+    if (!editingAgent) return null
+    const flow = flows.find((f) => f.id === editingAgent.flowId)
+    return flow?.agents?.find((a) => a.id === editingAgent.agentId) ?? null
+  })()
+  const allAgents = (() => {
+    const flow = editingAgent ? flows.find((f) => f.id === editingAgent.flowId) : undefined
+    return (flow?.agents ?? []).map((a) => ({ id: a.id, agent_name: a.agent_name }))
+  })()
+
   const [form] = Form.useForm()
-  const [expanded, setExpanded] = useState(false)
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
+
   const watchedValues = Form.useWatch([], form)
 
   useEffect(() => {
@@ -84,7 +90,8 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
         must_confirm_tools: agent.must_confirm_tools,
         work_mode: agent.work_mode ?? 'auto_complete',
         no_input: agent.no_input ?? false,
-        enable_share_values: agent.enable_share_values ?? false,
+        allowed_read_share_values_keys: agent.allowed_read_share_values_keys ?? [],
+        allowed_write_share_values_keys: agent.allowed_write_share_values_keys ?? [],
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -92,22 +99,19 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
         })),
       }
       form.setFieldsValue(newFormValue)
+    } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPreviewMode('preview')
     }
   }, [open, agent, form])
 
-  const handleOk = () => {
-    form.validateFields().then((val: Omit<Agent, 'id'>) => {
-      onSave({
-        ...val,
-        id: agent?.id ?? crypto.randomUUID(),
-        agent_prompt: watchedValues?.agent_prompt ?? '',
-      })
-    })
-  }
-
-  // 预览时使用完整系统提示词，useWatch 结果可能未初始化需兜底
-  const isValidAgent = (v: any): v is Agent => v && typeof v.agent_prompt === 'string'
+  const isValidAgent = (v: any): v is Agent => v && typeof v.agent_name === 'string'
   const fullPrompt = isValidAgent(watchedValues) ? buildAgentSystemPrompt(watchedValues) : ''
+
+  // 从 Flow 定义中提取全部可用 key 选项
+  const currentFlow = editingAgent ? flows.find((f) => f.id === editingAgent.flowId) : undefined
+  const shareValueKeys = currentFlow?.shareValuesKeys ?? []
+  const shareValueKeyOptions = shareValueKeys.map((k) => ({ label: k, value: k }))
 
   return (
     <Drawer
@@ -115,36 +119,46 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
       title={null}
       placement='left'
       open={open}
-      onClose={onCancel}
-      width={expanded ? 960 : 560}
+      onClose={() => setEditingAgent(undefined)}
+      defaultSize={1200}
+      resizable
       styles={{
         header: { display: 'none' },
         body: { padding: 0 },
-        wrapper: { ...SCROLLBAR_STYLE, transition: 'none' },
+        wrapper: { transition: 'none', minWidth: 1200 },
       }}
       footer={null}
     >
-      <div
+      <Form
+        form={form}
+        layout='vertical'
+        autoComplete='off'
+        className='flex h-full'
         onKeyDown={(e) => {
           if (e.key === 'Escape' || e.key === 'Tab') return
           e.stopPropagation()
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
-        className='flex h-full'
+        onFinish={(val: Omit<Agent, 'id'>) => {
+          save((draftFlows) => {
+            const f = draftFlows.find((f) => f.id === editingAgent!.flowId)
+            if (!f) return
+            f.agents = (f.agents ?? []).map((a) =>
+              a.id === editingAgent!.agentId ? { ...val, id: a.id } : a,
+            )
+          })
+          setEditingAgent(undefined)
+        }}
       >
         {/* 左侧表单 — 独立滚动 */}
-        <div className='flex flex-col' style={{ width: 560 }}>
-          {/* header */}
+        <div className='flex w-120 grow-0 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
-            <CloseOutlined onClick={onCancel} className='mr-2' />
+            <CloseOutlined onClick={() => setEditingAgent(undefined)} className='mr-2' />
             <span>编辑 Agent</span>
           </div>
-          {/* 滚动表单区域 */}
-          <div className='flex-1 overflow-auto' style={SCROLLBAR_STYLE}>
-            <Form form={form} layout='vertical' autoComplete='off' tabIndex={-1} className='p-4'>
-              {/* 隐藏字段：让 Form.useWatch 追踪 agent_prompt */}
-              <FormItem name='agent_prompt' hidden />
+          <div className='flex-1 overflow-auto'>
+            <div className='p-4'>
               <FormItem
                 name='agent_name'
                 label='Agent 名称'
@@ -153,11 +167,7 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                 <Input />
               </FormItem>
 
-              <FormItem
-                name='agent_desc'
-                label='Agent 简介'
-                tooltip='简要描述该 Agent 的职责与定位，会在系统提示词中作为任务上下文注入'
-              >
+              <FormItem name='agent_desc' label='Agent 简介'>
                 <Input placeholder='例如：负责代码评审，检查潜在 bug 与性能问题' />
               </FormItem>
 
@@ -168,24 +178,26 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                   rules={[{ required: true, message: '请选择或输入模型' }]}
                   className='mb-0 flex-1'
                 >
-                  <Select
+                  <AutoComplete
                     placeholder='选择或输入模型名称'
                     allowClear
                     options={[
-                      { label: 'opus', value: 'opus' },
-                      { label: 'gpt-5.5', value: 'gpt-5.5' },
-                      { label: 'glm-5.1', value: 'glm-5.1' },
-                      { label: 'DeepSeek-V4-Pro', value: 'DeepSeek-V4-Pro' },
-                      { label: 'opus4.7', value: 'claude-opus-4-7' },
-                      { label: 'opus4.6', value: 'claude-opus-4-6-v1' },
-                      { label: 'sonnet', value: 'sonnet' },
-                      { label: 'haiku', value: 'haiku' },
-                      { label: 'gpt-5.4', value: 'gpt-5.4' },
-                      { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-                      { label: 'DeepSeek-V4-flash', value: 'DeepSeek-V4-flash' },
+                      { value: 'opus', label: 'opus' },
+                      { value: 'gpt-5.5', label: 'gpt-5.5' },
+                      { value: 'glm-5.1', label: 'glm-5.1' },
+                      { value: 'DeepSeek-V4-Pro', label: 'DeepSeek-V4-Pro' },
+                      { value: 'claude-opus-4-7', label: 'opus4.7' },
+                      { value: 'claude-opus-4-6-v1', label: 'opus4.6' },
+                      { value: 'sonnet', label: 'sonnet' },
+                      { value: 'haiku', label: 'haiku' },
+                      { value: 'gpt-5.4', label: 'gpt-5.4' },
+                      { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+                      { value: 'DeepSeek-V4-flash', label: 'DeepSeek-V4-flash' },
                     ]}
                     filterOption={(inputValue, option) =>
-                      option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false
+                      (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                      option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                      false
                     }
                   />
                 </FormItem>
@@ -233,6 +245,7 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                   tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
                 >
                   <Select
+                    className='w-40'
                     options={[
                       { value: 'auto_complete', label: '自动完成' },
                       { value: 'require_confirm', label: '用户确认后完成' },
@@ -249,30 +262,41 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                 >
                   <Switch />
                 </FormItem>
-
-                <FormItem
-                  name='enable_share_values'
-                  label='共享存储'
-                  tooltip='开启后才会注入 setShareValues / getShareValues / getAllShareValues 工具，并在系统提示词中告知 Agent 共享存储的存在；关闭时本 Agent 完全无感知'
-                  valuePropName='checked'
-                >
-                  <Switch />
-                </FormItem>
               </Flex>
 
-              {/* 提示词：只展示标题 + 展开/收起 Switch，无需 FormItem 避免空白 */}
-              <div className='flex items-center gap-2 py-1'>
-                <span className='text-base font-medium'>提示词</span>
-                <Switch
-                  checked={expanded}
-                  onChange={(v) => {
-                    setExpanded(v)
-                    if (v) setPreviewMode('preview')
-                  }}
-                  checkedChildren='展开'
-                  unCheckedChildren='收起'
+              <FormItem
+                name='allowed_read_share_values_keys'
+                label={
+                  <div className='flex items-center gap-2'>
+                    <span>可读共享数据</span>
+                    <Button
+                      size='small'
+                      type='link'
+                      onClick={() => editingAgent && setEditingFlowId(editingAgent.flowId)}
+                    >
+                      编辑共享存储
+                    </Button>
+                  </div>
+                }
+                tooltip='Agent 在系统提示词中可看到的 shareValues key 子集'
+              >
+                <Select
+                  mode='multiple'
+                  placeholder='从 Flow 共享数据中选择 key'
+                  options={shareValueKeyOptions}
                 />
-              </div>
+              </FormItem>
+              <FormItem
+                name='allowed_write_share_values_keys'
+                label='可写共享数据'
+                tooltip='Agent 完成时通过 AgentComplete 可写入的 shareValues key 子集'
+              >
+                <Select
+                  mode='multiple'
+                  placeholder='从 Flow 共享数据中选择 key'
+                  options={shareValueKeyOptions}
+                />
+              </FormItem>
 
               <FormItem label='输出分支'>
                 <Form.List name='outputs'>
@@ -318,7 +342,10 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                               placeholder='下一个 Agent'
                               size='small'
                               allowClear
-                              options={allAgents.map((a) => ({ label: a.agent_name, value: a.id }))}
+                              options={allAgents.map((a) => ({
+                                label: a.agent_name,
+                                value: a.id,
+                              }))}
                             />
                           </Form.Item>
                           <MinusCircleOutlined
@@ -343,51 +370,49 @@ export const AgentEditor: FC<AgentEditorProps> = (props) => {
                   )}
                 </Form.List>
               </FormItem>
-            </Form>
+            </div>
           </div>
           {/* 底部保存按钮 — 固定不滚动 */}
           <div className='border-t border-[#313244] px-4 py-3'>
-            <Button type='primary' block onClick={handleOk}>
+            <Button type='primary' htmlType='submit' block>
               保存
             </Button>
           </div>
         </div>
 
-        {/* 右侧提示词面板（仅展开态）— 独立滚动 */}
-        {expanded && (
-          <div className='flex h-full w-150 flex-col overflow-hidden border-l border-[#313244]'>
-            <div className='flex items-center gap-2 px-3 py-2'>
-              <span className='text-[12px] text-[#a6adc8]'>提示词</span>
-              <Switch
-                size='small'
-                checked={previewMode === 'preview'}
-                onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
-                checkedChildren={<EyeOutlined />}
-                unCheckedChildren={<EditOutlined />}
-              />
-            </div>
-
-            <div className='flex-1 overflow-auto' style={SCROLLBAR_STYLE}>
-              {previewMode === 'edit' ? (
-                <div className='h-full overflow-hidden p-3'>
-                  <Input.TextArea
-                    className='h-full! min-h-full overflow-auto'
-                    value={watchedValues?.agent_prompt ?? ''}
-                    onChange={(e) => form.setFieldValue('agent_prompt', e.target.value)}
-                    placeholder='请输入提示词'
-                    style={SCROLLBAR_STYLE}
-                    autoSize={{ minRows: 15 }}
-                  />
-                </div>
-              ) : (
-                <div className='p-3'>
-                  <XMarkdown>{fullPrompt || '_暂无提示词_'}</XMarkdown>
-                </div>
-              )}
-            </div>
+        {/* 右侧提示词面板— 独立滚动 */}
+        <div
+          className={cn('flex h-full flex-1 flex-col overflow-hidden border-l border-[#313244]')}
+        >
+          <div className='flex items-center gap-2 px-3 py-2'>
+            <span className='text-base font-medium'>提示词</span>
+            <Switch
+              checked={previewMode === 'preview'}
+              onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
+              checkedChildren={<EyeOutlined />}
+              unCheckedChildren={<EditOutlined />}
+            />
           </div>
-        )}
-      </div>
+
+          <div className={cn('flex-1 overflow-hidden', { 'px-2': previewMode === 'edit' })}>
+            <FormItem name='agent_prompt' noStyle>
+              <Input.TextArea
+                className={cn('hidden h-full w-full resize-none overflow-auto', {
+                  block: previewMode === 'edit',
+                })}
+                placeholder='请输入提示词'
+              />
+            </FormItem>
+
+            {previewMode === 'preview' && (
+              <Md
+                className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'
+                content={fullPrompt}
+              ></Md>
+            )}
+          </div>
+        </div>
+      </Form>
     </Drawer>
   )
 }

@@ -39,7 +39,6 @@ const RunStateSchema = z.object({
     })
     .optional(),
   steps: z.array(StepSchema),
-  shareValues: z.record(z.string(), z.string()),
 })
 
 type RunState = z.infer<typeof RunStateSchema>
@@ -53,19 +52,27 @@ type WildcardSignalHandler = (
   data: FlowRunnerSignalEvents[keyof FlowRunnerSignalEvents],
 ) => void
 
+export type FlowRunnerOptions = {
+  /**
+   * 取当前 Flow 最新的 shareValues。
+   * FlowRunner 不再自己维护 shareValues 副本：构造 ClaudeExecutor 注入 systemPrompt
+   * 时调用此回调，由外部（reducer 镜像 FlowRunStateManager）作为唯一真相源。
+   */
+  getLatestShareValues: () => Record<string, string>
+}
+
 export class FlowRunner {
   readonly flow: Flow
 
-  private runState: RunState = { steps: [], shareValues: {} }
+  private runState: RunState = { steps: [] }
   private currentExecutor: ClaudeExecutor | null = null
-  private currentRunId: string | null = null
-  private currentSessionId: string | null = null
-  private currentAgentId: string | null = null
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
+  private readonly getLatestShareValues: () => Record<string, string>
 
-  constructor(flow: Flow) {
+  constructor(flow: Flow, options: FlowRunnerOptions) {
     this.flow = flow
+    this.getLatestShareValues = options.getLatestShareValues
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -117,7 +124,8 @@ export class FlowRunner {
         // killFlow 走 FlowRunnerManager.disposeRunner，不在此处处理
       })
       .with('flow.command.setShareValues', () => {
-        this.handleSetShareValues(data as FlowRunnerCommandEvents['flow.command.setShareValues'])
+        // FlowRunner 不再维护 shareValues 副本：reducer（webview/FlowRunStateManager）
+        // 是唯一真相源，构造 ClaudeExecutor 时通过 getLatestShareValues() 实时取。
       })
       .exhaustive()
   }
@@ -171,12 +179,12 @@ export class FlowRunner {
       return
     }
 
-    // 重置运行状态
-    this.runState = { steps: [], shareValues: {} }
-    this.currentRunId = crypto.randomUUID()
+    // 重置运行状态。shareValues 不再由 FlowRunner 维护——构造 ClaudeExecutor 时
+    // 通过 getLatestShareValues() 直接从 reducer 取最新值。
+    this.runState = { steps: [] }
+    const runId = crypto.randomUUID()
 
     // 启动 agent（sessionId 由 executor 从 SDK 获取后回调）
-    const runId = this.currentRunId!
     const effectiveInitMessage = agent.no_input
       ? {
           type: 'user' as const,
@@ -184,8 +192,7 @@ export class FlowRunner {
           parent_tool_use_id: null,
         }
       : initMessage
-    this.runAgent(effectiveInitMessage, agent, (sessionId) => {
-      this.currentSessionId = sessionId
+    this.runAgent(runId, effectiveInitMessage, agent, this.getLatestShareValues(), (sessionId) => {
       this.fire('flow.signal.flowStart', {
         runId,
         runKey,
@@ -211,16 +218,13 @@ export class FlowRunner {
     runId,
     sessionId,
   }: FlowRunnerCommandEvents['flow.command.interrupt']) {
-    if (!this.checkSession(runId, sessionId)) return
-    if (!this.currentExecutor) return
+    const executor = this.currentExecutor
+    if (!executor?.matches(runId, sessionId)) return
 
     // 调用 executor 的 interrupt，内部处理中断+后续 resume 逻辑
-    await this.currentExecutor.interrupt()
-    this.updateAgentStatus('ready')
-    this.fire('flow.signal.agentInterrupted', {
-      runId: this.currentRunId!,
-      sessionId: this.currentSessionId!,
-    })
+    await executor.interrupt()
+    this.updateAgentStatus(executor.agentId, 'ready')
+    this.fire('flow.signal.agentInterrupted', { runId, sessionId })
   }
 
   private handleAnswerQuestion({
@@ -245,31 +249,16 @@ export class FlowRunner {
     this.currentExecutor.answerToolPermission(toolUseId, allow)
   }
 
-  private handleSetShareValues({
-    runId,
-    values,
-  }: FlowRunnerCommandEvents['flow.command.setShareValues']): void {
-    if (this.currentRunId !== runId) return
-    const sv = this.runState.shareValues
-    for (const k of Object.keys(sv)) delete sv[k]
-    Object.assign(sv, values)
-    this.fire('flow.signal.shareValuesChanged', {
-      runId,
-      shareValues: { ...this.runState.shareValues },
-    })
-  }
-
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private runAgent(
+    runId: string,
     initMessage: UserMessageType,
     agent: Agent,
+    currentShareValues: Record<string, string>,
     onSessionId: (sessionId: string) => void,
   ): void {
-    this.currentAgentId = agent.id
-    this.updateAgentStatus('preparing')
-
-    const runId = this.currentRunId!
+    this.updateAgentStatus(agent.id, 'preparing')
 
     // 初始化当前 step
     this.runState.steps.push({
@@ -277,66 +266,71 @@ export class FlowRunner {
       messages: [],
     })
 
-    this.updateAgentStatus('generating')
+    this.updateAgentStatus(agent.id, 'generating')
 
-    // 本次 executor 专属 session 快照，防止过渡期间被 this.currentSessionId 覆盖污染
-    let executorSessionId: string | null = null
-
-    this.currentExecutor = new ClaudeExecutor(initMessage, agent, this.runState.shareValues, {
-      onSessionId: (sessionId) => {
-        executorSessionId = sessionId
-        onSessionId(sessionId)
+    const executor: ClaudeExecutor = new ClaudeExecutor(
+      runId,
+      initMessage,
+      agent,
+      currentShareValues,
+      {
+        onSessionId,
+        onMessage: (message) => {
+          if (!executor.sessionId) return
+          this.fire('flow.signal.aiMessage', { runId, sessionId: executor.sessionId, message })
+        },
+        onComplete: (result) => {
+          // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
+          if (this.currentExecutor !== executor) return
+          this.onAgentComplete(executor, agent, result)
+        },
+        onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
+          if (!executor.sessionId) return
+          this.fire('flow.signal.toolPermissionRequest', {
+            runId,
+            sessionId: executor.sessionId,
+            toolUseId,
+            toolName,
+            input,
+          })
+        },
+        onError: (err) => {
+          logError(`[FlowRunner] agent ${agent.id} error:`, err)
+          this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
+          this.updateAgentStatus(agent.id, 'completed')
+        },
       },
-      onMessage: (message) => {
-        if (!executorSessionId) return
-        this.fire('flow.signal.aiMessage', { runId, sessionId: executorSessionId, message })
-      },
-      onComplete: (result) => {
-        // 只接受当前 executor 的完成事件，防止旧 executor 残留回调污染过渡后的状态
-        if (this.currentAgentId !== agent.id) return
-        this.onAgentComplete(agent, result)
-      },
-      onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
-        if (!executorSessionId) return
-        this.fire('flow.signal.toolPermissionRequest', {
-          runId,
-          sessionId: executorSessionId,
-          toolUseId,
-          toolName,
-          input,
-        })
-      },
-      onShareValuesChanged: (shareValues) => {
-        this.fire('flow.signal.shareValuesChanged', {
-          runId,
-          shareValues: { ...shareValues },
-        })
-      },
-      onError: (err) => {
-        logError(`[FlowRunner] agent ${agent.id} error:`, err)
-        this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
-        this.updateAgentStatus('completed')
-      },
-    })
+    )
+    this.currentExecutor = executor
   }
 
-  private onAgentComplete(agent: Agent, result: ExecutorResult): void {
+  private onAgentComplete(
+    executor: ClaudeExecutor,
+    agent: Agent,
+    result: ExecutorResult,
+  ): void {
     try {
-      this.doOnAgentComplete(agent, result)
+      this.doOnAgentComplete(executor, agent, result)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logError(`[FlowRunner] onAgentComplete failed (agent=${agent.id}):`, err)
       this.fire('flow.signal.error', { msg: `agent complete failed: ${msg}` })
-      this.updateAgentStatus('completed')
+      this.updateAgentStatus(agent.id, 'completed')
       // 继续向上抛，让 MCP withErrorBoundary 也能把 isError 反馈给 AI
       throw err
     }
   }
 
-  private doOnAgentComplete(agent: Agent, result: ExecutorResult): void {
+  private doOnAgentComplete(
+    executor: ClaudeExecutor,
+    agent: Agent,
+    result: ExecutorResult,
+  ): void {
     const { outputName, content } = result
-    const runId = this.currentRunId!
-    const sessionId = this.currentSessionId!
+    const runId = executor.runId
+    // 切到下一个 agent 前要先 kill 当前 executor，sessionId 在 kill 后还要带进
+    // signal，所以提前快照。executor 进入 onComplete 时一定已经拿到 sessionId。
+    const oldSessionId = executor.sessionId!
 
     // 记录 step output
     const currentStep = this.runState.steps[this.runState.steps.length - 1]
@@ -355,39 +349,47 @@ export class FlowRunner {
       const nextAgent = this.findAgentById(nextAgentId)
       if (!nextAgent) {
         this.fire('flow.signal.error', { msg: `Next agent "${nextAgentId}" not found` })
-        this.updateAgentStatus('completed')
+        this.updateAgentStatus(agent.id, 'completed')
         return
       }
 
       // 终结旧 executor（query 仍可能在发送 AgentComplete 的 tool_result 尾音），
       // 必须 kill 后再建新 executor，否则旧消息会被错误地挂到新 session 上。
+      // killCurrentExecutor 会把 this.currentExecutor 置 null —— 此时 webview
+      // 仍持有旧 sessionId，checkSession 因为 currentExecutor 为 null 直接拒绝，
+      // 旧的 interrupt/userMessage 不会派发到尚未拿到 sessionId 的新 executor。
       this.killCurrentExecutor()
-      // 过渡期间清空 currentSessionId：此时 webview 仍持有旧 sessionId，
-      // 若保留旧值会让 checkSession 放行命令，导致把 interrupt/userMessage
-      // 错误地派发给已经切到下一个 agent 的 currentExecutor。
-      this.currentSessionId = null
       // 切换到下一个 agent
       const nextInitMessage = {
         type: 'user' as const,
         message: { role: 'user' as const, content: nextAgent.no_input ? '开始' : content },
         parent_tool_use_id: null,
       }
-      this.runAgent(nextInitMessage, nextAgent, (newSessionId) => {
-        this.currentSessionId = newSessionId
+      // 局部叠加：reducer 此刻尚未收到 agentComplete signal，getLatestShareValues 拿到
+      // 的还是合并前的值，因此手动叠加 result.shareValues 给 nextAgent 的 systemPrompt。
+      // FlowRunner 自身不持有 shareValues 状态——这是临时计算，不是字段维护。
+      const nextShareValues = result.shareValues
+        ? { ...this.getLatestShareValues(), ...result.shareValues }
+        : this.getLatestShareValues()
+      this.runAgent(runId, nextInitMessage, nextAgent, nextShareValues, (newSessionId) => {
         this.fire('flow.signal.agentComplete', {
           runId,
-          sessionId,
+          sessionId: oldSessionId,
           content,
           output: { name: result.outputName!, newSessionId },
+          shareValues: result.shareValues,
         })
       })
     } else {
       // Flow 结束
       this.killCurrentExecutor()
-      this.fire('flow.signal.agentComplete', { runId, sessionId, content: result.content })
-      this.updateAgentStatus('completed')
-      this.currentSessionId = null
-      this.currentAgentId = null
+      this.fire('flow.signal.agentComplete', {
+        runId,
+        sessionId: oldSessionId,
+        content: result.content,
+        shareValues: result.shareValues,
+      })
+      this.updateAgentStatus(agent.id, 'completed')
     }
   }
 
@@ -398,10 +400,7 @@ export class FlowRunner {
   }
 
   private checkSession(runId: string, sessionId: string): boolean {
-    if (runId !== this.currentRunId || sessionId !== this.currentSessionId) {
-      return false
-    }
-    return true
+    return this.currentExecutor?.matches(runId, sessionId) ?? false
   }
 
   private killCurrentExecutor(): void {
@@ -411,9 +410,10 @@ export class FlowRunner {
     }
   }
 
-  private updateAgentStatus(status: NonNullable<RunState['currentAgent']>['status']): void {
-    if (this.currentAgentId) {
-      this.runState.currentAgent = { id: this.currentAgentId, status }
-    }
+  private updateAgentStatus(
+    agentId: string,
+    status: NonNullable<RunState['currentAgent']>['status'],
+  ): void {
+    this.runState.currentAgent = { id: agentId, status }
   }
 }
