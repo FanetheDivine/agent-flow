@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type FC } from 'react'
-import { Drawer, Form, Input, Button, Select, Tag, Switch } from 'antd'
-import { CloseOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons'
+import { Drawer, Form, Input, Button, Select, Tag, Switch, Tooltip } from 'antd'
+import {
+  CloseOutlined,
+  EyeOutlined,
+  EditOutlined,
+  QuestionCircleOutlined,
+} from '@ant-design/icons'
 import { XMarkdown } from '@ant-design/x-markdown'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
@@ -127,8 +132,25 @@ export const FlowEditor: FC = () => {
 
               <Form.Item
                 name='shareValuesKeys'
-                label='共享数据'
-                tooltip='点 tag 打开右侧面板编辑值；点叉号删除该 key'
+                label={
+                  <span>
+                    共享数据
+                    <Tooltip title='点 tag 打开右侧面板编辑值；点叉号删除该 key'>
+                      <QuestionCircleOutlined style={{ marginInlineStart: 4 }} />
+                    </Tooltip>
+                    <Button
+                      type='link'
+                      size='small'
+                      onClick={() => {
+                        form.setFieldValue('shareValues', {})
+                        setShareValues(flow.id, {})
+                        setEditingKey(null)
+                      }}
+                    >
+                      清空
+                    </Button>
+                  </span>
+                }
                 rules={[
                   {
                     validator: (_, val: string[] = []) =>
