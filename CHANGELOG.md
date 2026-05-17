@@ -1,5 +1,15 @@
 # Change Log
 
+## [0.0.15] - 2026-05-17
+
+### 修复
+
+- **画布同步丢失 Flow 非 agents 字段**：`reactFlowToFlow` 原签名只接收 `id / name / agents`，导致画布上任何编辑（节点增删、连线调整等）触发 `syncToFlow` 时，会把 `flow_desc`、`shareValuesKeys` 以及未来新增的 Flow 顶层字段全部抹掉。改为接收完整 `flow` 对象，输出时 `{ ...flow, agents }` 透传 agents 以外的所有字段；`AgentFlow/index.tsx` 中 `syncToFlow` 的依赖也由细粒度字段改为整 `flow` 引用。
+
+### 优化
+
+- **默认「修改代码」工作流精简**：移除原 `需求分析-glm` 节点（与 `需求分析-opus` 职责重合）；`修改代码` agent 的模型从 `glm-5.1` 切换到 `opus`，提升默认体验下的修改质量；统一 `更新summary` 段落措辞为「如果用户提出新需求」。
+
 ## [0.0.14] - 2026-05-17
 
 ### 破坏性变更
