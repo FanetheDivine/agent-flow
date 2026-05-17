@@ -129,7 +129,9 @@ export const FlowEditor: FC = () => {
 
   useEffect(() => {
     if (open && flow) {
-      // shareValues 是运行时数据，不持久化；未运行时为空对象。
+      // shareValues 是 nested 字段，setFieldsValue 对未在新值中出现的子 key 不会清除，
+      // 跨 flow 切换时会读到上一次 form 内部 store 的残留值，所以先 reset 再赋值。
+      form.resetFields()
       form.setFieldsValue({
         name: flow.name,
         flow_desc: flow.flow_desc ?? '',
