@@ -354,6 +354,7 @@ function renderItemToBubble(
         .filter(Boolean)
         .join('\n')
       const breakdown = item.modelBreakdown ?? []
+      const shareEntries = item.shareValues ? Object.entries(item.shareValues) : []
       return {
         key: item.key,
         role: 'ai',
@@ -366,6 +367,21 @@ function renderItemToBubble(
               {item.displayContent && (
                 <div className='mt-2'>
                   <Md content={item.displayContent} />
+                </div>
+              )}
+              {shareEntries.length > 0 && (
+                <div className='mt-2 border-t border-[#45475a] pt-2'>
+                  <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
+                  <div className='flex flex-col gap-1'>
+                    {shareEntries.map(([k, v]) => (
+                      <div key={k} className='text-[11px]'>
+                        <Tag color='blue' className='m-0 mr-1 text-[10px]'>
+                          {k}
+                        </Tag>
+                        <span className='break-all whitespace-pre-wrap text-[#cdd6f4]'>{v}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {(breakdown.length > 0 || item.totalCost !== undefined) && (

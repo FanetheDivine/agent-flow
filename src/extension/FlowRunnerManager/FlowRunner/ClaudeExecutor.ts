@@ -63,6 +63,12 @@ export class ClaudeExecutor {
    * modelUsage / total_cost_usd）会被吞掉。
    */
   private pendingCompleteResult: ExecutorResult | null = null
+  /**
+   * 等待本回合 SDK result 消息到达的 resolver。任何路径调 SDK interrupt 都靠它
+   * 阻塞,确保 onMessage 把 result(含 modelUsage / total_cost_usd)透传到 webview
+   * 后再 close。两类触发：用户主动 interrupt + AgentComplete 后内部 interrupt。
+   */
+  private resolveResultArrived: (() => void) | null = null
 
   private _sessionId: string | null = null
   private events: ExecutorEvents
@@ -134,9 +140,30 @@ export class ClaudeExecutor {
     // 不要继续切到下一个 agent / 完成 flow。
     this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('interrupted')
-    await this.queryInstance.interrupt()
-    // 关闭进程
-    this.queryInstance.close()
+    await this.interruptAndAwaitResult()
+  }
+
+  /**
+   * 触发 SDK interrupt 并阻塞到本回合 result 消息(含 modelUsage / total_cost_usd)
+   * 被 for-await 透传给 onMessage 后才 close,否则 token 统计会被丢。3s 兜底防止
+   * SDK 异常导致 hang。两类调用方:用户主动 interrupt + AgentComplete onComplete。
+   */
+  private async interruptAndAwaitResult(): Promise<void> {
+    if (!this.queryInstance) return
+    const resultArrived = new Promise<void>((r) => {
+      this.resolveResultArrived = r
+    })
+    try {
+      await this.queryInstance.interrupt()
+    } catch (err) {
+      logError('[ClaudeExecutor] queryInstance.interrupt() failed:', err)
+    }
+    await Promise.race([
+      resultArrived,
+      new Promise<void>((r) => setTimeout(r, 3000)),
+    ])
+    this.resolveResultArrived = null
+    this.queryInstance?.close()
     this.queryInstance = null
   }
 
@@ -254,6 +281,12 @@ export class ClaudeExecutor {
         if (this.completed || this.disposed) return
         if (this.pendingCompleteResult) return
         this.pendingCompleteResult = result
+        // 立即 interrupt SDK,避免模型在 AgentComplete 之后继续生成多余文字。
+        // interruptAndAwaitResult 会阻塞到 result 消息抵达后才 close,
+        // 与用户主动 interrupt 共用同一条等待+关闭路径,token 统计不丢。
+        this.interruptAndAwaitResult().catch((err) => {
+          logError('[ClaudeExecutor] interrupt after AgentComplete failed:', err)
+        })
       },
     })
     const options: Options = {
@@ -288,14 +321,20 @@ export class ClaudeExecutor {
           this.events.onMessage(message)
         }
         this.events?.onMessage(msg)
-        // result 是本回合最后一条消息（带 modelUsage / total_cost_usd）。如果
-        // 之前 AgentComplete 触发过 onComplete 暂存 pending，此刻才把它通知
-        // 给上层，让 token 信息进入 webview 后再切换/结束。
-        if (msg.type === 'result' && this.pendingCompleteResult && !this.completed) {
-          const pending = this.pendingCompleteResult
-          this.pendingCompleteResult = null
-          this.events.onComplete(pending)
-          this.completed = true
+        // result 是本回合最后一条消息（带 modelUsage / total_cost_usd）。
+        if (msg.type === 'result') {
+          // 通知正在等待 result 的 interrupt 路径可以 close 了(用户主动中断
+          // 或 AgentComplete 内部触发的 interrupt 都共用此 resolver)。
+          this.resolveResultArrived?.()
+          this.resolveResultArrived = null
+          // 之前 AgentComplete 触发过 onComplete 暂存 pending,此刻才把它通知
+          // 给上层,让 token 信息进入 webview 后再切换 / 结束。
+          if (this.pendingCompleteResult && !this.completed) {
+            const pending = this.pendingCompleteResult
+            this.pendingCompleteResult = null
+            this.events.onComplete(pending)
+            this.completed = true
+          }
         }
       }
     } catch (err) {

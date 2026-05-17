@@ -41,6 +41,8 @@ export type RenderItem =
       key: string
       outputName?: string
       displayContent?: string
+      /** Agent 通过 AgentComplete 写入的 shareValues 变更 */
+      shareValues?: Record<string, string>
       /** 截至本 session 结束的 token 累计（按模型拆分），来自最后一条 result.modelUsage */
       modelBreakdown?: Array<{ model: string; usage: ModelTokenUsage }>
       /** 截至本 session 结束的总成本，来自最后一条 result.total_cost_usd */
@@ -55,6 +57,12 @@ type CacheEntry = {
   prevModelUsage: Record<string, ModelTokenUsage>
   /** 截至最近一条 result 的 total_cost_usd（session 累计成本） */
   lastTotalCost: number
+  /**
+   * AgentComplete 的 mcp_tool_use 已出现。该 tool 一旦被调用就标志 agent 决定收尾,
+   * 后续 SDK 还可能因为中断时序生成多余消息(text / 重试 tool_use / 失败 tool_result),
+   * 这些都应被丢弃,只保留 flow.signal.agentComplete 的「完成卡片」。
+   */
+  agentCompleteSeen: boolean
 }
 
 // ── 缓存 ─────────────────────────────────────────────────────────────────
@@ -129,6 +137,10 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         key: `${mIdx}-complete`,
         outputName: data.output?.name,
         displayContent: data.content,
+        shareValues:
+          data.shareValues && Object.keys(data.shareValues).length > 0
+            ? data.shareValues
+            : undefined,
         modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
         totalCost: cached.lastTotalCost > 0 ? cached.lastTotalCost : undefined,
       })
@@ -136,6 +148,9 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
     }
 
     if (msg.type !== 'flow.signal.aiMessage') continue
+    // AgentComplete tool_use 一旦出现就视为本 session 收尾,后续 ai 消息（含
+    // 中断时序产生的多余 text / 重试 tool_use / MCP AbortError tool_result）一律丢弃。
+    if (cached.agentCompleteSeen) continue
     const { message } = msg.data
 
     if (message.type === 'user') {
@@ -184,6 +199,8 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       }
 
       blocks.forEach((block: any, bIdx: number) => {
+        // 同一条 assistant 消息中,AgentComplete 之后的 block 一律忽略。
+        if (cached.agentCompleteSeen) return
         const key = `${mIdx}-${bIdx}`
         if (block.type === 'text' && typeof block.text === 'string') {
           items.push({ kind: 'text', key, text: block.text, streaming: false })
@@ -196,6 +213,23 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
           const toolName =
             'server_name' in block ? `${block.server_name}::${block.name}` : block.name
+          // AgentComplete 是终结型 tool —— 不渲染 tool 卡片(避免被中断的 MCP
+          // AbortError 显示为「失败」,也避免成功结果与下方完成卡片重复),
+          // 同时作为 session 收尾的标志。后续若 SDK 还流出多余 text / 重试调用,
+          // 会被外层 agentCompleteSeen 跳过。
+          // MCP tool 的 block.name 形态可能是 `mcp__<server>__AgentComplete`
+          // (普通 tool_use),也可能是带 server_name 的 mcp_tool_use,统一按
+          // toolName 末段匹配。
+          if (
+            toolName === 'AgentControllerMcp::AgentComplete' ||
+            toolName === 'mcp__AgentControllerMcp__AgentComplete' ||
+            (block.type === 'mcp_tool_use' &&
+              (block as any).server_name === 'AgentControllerMcp' &&
+              block.name === 'AgentComplete')
+          ) {
+            cached.agentCompleteSeen = true
+            return
+          }
           if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
             const input = block.input as AskUserQuestionInput | undefined
             if (input && Array.isArray(input.questions)) {
@@ -306,6 +340,7 @@ export function buildRenderItems(
         pendingTooluse: {},
         prevModelUsage: {},
         lastTotalCost: 0,
+        agentCompleteSeen: false,
       })
       return cache.get(sessionId)!
     })
