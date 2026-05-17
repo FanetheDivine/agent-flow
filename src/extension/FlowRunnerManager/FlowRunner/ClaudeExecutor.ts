@@ -158,10 +158,7 @@ export class ClaudeExecutor {
     } catch (err) {
       logError('[ClaudeExecutor] queryInstance.interrupt() failed:', err)
     }
-    await Promise.race([
-      resultArrived,
-      new Promise<void>((r) => setTimeout(r, 3000)),
-    ])
+    await Promise.race([resultArrived, new Promise<void>((r) => setTimeout(r, 3000))])
     this.resolveResultArrived = null
     this.queryInstance?.close()
     this.queryInstance = null

@@ -43,7 +43,7 @@ pnpm build-extension   # 生成 .vsix 文件
 - **模型自由搭配**：每个 Agent 独立配置模型（opus / sonnet / haiku）、思考强度（effort）与简介描述。
 - **无输入启动**：开启 `no_input` 的 Agent 在节点上显示启动按钮，点击后始终以"开始"为初始消息自动运行，无需手动输入。
 - **上下文隔离**：每个 Agent 有自己独立的对话上下文。
-- **共享数据按 key 授权读写**：Flow 在 `shareValuesKeys` 中声明全部可用 key；Agent 各自配置 `allowed_read_share_values_keys` / `allowed_write_share_values_keys`，只能看到 / 写入被授权的 key。被授权读取的 key 与当前值会注入到 Agent 系统提示词「# 可用数据」节；写入只能在 `AgentComplete` 时通过 `shareValues` 参数一次性提交，未授权 key 会被静默丢弃。
+- **共享数据按 key 授权读写**：Flow 在 `shareValuesKeys` 中声明全部可用 key（每个 key 可附加 `desc` 标注语义）；Agent 各自配置 `allowed_read_share_values_keys` / `allowed_write_share_values_keys`，只能看到 / 写入被授权的 key。被授权读取的 key 与当前值会注入到 Agent 系统提示词「# 可用数据」节；写入只能在 `AgentComplete` 时通过 `shareValues` 参数一次性提交，未授权 key 会被静默丢弃。
 - **连线约束**：每个 output 最多连一条出边；`next_agent` 允许指向自身以支持循环。
 
 ### 2. 自由复制粘贴
@@ -62,7 +62,8 @@ pnpm build-extension   # 生成 .vsix 文件
 - **可拖拽聊天 Drawer**：支持拖拽调整宽度、`Esc` 关闭。
 - **智能通知**：Agent 等待回复或工作流完成时，若面板不在前台，自动弹出 VSCode 系统通知，点击即可跳转回对应聊天。
 - **关闭面板不打断运行**：关闭 Webview 后 Agent 继续在后台执行，重新打开时自动恢复全部历史消息与运行态，等待用户回复 / 完成等通知照常送达。
-- **ShareValues 编辑器**：Flow 列表项的数据库按钮打开 FlowEditor 抽屉，集中编辑工作流名称、`shareValuesKeys`（声明可用 key）以及运行中各 key 的当前值；删除 key 时自动清理所有 Agent 的 `allowed_read/write_share_values_keys` 引用。
+- **Flow 编辑器**：Flow 列表项的数据库按钮打开 FlowEditor 抽屉，集中编辑工作流名称、Flow 简介、`shareValuesKeys`（拖拽列表维护，每项支持 `key` / `desc`、重复校验、一键清空）以及运行中各 key 的当前值；删除 key 时自动清理所有 Agent 的 `allowed_read/write_share_values_keys` 引用。
+- **AgentComplete 完成卡片**：每个 Agent 完成时的卡片直接展示本回合写入的共享数据（按 `key/value` 列出），便于回看数据流转；`AgentComplete` 后立即中断 SDK，避免模型继续生成多余文字，且中断回合的 token / 费用统计不会丢。
 - **Token 消耗可视化**：消息级、回合级、Flow 级三层展示 token 用量与费用，AI 气泡自动回填实际消耗，优先显示 SDK 实际费用而非估算；`agent_complete` 时展示按模型分组的 session 累计 breakdown。
 - **Starting 阶段节点高亮与红点**：启动阶段（session 尚未建立）Agent 节点也能正确高亮显示，对话框同步展示红点提示。
 - **AskUserQuestion 字体优化**：调整提问卡片字体样式，提升可读性。

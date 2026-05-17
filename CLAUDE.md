@@ -94,13 +94,13 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 
 shareValues 不再是「Agent 自由读写的全局变量」，而是**按 key 授权的契约**：
 
-- **Flow 级声明**：`Flow.shareValuesKeys: string[]` 列出本 Flow 全部可用 key（FlowEditor UI 维护）。删除 key 时自动从所有 Agent 的 `allowed_read/write_share_values_keys` 中清理引用
+- **Flow 级声明**：`Flow.shareValuesKeys: ShareValueKey[]`（每项含 `key` 与可选 `desc`）列出本 Flow 全部可用 key（FlowEditor UI 维护）。`desc` 仅作设计期标注语义，不进入 prompt / MCP schema。删除 key 时自动从所有 Agent 的 `allowed_read/write_share_values_keys` 中清理引用
 - **Agent 级授权**：`allowed_read_share_values_keys` 和 `allowed_write_share_values_keys` 分别声明本 Agent 可读 / 可写的 key 子集。无授权时 Agent **完全感知不到** shareValues 的存在
 - **读路径**：[buildAgentSystemPrompt](src/common/index.ts) 把可读 key 与当前值（缺失为 `null`）以 JSON 形式注入到「# 可用数据」节。**这是 prompt 时点的快照**，Agent 在本会话内不会重新读，运行中改值需要切到下一个 Agent 才生效
 - **写路径**：仅通过 [AgentComplete](src/common/extension.ts) 工具的 `shareValues` 参数提交，schema 由 `allowed_write_share_values_keys` 动态生成；MCP 端按白名单过滤，未授权 key 静默丢弃。`never_complete` 模式无 AgentComplete，因此也无法写入
 - **事件契约**：`flow.signal.agentComplete` 携带 `shareValues` 字段（reducer 合并到 state）；`flow.command.setShareValues`（webview→extension，full replace，**无 runId 字段**，未运行时也能编辑）。**已删除** `flow.signal.shareValuesChanged` 与 `getShareValues` / `setShareValues` / `getAllShareValues` 三个 MCP 工具
 - **运行时取值**：[FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) 构造时接收 `getLatestShareValues(flowId)` 回调，最终指向 `FlowRunStateManager.getFlowRunStates()[flowId]?.shareValues`。`FlowRunner` 不再持有 shareValues 副本
-- **UI**：[FlowEditor](src/webview/components/FlowEditor/index.tsx) 抽屉编辑 Flow 名称、`shareValuesKeys`、运行中各 key 当前值；[AgentEditor](src/webview/components/AgentEditor/index.tsx) 用 multi-select 维护两个授权列表，选项来自当前 Flow 的 `shareValuesKeys`
+- **UI**：[FlowEditor](src/webview/components/FlowEditor/index.tsx) 抽屉编辑 Flow 名称、`flow_desc`、`shareValuesKeys`（拖拽列表，每项支持 `key` / `desc` 编辑、重复校验、清空按钮）以及运行中各 key 当前值；[AgentEditor](src/webview/components/AgentEditor/index.tsx) 用 multi-select 维护两个授权列表，选项标签为 `key(desc)`，提交时只用 key
 - **Flow 完成清空**：reducer 在 phase 转 `completed` 时把 `state.shareValues = {}`，避免污染下一次启动；`flowStart` 改为保留 `state?.shareValues ?? {}` 以便 webview 在未运行时编辑的值能带入新 run
 
 ## Token 追踪

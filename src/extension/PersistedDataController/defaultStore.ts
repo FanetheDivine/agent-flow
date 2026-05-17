@@ -291,7 +291,7 @@ const PresetFlows: Flow[] = [
         agent_prompt: [
           '切换main分支。',
           '查看上一个tag到最新提交**全部**、**完整**commit message，更新readme.md/Claude.md/Changelog.md，并由用户确认。',
-          '更新完毕后，执行npx release更新并发布新版本。',
+          '更新完毕后，执行npm run release更新并发布新版本。',
         ].join('\n'),
         outputs: [],
         id: '2',

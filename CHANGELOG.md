@@ -1,5 +1,23 @@
 # Change Log
 
+## [0.0.14] - 2026-05-17
+
+### 破坏性变更
+
+- **`Flow.shareValuesKeys` 数据形态变更**：从 `string[]` 调整为 `ShareValueKey[]`（每项含 `key` 与可选 `desc`），方便在设计期对每个共享 key 标注语义。`Flow` 同步新增可选字段 `flow_desc` 用于描述 Flow 整体职责。`AgentEditor` 的读 / 写授权多选下拉项展示形如 `key(desc)`，`buildAgentSystemPrompt` 注入 prompt 时仍只用 key。内置 PresetFlows 已迁移到新格式，旧 `string[]` 数据需经 `validateFlow` 重新清洗。
+
+### 新增
+
+- **AgentComplete 完成卡片展示 shareValues 写入**：`buildRenderItems` 把 `agentComplete` signal 携带的 `shareValues` 透传到完成卡片，气泡中以 `Tag + 值` 列表展示该回合 Agent 写入的共享数据，便于回看数据流转。
+- **FlowEditor 共享 key 编辑重写**：原 `Select tags` 模式改为 `@dnd-kit` 拖拽列表，每行支持编辑 `key` / `desc`、按钮删除、拖拽手柄调整顺序，并对重复 key 给出表单级校验；新增 Flow 简介（`flow_desc`）输入与"清空 shareValues"按钮，抽屉宽度调整为 600。
+
+### 优化
+
+- **AgentComplete 后立即中断 SDK，token 统计不再丢失**：`ClaudeExecutor` 抽出 `interruptAndAwaitResult()`，让用户主动 interrupt 与 `AgentComplete` 触发的内部 interrupt 共用同一条「先 interrupt → await SDK result(modelUsage / total_cost_usd) → close」路径，3s 兜底防 hang；中断回合的费用 / token 现也能完整透传到 webview。同时模型在 AgentComplete 之后不再继续生成多余文字。
+- **AgentComplete 工具卡片与多余消息丢弃**：`buildRenderItems` 引入 `agentCompleteSeen` 标志——AgentComplete 的 `tool_use` 一出现就视为本 session 收尾，既不再渲染该 tool 卡片（避免被中断后显示「失败」），也丢弃后续因中断时序产生的多余 text / 重试 tool_use / MCP AbortError tool_result，只保留下方完成卡片。
+- **停止工作流不清空 shareValues**：ChatPanel 停止按钮 tooltip 更新为「停止工作流，不清空shareValues」，方便用户中断后基于已写入的共享数据重启或排查。
+- **默认工作流提示词措辞**：内置 PresetFlows 中部分 Agent 的「任务完成」章节统一改为「完成任务」，并明确 `content` 取值与共享数据写入要求；工作流生成器对子 Agent 的 `agent_prompt` 模板也补充了「明确 AgentComplete 的 content 与写入 key」要求。
+
 ## [0.0.13] - 2026-05-16
 
 ### 破坏性变更
