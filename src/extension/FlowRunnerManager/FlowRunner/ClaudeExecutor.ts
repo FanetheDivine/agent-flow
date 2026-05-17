@@ -58,6 +58,14 @@ export class ClaudeExecutor {
   private completed = false
   private disposed = false
   /**
+   * 首次会话握手是否已对外发出。
+   * - 新 session：在 SDK 流出第一条带 session_id 的消息时设为 true，
+   *   同时调用 `onSessionId` + 首次透传 `initMessage` 给上层。
+   * - resume 模式：构造时直接置 true（_sessionId 已知），由构造函数异步 emit
+   *   onSessionId + initMessage，避免 createQuery 内重复透传。
+   */
+  private initEmitted = false
+  /**
    * MCP 端 AgentComplete 工具触发后暂存 result，等本回合的 SDK result 消息到达再
    * fire onComplete。否则上层立即 killCurrentExecutor，最后一条 result（含
    * modelUsage / total_cost_usd）会被吞掉。
@@ -96,7 +104,8 @@ export class ClaudeExecutor {
    * @param runId - FlowRunner 分配的本次运行 ID,贯穿整个 Flow 直到结束
    * @param agent - Agent 定义(model、outputs、prompt 等)
    * @param currentShareValues - Flow 全局共享上下文(仅用于注入系统提示词)
-   * @param previousOutput - 上一个 Agent 的输出,用于注入 prompt 上下文
+   * @param resumeSessionId - 若提供，构造时即以该 sessionId resume 已有 SDK 会话
+   *   （fork 后的延续启动走此路径）；否则首次握手由 SDK 分配。
    */
   constructor(
     runId: string,
@@ -104,6 +113,7 @@ export class ClaudeExecutor {
     agent: Agent,
     currentShareValues: Record<string, string>,
     events: ExecutorEvents,
+    resumeSessionId?: string,
   ) {
     this.runId = runId
     this.agentId = agent.id
@@ -112,6 +122,17 @@ export class ClaudeExecutor {
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     // shareValues是写在系统提示词里的 不能即时读写 可以直接构造
     this.prompt = buildAgentSystemPrompt(agent, currentShareValues)
+    if (resumeSessionId) {
+      // resume 模式：sessionId 已知，立即通知上层并透传 initMessage（与新 session
+      // 路径中 onSessionId+onMessage(initMessage) 的语义一致），避免 createQuery
+      // 的 for-await 路径再重复一次。
+      this._sessionId = resumeSessionId
+      this.initEmitted = true
+      queueMicrotask(() => {
+        this.events.onSessionId(resumeSessionId)
+        this.events.onMessage(initMessage)
+      })
+    }
     this.createQuery(initMessage)
   }
 
@@ -308,12 +329,13 @@ export class ClaudeExecutor {
       this.userInputStream.push(message)
       for await (const msg of this.queryInstance) {
         if (this.disposed) break
-        if (!this._sessionId) {
+        if (!this.initEmitted) {
           if (!msg.session_id) {
             this.events.onError(new Error(JSON.stringify(msg)))
             break
           }
           this._sessionId = msg.session_id
+          this.initEmitted = true
           this.events.onSessionId(msg.session_id)
           this.events.onMessage(message)
         }

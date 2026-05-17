@@ -1,11 +1,16 @@
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
+import { forkSession } from '@anthropic-ai/claude-agent-sdk'
 import type {
+  AskUserQuestionInput,
   ExtensionFlowCommandEvents,
   ExtensionFlowCommandMessage,
   ExtensionFlowSignalMessage,
   ExtensionFromWebviewMessage,
   ExtensionToWebviewMessage,
+  Flow,
+  FlowPhase,
+  FlowRunState,
   PersistedData,
 } from '@/common'
 import { FlowRunStateManager } from './FlowRunStateManager'
@@ -156,6 +161,148 @@ export function activate(context: vscode.ExtensionContext) {
     (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.shareValues ?? {},
   )
 
+  /**
+   * 在源 RunState 的 sessions 中定位 fork target 所在 session 与切片终点 messageUuid。
+   * 对 askUserQuestion target 还会回填该 toolUseId 的 input 用于新 RunState 的 pendingQuestion。
+   */
+  type ForkTarget = ExtensionFlowCommandEvents['flow.command.fork']['target']
+  const locateFork = (
+    state: FlowRunState,
+    target: ForkTarget,
+  ):
+    | {
+        sessionIdx: number
+        sessionId: string
+        upToMessageId: string
+        askInput?: AskUserQuestionInput
+      }
+    | undefined => {
+    for (let i = 0; i < state.sessions.length; i++) {
+      const session = state.sessions[i]
+      for (const m of session.messages) {
+        if (m.type !== 'flow.signal.aiMessage') continue
+        const sdkMsg = m.data.message as {
+          type: string
+          uuid?: string
+          message?: { content?: unknown }
+        }
+        if (target.kind === 'message') {
+          if (sdkMsg.uuid && sdkMsg.uuid === target.messageUuid) {
+            return {
+              sessionIdx: i,
+              sessionId: session.sessionId,
+              upToMessageId: target.messageUuid,
+            }
+          }
+        } else if (target.kind === 'askUserQuestion') {
+          if (sdkMsg.type !== 'assistant') continue
+          const blocks = sdkMsg.message?.content
+          if (!Array.isArray(blocks)) continue
+          for (const block of blocks) {
+            if (
+              block &&
+              typeof block === 'object' &&
+              (block as { type?: string; id?: string }).type === 'tool_use' &&
+              (block as { id?: string }).id === target.toolUseId
+            ) {
+              return {
+                sessionIdx: i,
+                sessionId: session.sessionId,
+                upToMessageId: sdkMsg.uuid ?? '',
+                askInput: (block as { input?: AskUserQuestionInput }).input,
+              }
+            }
+          }
+        }
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * 处理 fork command：调 SDK forkSession 复制 transcript 切片，准备 newRunState，
+   * 注入到 flowRunStateManager 并发 `flow.signal.fork`。
+   * - 不 spawn FlowRunner（用户后续发消息时走 startFlow + resumeSessionId 路径）
+   * - currentFlows 同步 push newFlow（避免 webview save 之前的 race），webview 端
+   *   收到 signal 后也会自行 push 并通过 save 持久化
+   */
+  const handleFork = async (
+    data: ExtensionFlowCommandEvents['flow.command.fork'],
+  ): Promise<void> => {
+    const { flowId: sourceFlowId, agentId, target } = data
+    const sourceFlow = currentFlows.flows.find((f) => f.id === sourceFlowId)
+    const sourceState = flowRunStateManager.getFlowRunStates()[sourceFlowId]
+    if (!sourceFlow || !sourceState) {
+      logError('[fork] source flow / state missing', sourceFlowId)
+      return
+    }
+    const located = locateFork(sourceState, target)
+    if (!located || !located.upToMessageId) {
+      logError('[fork] target not located', target)
+      return
+    }
+    const { sessionIdx, sessionId: srcSessionId, upToMessageId, askInput } = located
+
+    let newSessionId: string
+    try {
+      const result = await forkSession(srcSessionId, {
+        upToMessageId,
+        dir: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+      })
+      newSessionId = result.sessionId
+    } catch (err) {
+      logError('[fork] forkSession failed', err)
+      return
+    }
+
+    // 复制并裁剪 sessions：保留 [0, sessionIdx]，target 所在 session 的 sessionId
+    // 替换为 newSessionId、completed 重置；后续 sessions 全部丢弃
+    const newSessions = sourceState.sessions.slice(0, sessionIdx).map((s) => structuredClone(s))
+    const targetSession = sourceState.sessions[sessionIdx]
+    newSessions.push({
+      ...structuredClone(targetSession),
+      sessionId: newSessionId,
+      completed: false,
+      outputName: undefined,
+    })
+
+    let phase: FlowPhase = 'result'
+    const pendingQuestions: FlowRunState['pendingQuestions'] = []
+    const answeredQuestions = { ...sourceState.answeredQuestions }
+    if (target.kind === 'askUserQuestion' && askInput) {
+      phase = 'awaiting-question'
+      pendingQuestions.push({
+        toolUseId: target.toolUseId,
+        input: askInput,
+        sessionId: newSessionId,
+      })
+      delete answeredQuestions[target.toolUseId]
+    }
+
+    const newRunState: FlowRunState = {
+      runKey: undefined,
+      runId: undefined,
+      phase,
+      sessions: newSessions,
+      answeredQuestions,
+      answeredToolPermissions: { ...sourceState.answeredToolPermissions },
+      pendingQuestions,
+      pendingToolPermission: undefined,
+      currentAgentId: agentId,
+      shareValues: { ...sourceState.shareValues },
+    }
+
+    const newFlowId = (globalThis.crypto as { randomUUID(): string }).randomUUID()
+    const newFlow: Flow = { ...structuredClone(sourceFlow), id: newFlowId }
+    currentFlows = { ...currentFlows, flows: [...currentFlows.flows, newFlow] }
+    flowRunStateManager.setRunState(newFlowId, newRunState)
+
+    postMessageToWebview({
+      type: 'flow.signal.fork',
+      data: { flowId: sourceFlowId, newFlowId, newRunState, agentId },
+    })
+  }
+
   const openPanel = vscode.commands.registerCommand('agent-flow.openPanel', () => {
     if (currentPanel) {
       currentPanel.reveal(undefined, true)
@@ -241,7 +388,12 @@ export function activate(context: vscode.ExtensionContext) {
             // 文件不存在或无法打开时静默忽略
           }
         })
-        .with({ type: P.string.startsWith('flow.command.') }, (e) => {
+        .with({ type: P.string.startsWith('flow.command.') }, async (e) => {
+          // fork 是特殊命令：不走 runner，由 extension 自己处理 SDK forkSession
+          if (e.type === 'flow.command.fork') {
+            await handleFork(e.data as ExtensionFlowCommandEvents['flow.command.fork'])
+            return
+          }
           // 先镜像到 state（flowStart 路径的覆盖式初始化也由 reducer 完成；killFlow 会置 stopped）
           flowRunStateManager.applyCommand(e as ExtensionFlowCommandMessage)
           const { type, data } = e
