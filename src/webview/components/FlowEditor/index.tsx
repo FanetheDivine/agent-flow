@@ -1,20 +1,104 @@
-import { useEffect, useRef, useState, type FC } from 'react'
-import { Drawer, Form, Input, Button, Select, Tag, Switch, Tooltip } from 'antd'
+import { useEffect, useState, type FC } from 'react'
+import { Drawer, Form, Input, Button, Switch, Tag, Tooltip, message } from 'antd'
 import {
   CloseOutlined,
   EyeOutlined,
   EditOutlined,
   QuestionCircleOutlined,
+  HolderOutlined,
+  MinusCircleOutlined,
+  PlusOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
-import { XMarkdown } from '@ant-design/x-markdown'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import type { ShareValueKey } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { Md } from '../text-components'
 
 type FormValues = {
   name: string
-  shareValuesKeys: string[]
+  flow_desc?: string
+  shareValuesKeys: ShareValueKey[]
   shareValues: Record<string, string>
+}
+
+type SortableRowProps = {
+  id: string | number
+  fieldName: number
+  isActive: boolean
+  onClickKey: () => void
+  onRemove: () => void
+}
+
+const SortableShareValueKeyRow: FC<SortableRowProps> = ({
+  id,
+  fieldName,
+  isActive,
+  onClickKey,
+  onRemove,
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <div ref={setNodeRef} style={style} className='mb-2 flex items-center gap-2'>
+      <span
+        className='cursor-grab text-[#585b70] hover:text-[#a6adc8]'
+        {...attributes}
+        {...listeners}
+      >
+        <HolderOutlined />
+      </span>
+      <Form.Item
+        name={[fieldName, 'key']}
+        noStyle
+        rules={[
+          { required: true, message: '请输入 key' },
+          ({ getFieldValue }) => ({
+            validator(_, value) {
+              if (!value) return Promise.resolve()
+              const keys = (getFieldValue('shareValuesKeys') ?? []) as ShareValueKey[]
+              const dupIdxs = keys.reduce<number[]>((acc, k, i) => {
+                if (k?.key === value) acc.push(i)
+                return acc
+              }, [])
+              if (dupIdxs.length <= 1) return Promise.resolve()
+              // 所有重复行都 reject 标红；只有重复组的第一个带消息文本，其余 reject 空消息，
+              // 由父 Form.Item 的 CSS 把空 explain-error 隐藏，避免冒泡多条相同提示。
+              return Promise.reject(new Error(dupIdxs[0] === fieldName ? 'Key 不能重复' : ''))
+            },
+          }),
+        ]}
+      >
+        <Input size='small' placeholder='变量key' className='w-30' />
+      </Form.Item>
+      <Form.Item name={[fieldName, 'desc']} noStyle>
+        <Input size='small' placeholder='变量描述' className='flex-1' />
+      </Form.Item>
+      <FileTextOutlined
+        onClick={onClickKey}
+        className={isActive ? 'border-[#89b4fa] text-[#89b4fa]' : ''}
+        title='编辑值'
+      />
+      <MinusCircleOutlined className='cursor-pointer text-[#f38ba8]' onClick={onRemove} />
+    </div>
+  )
 }
 
 export const FlowEditor: FC = () => {
@@ -33,18 +117,28 @@ export const FlowEditor: FC = () => {
   const [form] = Form.useForm<FormValues>()
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit')
+  const [newKeyInput, setNewKeyInput] = useState('')
 
   const watchedShareValues = (Form.useWatch('shareValues', form) ?? {}) as Record<string, string>
+  const watchedKeys = (Form.useWatch('shareValuesKeys', form) ?? []) as ShareValueKey[]
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  )
+
   useEffect(() => {
     if (open && flow) {
       // shareValues 是运行时数据，不持久化；未运行时为空对象。
       form.setFieldsValue({
         name: flow.name,
+        flow_desc: flow.flow_desc ?? '',
         shareValuesKeys: flow.shareValuesKeys ?? [],
         shareValues: runShareValues ?? {},
       })
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditingKey(null)
+      setNewKeyInput('')
     }
   }, [open, flow, runShareValues, form])
 
@@ -53,19 +147,30 @@ export const FlowEditor: FC = () => {
   const handleClose = () => setEditingFlowId(undefined)
 
   const handleFinish = (values: FormValues) => {
-    const keys = values.shareValuesKeys ?? []
+    const newKeys = (values.shareValuesKeys ?? []).map((k) => ({
+      key: k.key,
+      ...(k.desc ? { desc: k.desc } : {}),
+    }))
+    const newKeyStrs = newKeys.map((k) => k.key)
     const sourceValues = form.getFieldsValue(true)?.shareValues ?? {}
     const cleanedValues = Object.fromEntries(
-      keys
+      newKeyStrs
         .map((k) => (typeof sourceValues[k] === 'string' ? [k, sourceValues[k]] : null))
         .filter(Boolean) as [string, string][],
     )
-    const removedKeys = (flow.shareValuesKeys ?? []).filter((k) => !keys.includes(k))
+    const oldKeyStrs = (flow.shareValuesKeys ?? []).map((k) => k.key)
+    const removedKeys = oldKeyStrs.filter((k) => !newKeyStrs.includes(k))
     save((draft) => {
       const target = draft.find((f) => f.id === flow.id)
       if (!target) return
       target.name = values.name.trim() || target.name
-      target.shareValuesKeys = keys
+      const desc = values.flow_desc?.trim()
+      if (desc) {
+        target.flow_desc = desc
+      } else {
+        delete target.flow_desc
+      }
+      target.shareValuesKeys = newKeys
       for (const agent of target.agents ?? []) {
         if (agent.allowed_read_share_values_keys) {
           agent.allowed_read_share_values_keys = agent.allowed_read_share_values_keys.filter(
@@ -115,7 +220,7 @@ export const FlowEditor: FC = () => {
         onPaste={(e) => e.stopPropagation()}
         onFinish={handleFinish}
       >
-        <div className='flex flex-col' style={{ width: 480 }}>
+        <div className='flex w-150 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
             <CloseOutlined onClick={handleClose} className='mr-2' />
             <span>编辑工作流</span>
@@ -130,12 +235,16 @@ export const FlowEditor: FC = () => {
                 <Input placeholder='工作流名称' />
               </Form.Item>
 
+              <Form.Item name='flow_desc' label='简介'>
+                <Input placeholder='Flow 描述' />
+              </Form.Item>
+
               <Form.Item
-                name='shareValuesKeys'
+                className='[&_.ant-form-item-explain-error:empty]:hidden'
                 label={
                   <span>
                     共享数据
-                    <Tooltip title='点 tag 打开右侧面板编辑值；点叉号删除该 key'>
+                    <Tooltip title='点击 key 标签打开右侧面板编辑值；编辑描述；点叉号删除该 key；拖拽手柄调整顺序'>
                       <QuestionCircleOutlined style={{ marginInlineStart: 4 }} />
                     </Tooltip>
                     <Button
@@ -151,48 +260,89 @@ export const FlowEditor: FC = () => {
                     </Button>
                   </span>
                 }
-                rules={[
-                  {
-                    validator: (_, val: string[] = []) =>
-                      val.length === new Set(val).size
-                        ? Promise.resolve()
-                        : Promise.reject(new Error('Key 不能重复')),
-                  },
-                ]}
               >
-                <Select
-                  mode='tags'
-                  placeholder='输入 key 后回车添加'
-                  tokenSeparators={[',', ' ']}
-                  open={false}
-                  suffixIcon={null}
-                  tagRender={({ label, value, closable, onClose }) => {
-                    const key = String(value)
-                    const isActive = key === editingKey
+                <Form.List name='shareValuesKeys'>
+                  {(fields, { add, remove, move }) => {
+                    const onDragEnd = (event: DragEndEvent) => {
+                      const { active, over } = event
+                      if (!over || active.id === over.id) return
+                      const oldIdx = fields.findIndex((f) => String(f.key) === active.id)
+                      const newIdx = fields.findIndex((f) => String(f.key) === over.id)
+                      if (oldIdx !== -1 && newIdx !== -1) {
+                        move(oldIdx, newIdx)
+                      }
+                    }
+
+                    const tryAdd = () => {
+                      const v = newKeyInput.trim()
+                      if (!v) return
+                      const current = (form.getFieldValue('shareValuesKeys') ??
+                        []) as ShareValueKey[]
+                      if (current.some((k) => k.key === v)) {
+                        message.error('Key 不能重复')
+                        return
+                      }
+                      add({ key: v })
+                      setNewKeyInput('')
+                    }
+
                     return (
-                      <Tag
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                        }}
-                        closable={closable}
-                        onClose={(e) => {
-                          e.preventDefault()
-                          onClose()
-                          if (editingKey === key) setEditingKey(null)
-                        }}
-                        onClick={() => {
-                          setEditingKey(key)
-                          setPreviewMode('preview')
-                        }}
-                        color={isActive ? 'blue' : undefined}
-                        style={{ cursor: 'pointer', marginInlineEnd: 4 }}
-                      >
-                        {label}
-                      </Tag>
+                      <>
+                        <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={onDragEnd}
+                        >
+                          <SortableContext
+                            items={fields.map((f) => String(f.key))}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            {fields.map((field, idx) => {
+                              const k = watchedKeys[idx]?.key ?? ''
+                              return (
+                                <SortableShareValueKeyRow
+                                  key={field.key}
+                                  id={String(field.key)}
+                                  fieldName={field.name}
+                                  isActive={!!k && k === editingKey}
+                                  onClickKey={() => {
+                                    if (!k) return
+                                    setEditingKey((curK) => (k === curK ? null : k))
+                                    setPreviewMode('preview')
+                                  }}
+                                  onRemove={() => {
+                                    if (editingKey === k) setEditingKey(null)
+                                    remove(field.name)
+                                  }}
+                                />
+                              )
+                            })}
+                          </SortableContext>
+                        </DndContext>
+                        <div className='mt-2 flex items-center gap-2'>
+                          <Input
+                            size='small'
+                            placeholder='输入新 key 后回车添加'
+                            value={newKeyInput}
+                            onChange={(e) => setNewKeyInput(e.target.value)}
+                            onPressEnter={(e) => {
+                              e.preventDefault()
+                              tryAdd()
+                            }}
+                          />
+                          <Button
+                            type='dashed'
+                            size='small'
+                            icon={<PlusOutlined />}
+                            onClick={tryAdd}
+                          >
+                            添加
+                          </Button>
+                        </div>
+                      </>
                     )
                   }}
-                />
+                </Form.List>
               </Form.Item>
             </div>
           </div>

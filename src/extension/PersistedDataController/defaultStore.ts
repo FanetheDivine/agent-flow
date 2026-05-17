@@ -232,7 +232,11 @@ const PresetFlows: Flow[] = [
         allowed_write_share_values_keys: [],
       },
     ],
-    shareValuesKeys: ['summary', 'feedback', 'worktreePath'],
+    shareValuesKeys: [
+      { key: 'summary', desc: '需求摘要' },
+      { key: 'feedback', desc: '用户对代码的修改意见' },
+      { key: 'worktreePath', desc: '工作区绝对路径' },
+    ],
   },
   {
     id: '1',
@@ -477,7 +481,13 @@ const PresetFlows: Flow[] = [
         id: '859baeac-7b9f-4e5a-94bc-83babfdaad85',
       },
     ],
-    shareValuesKeys: ['requirement', 'steps', 'feedback', 'generatedFlow', 'changeList'],
+    shareValuesKeys: [
+      { key: 'requirement', desc: '用户原始需求摘要' },
+      { key: 'steps', desc: '需求拆分得到的步骤列表' },
+      { key: 'feedback', desc: '用户对工作流或需求拆分的反馈' },
+      { key: 'generatedFlow', desc: '当前轮次生成的 Flow JSON' },
+      { key: 'changeList', desc: '工作流的累计变更记录' },
+    ],
   },
 ]
 export const defaultStore: PersistedData = {

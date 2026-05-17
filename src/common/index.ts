@@ -65,12 +65,22 @@ export const AgentSchema = z.object({
 /** @see {@link AgentSchema} */
 export type Agent = z.infer<typeof AgentSchema>
 
+/** 共享数据 key 声明：key 为字段名，desc 仅用于设计期标注语义（不进入 prompt / MCP schema） */
+export const ShareValueKeySchema = z.object({
+  key: z.string().describe('共享数据 key 名称，在 Flow 内唯一'),
+  desc: z.string().optional().describe('共享数据语义描述'),
+})
+
+/** @see {@link ShareValueKeySchema} */
+export type ShareValueKey = z.infer<typeof ShareValueKeySchema>
+
 /** Agent 作为节点构成的有向图 */
 export const FlowSchema = z.object({
   id: z.string().describe('Flow 唯一标识'),
   name: z.string().describe('Flow 名称'),
+  flow_desc: z.string().optional().describe('Flow 描述'),
   agents: z.array(AgentSchema).optional().describe('当前 Flow 内的 agent，其 outputs 定义了连接边'),
-  shareValuesKeys: z.array(z.string()).optional().describe('Flow 可用的共享数据 key 集合'),
+  shareValuesKeys: z.array(ShareValueKeySchema).optional().describe('Flow 可用的共享数据 key 集合'),
 })
 
 /** @see {@link FlowSchema} */

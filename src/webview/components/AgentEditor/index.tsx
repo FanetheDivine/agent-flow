@@ -8,7 +8,6 @@ import {
   EyeOutlined,
   CloseOutlined,
 } from '@ant-design/icons'
-import { XMarkdown } from '@ant-design/x-markdown'
 import type { Agent } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
@@ -111,7 +110,10 @@ export const AgentEditor: FC = () => {
   // 从 Flow 定义中提取全部可用 key 选项
   const currentFlow = editingAgent ? flows.find((f) => f.id === editingAgent.flowId) : undefined
   const shareValueKeys = currentFlow?.shareValuesKeys ?? []
-  const shareValueKeyOptions = shareValueKeys.map((k) => ({ label: k, value: k }))
+  const shareValueKeyOptions = shareValueKeys.map((k) => ({
+    label: k.desc ? `${k.key}(${k.desc})` : k.key,
+    value: k.key,
+  }))
 
   return (
     <Drawer
