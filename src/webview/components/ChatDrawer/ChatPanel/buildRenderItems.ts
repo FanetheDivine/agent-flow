@@ -11,10 +11,37 @@ import {
 
 export type ToolResult = { isError: boolean; text: string }
 
+/**
+ * fork icon 显隐相关字段：
+ * - `messageUuid` 是 fork 切片的 SDK 消息 UUID（user/text/thinking 用所属 SDK 消息的 uuid，
+ *   turn_end 用 result 消息的 uuid）；缺失时 UI 不显示 fork icon
+ * - `turnClosed` 表示该项所属 turn 是否已闭环（出现 result 视为闭环）；
+ *   未闭环时 UI 不显示 fork icon，避免 fork 出悬空 tool_use 的非法 transcript
+ */
 export type RenderItem =
-  | { kind: 'user'; key: string; rawContent: unknown }
-  | { kind: 'text'; key: string; text: string; streaming: boolean }
-  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
+  | {
+      kind: 'user'
+      key: string
+      rawContent: unknown
+      messageUuid?: string
+      turnClosed: boolean
+    }
+  | {
+      kind: 'text'
+      key: string
+      text: string
+      streaming: boolean
+      messageUuid?: string
+      turnClosed: boolean
+    }
+  | {
+      kind: 'thinking'
+      key: string
+      text: string
+      streaming: boolean
+      messageUuid?: string
+      turnClosed: boolean
+    }
   | {
       kind: 'tool_use'
       key: string
@@ -35,6 +62,9 @@ export type RenderItem =
       isError: boolean
       /** 本回合（自上一条 result 之后）每模型 token 用量增量，多模型分多行展示 */
       modelUsages?: Array<{ model: string; usage: ModelTokenUsage }>
+      messageUuid?: string
+      /** turn_end 永远闭环（result 一定意味着本回合 tool_use 全部已 result） */
+      turnClosed: true
     }
   | {
       kind: 'agent_complete'
@@ -57,6 +87,11 @@ type CacheEntry = {
   prevModelUsage: Record<string, ModelTokenUsage>
   /** 截至最近一条 result 的 total_cost_usd（session 累计成本） */
   lastTotalCost: number
+  /**
+   * 当前 turn 起始 item 索引（自上一个 turn_end 之后第一条 item）。
+   * 遇到 turn_end 时把 [turnStartIdx, turn_end) 区间内所有 item 的 turnClosed 置 true。
+   */
+  turnStartIdx: number
   /**
    * AgentComplete 的 mcp_tool_use 已出现。该 tool 一旦被调用就标志 agent 决定收尾,
    * 后续 SDK 还可能因为中断时序生成多余消息(text / 重试 tool_use / 失败 tool_result),
@@ -152,6 +187,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
     // 中断时序产生的多余 text / 重试 tool_use / MCP AbortError tool_result）一律丢弃。
     if (cached.agentCompleteSeen) continue
     const { message } = msg.data
+    const messageUuid = (message as { uuid?: string }).uuid
 
     if (message.type === 'user') {
       const rawContent = message.message.content
@@ -180,7 +216,13 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       }
       if (message.isSynthetic) continue
       if (message.parent_tool_use_id) continue
-      items.push({ kind: 'user', key: `${mIdx}-user`, rawContent })
+      items.push({
+        kind: 'user',
+        key: `${mIdx}-user`,
+        rawContent,
+        messageUuid,
+        turnClosed: false,
+      })
       continue
     }
 
@@ -203,11 +245,25 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         if (cached.agentCompleteSeen) return
         const key = `${mIdx}-${bIdx}`
         if (block.type === 'text' && typeof block.text === 'string') {
-          items.push({ kind: 'text', key, text: block.text, streaming: false })
+          items.push({
+            kind: 'text',
+            key,
+            text: block.text,
+            streaming: false,
+            messageUuid,
+            turnClosed: false,
+          })
           return
         }
         if (block.type === 'thinking' && block.thinking) {
-          items.push({ kind: 'thinking', key, text: block.thinking, streaming: false })
+          items.push({
+            kind: 'thinking',
+            key,
+            text: block.thinking,
+            streaming: false,
+            messageUuid,
+            turnClosed: false,
+          })
           return
         }
         if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
@@ -284,12 +340,23 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       const cost = (message as any).total_cost_usd
       if (typeof cost === 'number') cached.lastTotalCost = cost
 
+      // 把当前 turn 内（自上一个 turn_end 之后）所有 user/text/thinking item 标记为已闭环
+      for (let j = cached.turnStartIdx; j < items.length; j++) {
+        const it = items[j]
+        if (it.kind === 'user' || it.kind === 'text' || it.kind === 'thinking') {
+          items[j] = { ...it, turnClosed: true }
+        }
+      }
+
       items.push({
         kind: 'turn_end',
         key: `${mIdx}-result`,
         isError,
         modelUsages: modelUsages.length > 0 ? modelUsages : undefined,
+        messageUuid,
+        turnClosed: true,
       })
+      cached.turnStartIdx = items.length
       continue
     }
 
@@ -311,9 +378,21 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       } else {
         const key = `${mIdx}-streaming-${event.index ?? 0}`
         if (blockType === 'text') {
-          items.push({ kind: 'text', key, text: deltaText, streaming: true })
+          items.push({
+            kind: 'text',
+            key,
+            text: deltaText,
+            streaming: true,
+            turnClosed: false,
+          })
         } else {
-          items.push({ kind: 'thinking', key, text: deltaText, streaming: true })
+          items.push({
+            kind: 'thinking',
+            key,
+            text: deltaText,
+            streaming: true,
+            turnClosed: false,
+          })
         }
       }
       continue
@@ -340,6 +419,7 @@ export function buildRenderItems(
         pendingTooluse: {},
         prevModelUsage: {},
         lastTotalCost: 0,
+        turnStartIdx: 0,
         agentCompleteSeen: false,
       })
       return cache.get(sessionId)!

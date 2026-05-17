@@ -1,6 +1,6 @@
 import { memo, type FC, type ReactNode } from 'react'
-import { Tag } from 'antd'
-import { CheckCircleOutlined } from '@ant-design/icons'
+import { Tag, Tooltip } from 'antd'
+import { BranchesOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
@@ -37,6 +37,18 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
+  /**
+   * 触发会话 fork。target.kind:
+   * - `message`：以 SDK 消息 UUID 为切片终点
+   * - `askUserQuestion`：以包含该 toolUseId 的 assistant message 为切片终点（不含 tool_result）
+   *
+   * 第二个参数 sessionCompleted 由 ChatPanel 在每个 session 上下文中注入，
+   * 用于让 fork 触发方决定是否弹 modal 提示「shareValues 一致性不保证」。
+   */
+  onFork?: (
+    target: { kind: 'message'; messageUuid: string } | { kind: 'askUserQuestion'; toolUseId: string },
+    sessionCompleted: boolean,
+  ) => void
 }
 
 type RenderedBubble = {
@@ -227,23 +239,67 @@ function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage
   )
 }
 
+/** 带 fork icon 的消息容器：右上角悬浮一个 hover 时变亮的分支按钮 */
+function ForkWrap({
+  onFork,
+  children,
+}: {
+  onFork: () => void
+  children: ReactNode
+}): ReactNode {
+  return (
+    <div className='group relative'>
+      {children}
+      <Tooltip title='从此处 fork 出新工作流'>
+        <button
+          type='button'
+          onClick={(e) => {
+            e.stopPropagation()
+            onFork()
+          }}
+          className='absolute -top-1 -right-1 z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-[#45475a] bg-[#1e1e2e] text-[10px] text-[#6c7086] opacity-0 transition-opacity hover:text-[#cdd6f4] group-hover:opacity-100'
+        >
+          <BranchesOutlined />
+        </button>
+      </Tooltip>
+    </div>
+  )
+}
+
 function renderItemToBubble(
   item: RenderItem,
   ctx?: BubbleCtx,
   sessionCompleted = false,
 ): RenderedBubble | null {
+  /** 把内容包装上 fork icon —— 仅当 ctx.onFork 存在、turn 已闭环且 messageUuid 存在时生效 */
+  const wrapFork = (
+    content: ReactNode,
+    target: { kind: 'message'; messageUuid: string } | { kind: 'askUserQuestion'; toolUseId: string },
+  ): ReactNode => {
+    if (!ctx?.onFork) return content
+    return <ForkWrap onFork={() => ctx.onFork!(target, sessionCompleted)}>{content}</ForkWrap>
+  }
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
+      const inner = <Copyable text={copyText}>{node}</Copyable>
+      const content =
+        item.turnClosed && item.messageUuid
+          ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
+          : inner
       return {
         key: item.key,
         role: 'user',
-        content: <Copyable text={copyText}>{node}</Copyable>,
+        content,
       }
     }
     case 'text': {
       const md = <Md content={item.text} />
-      const content = item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>
+      const inner = item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>
+      const content =
+        item.turnClosed && item.messageUuid && !item.streaming
+          ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
+          : inner
       return {
         key: item.key,
         role: 'ai',
@@ -260,7 +316,11 @@ function renderItemToBubble(
           <Md content={item.text} />
         </Think>
       )
-      const content = item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>
+      const wrapped = item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>
+      const content =
+        item.turnClosed && item.messageUuid && !item.streaming
+          ? wrapFork(wrapped, { kind: 'message', messageUuid: item.messageUuid })
+          : wrapped
       return {
         key: item.key,
         role: 'ai',
@@ -282,16 +342,17 @@ function renderItemToBubble(
       // pending 卡片不在消息列表中渲染（改为固定在输入框上方），只渲染已回答的历史卡片
       if (isPending) return null
       const answered = ctx.answeredMap.get(item.toolUseId)
+      const card = (
+        <AskUserQuestionCard
+          input={item.input}
+          mode='historical'
+          answeredValues={answered?.values}
+        />
+      )
       return {
         key: item.key,
         role: 'system',
-        content: (
-          <AskUserQuestionCard
-            input={item.input}
-            mode='historical'
-            answeredValues={answered?.values}
-          />
-        ),
+        content: wrapFork(card, { kind: 'askUserQuestion', toolUseId: item.toolUseId }),
       }
     }
     case 'tool_use': {
@@ -330,20 +391,24 @@ function renderItemToBubble(
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
+      const inner = (
+        <div className='flex flex-col gap-0.5'>
+          {modelUsages.map((m) => (
+            <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
+          ))}
+          <span className='text-[10px] text-[#6c7086]'>
+            <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
+            <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+          </span>
+        </div>
+      )
+      const content = item.messageUuid
+        ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
+        : inner
       return {
         key: item.key,
         role: 'divider',
-        content: (
-          <div className='flex flex-col gap-0.5'>
-            {modelUsages.map((m) => (
-              <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
-            ))}
-            <span className='text-[10px] text-[#6c7086]'>
-              <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-              <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
-            </span>
-          </div>
-        ),
+        content,
       }
     }
     case 'agent_complete': {
