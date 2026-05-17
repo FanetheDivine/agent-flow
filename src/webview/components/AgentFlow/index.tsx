@@ -103,19 +103,13 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   const syncToFlow = useCallback(
     (currentNodes: AgentNode[], currentEdges: Edge[]) => {
       isInternalChange.current = true
-      const newFlow = reactFlowToFlow(
-        flow.id,
-        flow.name,
-        flow.agents ?? [],
-        currentNodes,
-        currentEdges,
-      )
+      const newFlow = reactFlowToFlow(flow, currentNodes, currentEdges)
       save((flows) => {
         const idx = flows.findIndex((f) => f.id === flowId)
         if (idx >= 0) flows[idx] = newFlow
       })
     },
-    [flow.id, flow.name, flow.agents, flowId, save],
+    [flow, flowId, save],
   )
 
   const onConnect = useCallback(

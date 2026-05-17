@@ -181,14 +181,9 @@ export function flowToReactFlow(flow: Flow): { nodes: AgentNode[]; edges: Edge[]
 
 // ── ReactFlow → Flow 转换 ──────────────────────────────────────────────────
 
-/** 从 ReactFlow 的节点和边还原 Flow */
-export function reactFlowToFlow(
-  id: string,
-  name: string,
-  agents: Agent[],
-  nodes: AgentNode[],
-  edges: Edge[],
-): Flow {
+/** 从 ReactFlow 的节点和边还原 Flow（保留 flow 上 agents 以外的所有字段） */
+export function reactFlowToFlow(flow: Flow, nodes: AgentNode[], edges: Edge[]): Flow {
+  const agents = flow.agents ?? []
   const agentMap = new Map<string, Agent>()
 
   // 先把节点还原为 Agent，保留原始 outputs（清空 next_agent 以便从边重建）
@@ -231,8 +226,7 @@ export function reactFlowToFlow(
   }
 
   return {
-    id,
-    name,
+    ...flow,
     agents: [...agentMap.values()],
   }
 }
