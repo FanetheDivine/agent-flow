@@ -303,7 +303,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           )}
         </div>
         {canKillFlow && (
-          <Tooltip title='停止工作流'>
+          <Tooltip title='停止工作流，不清空shareValues'>
             <Button
               size='small'
               danger
