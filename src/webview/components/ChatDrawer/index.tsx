@@ -94,7 +94,13 @@ export const ChatDrawer: FC = () => {
     >
       <div className='flex flex-1 flex-col overflow-hidden bg-[#1e1e2e]'>
         {chatDrawer ? (
+          // key 强制 ChatPanel 在 (flowId, agentId) 切换时重新挂载,避免跨 Flow 共用
+          // React 内部状态（特别是 AskUserQuestionCard 的 selections / otherStates,
+          // 以及 motion.div 的 ask-card key 在 toolUseId 相同时被复用）。
+          // fork 出的新 Flow 与源 Flow 的 toolUseId 已经不同（handleFork 重新生成）,
+          // 但同步切换 ChatPanel 时仍可能短暂复用,加 key 是更彻底的隔离手段。
           <ChatPanel
+            key={`${chatDrawer.flowId}-${chatDrawer.agentId}`}
             ref={chatPanelRef}
             flowId={chatDrawer.flowId}
             agentId={chatDrawer.agentId}

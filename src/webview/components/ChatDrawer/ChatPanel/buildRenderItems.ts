@@ -156,6 +156,24 @@ function readResultModelUsage(message: unknown): Record<string, ModelTokenUsage>
 function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry): void {
   const { items, pendingTooluse, nextScanStart } = cached
 
+  /**
+   * 取「该索引之前最后一条带 uuid 的 SDK 消息」的 uuid。
+   * 用于给 user item 提供 fork 锚点：user fork 语义 = 「让用户重新说一次」=
+   * SDK forkSession upToMessageId 截到上一条但不含该 user 自己。
+   * - SDKUserMessage.uuid 是可选的（webview 主动发的消息通常没有），所以不能用
+   *   user 自己的 uuid 当锚点
+   * - 第一条 user（之前没有任何 SDK 消息）会得到 undefined,UI 不显示 fork icon
+   */
+  const findPrevUuid = (idx: number): string | undefined => {
+    for (let j = idx - 1; j >= 0; j--) {
+      const prev = msgs[j]
+      if (prev.type !== 'flow.signal.aiMessage') continue
+      const u = (prev.data.message as { uuid?: string }).uuid
+      if (u) return u
+    }
+    return undefined
+  }
+
   for (let i = nextScanStart; i < msgs.length; i++) {
     const mIdx = i
     const msg = msgs[i]
@@ -216,11 +234,14 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       }
       if (message.isSynthetic) continue
       if (message.parent_tool_use_id) continue
+      // user fork 语义：fork 上一条消息 = 让用户重新说一次。messageUuid 取
+      // 上一条 SDK 消息的 uuid（不是 user 自己的 uuid,因为 SDKUserMessage.uuid
+      // 经常缺失）。第一条 user 没有上一条,messageUuid undefined → UI 不显示 fork icon。
       items.push({
         kind: 'user',
         key: `${mIdx}-user`,
         rawContent,
-        messageUuid,
+        messageUuid: findPrevUuid(mIdx),
         turnClosed: false,
       })
       continue

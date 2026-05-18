@@ -239,30 +239,21 @@ function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage
   )
 }
 
-/** 带 fork icon 的消息容器：右上角悬浮一个 hover 时变亮的分支按钮 */
-function ForkWrap({
-  onFork,
-  children,
-}: {
-  onFork: () => void
-  children: ReactNode
-}): ReactNode {
+/** fork 触发按钮 —— inline 元素,作为 Copyable.extra 与 CopyButton 同列垂直堆叠 */
+function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   return (
-    <div className='group relative'>
-      {children}
-      <Tooltip title='从此处 fork 出新工作流'>
-        <button
-          type='button'
-          onClick={(e) => {
-            e.stopPropagation()
-            onFork()
-          }}
-          className='absolute -top-1 -right-1 z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-[#45475a] bg-[#1e1e2e] text-[10px] text-[#6c7086] opacity-0 transition-opacity hover:text-[#cdd6f4] group-hover:opacity-100'
-        >
-          <BranchesOutlined />
-        </button>
-      </Tooltip>
-    </div>
+    <Tooltip title='从此处 fork 出新工作流'>
+      <button
+        type='button'
+        onClick={(e) => {
+          e.stopPropagation()
+          onFork()
+        }}
+        className='cursor-pointer text-[11px] text-[#6c7086] transition-colors hover:text-[#cdd6f4]'
+      >
+        <BranchesOutlined />
+      </button>
+    </Tooltip>
   )
 }
 
@@ -271,39 +262,52 @@ function renderItemToBubble(
   ctx?: BubbleCtx,
   sessionCompleted = false,
 ): RenderedBubble | null {
-  /** 把内容包装上 fork icon —— 仅当 ctx.onFork 存在、turn 已闭环且 messageUuid 存在时生效 */
-  const wrapFork = (
-    content: ReactNode,
-    target: { kind: 'message'; messageUuid: string } | { kind: 'askUserQuestion'; toolUseId: string },
-  ): ReactNode => {
-    if (!ctx?.onFork) return content
-    return <ForkWrap onFork={() => ctx.onFork!(target, sessionCompleted)}>{content}</ForkWrap>
+  /**
+   * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素,作为 Copyable.extra 注入。
+   * fork icon 与 CopyButton 同列垂直堆叠（见 Copyable 组件实现）,不再用 absolute 定位。
+   */
+  const buildForkIcon = (
+    target:
+      | { kind: 'message'; messageUuid: string }
+      | { kind: 'askUserQuestion'; toolUseId: string },
+  ): ReactNode | undefined => {
+    if (!ctx?.onFork) return undefined
+    return <ForkButton onFork={() => ctx.onFork!(target, sessionCompleted)} />
   }
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
-      const inner = <Copyable text={copyText}>{node}</Copyable>
-      const content =
+      const fork =
         item.turnClosed && item.messageUuid
-          ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
-          : inner
+          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'user',
-        content,
+        content: (
+          <Copyable text={copyText} extra={fork}>
+            {node}
+          </Copyable>
+        ),
       }
     }
     case 'text': {
       const md = <Md content={item.text} />
-      const inner = item.streaming ? md : <Copyable text={item.text}>{md}</Copyable>
-      const content =
-        item.turnClosed && item.messageUuid && !item.streaming
-          ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
-          : inner
+      if (item.streaming) {
+        return { key: item.key, role: 'ai', content: md }
+      }
+      const fork =
+        item.turnClosed && item.messageUuid
+          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'ai',
-        content,
+        content: (
+          <Copyable text={item.text} extra={fork}>
+            {md}
+          </Copyable>
+        ),
       }
     }
     case 'thinking': {
@@ -316,15 +320,21 @@ function renderItemToBubble(
           <Md content={item.text} />
         </Think>
       )
-      const wrapped = item.streaming ? inner : <Copyable text={item.text}>{inner}</Copyable>
-      const content =
-        item.turnClosed && item.messageUuid && !item.streaming
-          ? wrapFork(wrapped, { kind: 'message', messageUuid: item.messageUuid })
-          : wrapped
+      if (item.streaming) {
+        return { key: item.key, role: 'ai', content: inner }
+      }
+      const fork =
+        item.turnClosed && item.messageUuid
+          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'ai',
-        content,
+        content: (
+          <Copyable text={item.text} extra={fork}>
+            {inner}
+          </Copyable>
+        ),
       }
     }
     case 'ask_user_question': {
@@ -349,10 +359,21 @@ function renderItemToBubble(
           answeredValues={answered?.values}
         />
       )
+      const fork = buildForkIcon({ kind: 'askUserQuestion', toolUseId: item.toolUseId })
+      // ask_user_question 卡片自带样式,不通过 Copyable 包裹（无文本可复制）;
+      // fork icon 用 inline-flex 直接挂在卡片右侧。
+      const content = fork ? (
+        <div className='flex items-start gap-1'>
+          <div className='min-w-0 flex-1'>{card}</div>
+          <div className='shrink-0 pt-1'>{fork}</div>
+        </div>
+      ) : (
+        card
+      )
       return {
         key: item.key,
         role: 'system',
-        content: wrapFork(card, { kind: 'askUserQuestion', toolUseId: item.toolUseId }),
+        content,
       }
     }
     case 'tool_use': {
@@ -391,24 +412,30 @@ function renderItemToBubble(
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
+      const fork = item.messageUuid
+        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+        : undefined
+      // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
+      // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
+      // 在 divider 容器层级也会失效。所以 fork icon 必须 inline 渲染在 content 内。
       const inner = (
-        <div className='flex flex-col gap-0.5'>
-          {modelUsages.map((m) => (
-            <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
-          ))}
-          <span className='text-[10px] text-[#6c7086]'>
-            <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-            <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+        <div className='inline-flex items-center gap-2'>
+          <span className='flex flex-col gap-0.5 text-left'>
+            {modelUsages.map((m) => (
+              <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
+            ))}
+            <span className='text-[10px] text-[#6c7086]'>
+              <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
+              <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+            </span>
           </span>
+          {fork && <span className='shrink-0'>{fork}</span>}
         </div>
       )
-      const content = item.messageUuid
-        ? wrapFork(inner, { kind: 'message', messageUuid: item.messageUuid })
-        : inner
       return {
         key: item.key,
         role: 'divider',
-        content,
+        content: inner,
       }
     }
     case 'agent_complete': {
