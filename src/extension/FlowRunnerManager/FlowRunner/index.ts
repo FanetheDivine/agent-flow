@@ -140,6 +140,68 @@ export class FlowRunner {
     this.wildcardListeners.clear()
   }
 
+  /**
+   * fork 路径专用：以 resume 模式启动一个 lazy ClaudeExecutor，runId / sessionId
+   * 都已知，不 fire flow.signal.flowStart（fork 由 extension 端用 flow.signal.fork
+   * 替代）。executor 处于 lazy 态：构造时不 createQuery、不 push initMessage,
+   * 等用户首次 sendUserMessage / answerQuestion 触发 SDK 启动。
+   */
+  spawnForFork(params: { runId: string; agentId: string; resumeSessionId: string }): void {
+    const { runId, agentId, resumeSessionId } = params
+    const agent = this.findAgentById(agentId)
+    if (!agent) {
+      this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })
+      return
+    }
+    this.killCurrentExecutor()
+    this.runState = { steps: [{ agentName: agent.agent_name, messages: [] }] }
+    this.updateAgentStatus(agent.id, 'generating')
+    // dummy initMessage：lazy 模式下不会被透传到上层、也不会 push 到 SDK,仅作为
+    // ClaudeExecutor 接口占位。用户首次 sendUserMessage 会以真实消息覆盖。
+    const dummyInit: UserMessageType = {
+      type: 'user',
+      message: { role: 'user', content: '' },
+      parent_tool_use_id: null,
+    }
+    const executor: ClaudeExecutor = new ClaudeExecutor(
+      runId,
+      dummyInit,
+      agent,
+      this.getLatestShareValues(),
+      {
+        onSessionId: () => {
+          // fork 路径不 fire flow.signal.flowStart;sessionId 已通过 signal.fork 同步
+        },
+        onMessage: (message) => {
+          if (!executor.sessionId) return
+          this.fire('flow.signal.aiMessage', { runId, sessionId: executor.sessionId, message })
+        },
+        onComplete: (result) => {
+          if (this.currentExecutor !== executor) return
+          this.onAgentComplete(executor, agent, result)
+        },
+        onToolPermissionRequest: ({ toolUseId, toolName, input }) => {
+          if (!executor.sessionId) return
+          this.fire('flow.signal.toolPermissionRequest', {
+            runId,
+            sessionId: executor.sessionId,
+            toolUseId,
+            toolName,
+            input,
+          })
+        },
+        onError: (err) => {
+          logError(`[FlowRunner] agent ${agent.id} error:`, err)
+          this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
+          this.updateAgentStatus(agent.id, 'completed')
+        },
+      },
+      resumeSessionId,
+      true, // lazy
+    )
+    this.currentExecutor = executor
+  }
+
   // ── signal 发射 ─────────────────────────────────────────────────────────
 
   private fire<K extends keyof FlowRunnerSignalEvents>(

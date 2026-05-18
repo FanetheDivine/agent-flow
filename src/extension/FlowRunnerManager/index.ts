@@ -79,4 +79,32 @@ export class FlowRunnerManager {
       this.runners.delete(flowId)
     }
   }
+
+  /**
+   * fork 路径专用：spawn 一个 lazy 模式的 FlowRunner（resume 模式启动 ClaudeExecutor）。
+   * - 调用方需提前生成 runId 并写入 newRunState.runId,以便 webview 收到 signal.fork
+   *   后用 (runId, sessionId) 派发 sendUserMessage / answerQuestion / interrupt
+   * - 不发 flow.signal.flowStart;runId / sessionId 由 extension 端通过 signal.fork 同步
+   */
+  spawnForFork(params: {
+    flowId: string
+    flow: Flow
+    agentId: string
+    resumeSessionId: string
+    runId: string
+  }): void {
+    const { flowId, flow, agentId, resumeSessionId, runId } = params
+    this.disposeRunner(flowId)
+    const runner = new FlowRunner(flow, {
+      getLatestShareValues: () => this.getLatestShareValues(flowId),
+    })
+    runner.listenAllSignals((eventType, signalData) => {
+      this.postMessage({
+        type: eventType,
+        data: { ...signalData, flowId },
+      } as ExtensionToWebviewMessage)
+    })
+    this.runners.set(flowId, runner)
+    runner.spawnForFork({ runId, agentId, resumeSessionId })
+  }
 }

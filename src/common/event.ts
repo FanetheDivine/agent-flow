@@ -136,6 +136,10 @@ type FlowSignalPayload = {
    * - flowId（由 WithFlowId 注入）= sourceFlowId（源 Flow id）
    * - newFlowId / newRunState：新 Flow 的 id 与对应运行态
    * - agentId：fork 起点所在的 agent id（用于 webview 自动打开 ChatDrawer）
+   * - runId：extension 端 fork 时同步 spawn FlowRunner 分配的运行 ID（运行时必须）;
+   *   webview 收到后写入 newRunState.runId,后续 sendUserMessage / answerQuestion /
+   *   interrupt 都基于此 runId 派发到 runner。FlowRunState.runId 类型保持
+   *   `string | undefined` 兼容空闲态,但 fork 信号中此字段必有值。
    *
    * 不携带 newFlow 定义；webview 端自行根据 sourceFlowId 深拷贝 Flow 后将 id 改为
    * newFlowId 加入 flows，并通过既有 save 通道持久化。
@@ -144,6 +148,7 @@ type FlowSignalPayload = {
     newFlowId: string
     newRunState: FlowRunState
     agentId: string
+    runId: string
   }
 }
 

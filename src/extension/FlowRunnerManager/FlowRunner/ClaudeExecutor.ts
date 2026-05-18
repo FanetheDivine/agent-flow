@@ -101,11 +101,25 @@ export class ClaudeExecutor {
   >()
 
   /**
+   * fork 模式（lazy）：构造时**不**调 createQuery、也不 push initMessage。
+   * - 等用户首次 sendUserMessage 时才 createQuery + push（resume 模式下接续 SDK 会话）
+   * - awaiting-question fork 路径：用户提交答案时,answerQuestion 找不到 resolver
+   *   会把 output 暂存到 pendingAnswers,然后 createQuery 启动 SDK；SDK resume 后
+   *   重新调 canUseTool('AskUserQuestion', input, { toolUseID })，canUseTool 内
+   *   先消费 pendingAnswers 直接 resolve，跳过 pendingPermissions 挂起阶段。
+   */
+  /** lazy 模式下未 startQuery 时,answerQuestion 的输出按 toolUseId 暂存,SDK 启动后 canUseTool 触发时消费 */
+  private pendingAnswers = new Map<string, AskUserQuestionOutput>()
+  private readonly initMessage: UserMessageType
+
+  /**
    * @param runId - FlowRunner 分配的本次运行 ID,贯穿整个 Flow 直到结束
    * @param agent - Agent 定义(model、outputs、prompt 等)
    * @param currentShareValues - Flow 全局共享上下文(仅用于注入系统提示词)
    * @param resumeSessionId - 若提供，构造时即以该 sessionId resume 已有 SDK 会话
    *   （fork 后的延续启动走此路径）；否则首次握手由 SDK 分配。
+   * @param lazy - fork 路径专用：构造时不 createQuery、不 push initMessage,等
+   *   用户首次操作（sendUserMessage / answerQuestion）触发 SDK 启动。
    */
   constructor(
     runId: string,
@@ -114,26 +128,31 @@ export class ClaudeExecutor {
     currentShareValues: Record<string, string>,
     events: ExecutorEvents,
     resumeSessionId?: string,
+    lazy = false,
   ) {
     this.runId = runId
     this.agentId = agent.id
     this.agent = agent
     this.events = events
+    this.initMessage = initMessage
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     // shareValues是写在系统提示词里的 不能即时读写 可以直接构造
     this.prompt = buildAgentSystemPrompt(agent, currentShareValues)
     if (resumeSessionId) {
-      // resume 模式：sessionId 已知，立即通知上层并透传 initMessage（与新 session
-      // 路径中 onSessionId+onMessage(initMessage) 的语义一致），避免 createQuery
-      // 的 for-await 路径再重复一次。
+      // resume 模式：sessionId 已知，立即通知上层。lazy 模式下不透传 initMessage
+      // （fork 路径的 initMessage 是 dummy,sessions.messages 切片已有真实历史）。
       this._sessionId = resumeSessionId
       this.initEmitted = true
       queueMicrotask(() => {
         this.events.onSessionId(resumeSessionId)
-        this.events.onMessage(initMessage)
+        if (!lazy) {
+          this.events.onMessage(initMessage)
+        }
       })
     }
-    this.createQuery(initMessage)
+    if (!lazy) {
+      this.createQuery(initMessage)
+    }
   }
 
   /** 转发用户消息 */
@@ -143,8 +162,36 @@ export class ClaudeExecutor {
       // 当前 query 仍在运行（如等待 AskUserQuestion 的 tool_result），直接推入流
       this.userInputStream.push(message)
     } else {
-      // query 已结束（中断/完成），创建新 query 并 resume
+      // query 已结束（中断/完成）或 lazy 模式尚未启动，创建新 query 并 resume
       this.createQuery(message)
+    }
+  }
+
+  /**
+   * 回答当前挂起的 AskUserQuestion：
+   * - SDK 已挂起（pendingPermissions 有 resolver）：直接 resolve
+   * - lazy 模式 SDK 还没启动 / pending 已被 reset：把 output 暂存到 pendingAnswers,
+   *   并触发 createQuery 启动 SDK（resume 模式）。SDK 看到 transcript pending
+   *   tool_use 重新调 canUseTool 时,canUseTool 内消费 pendingAnswers 直接 resolve。
+   */
+  answerQuestion(toolUseId: string, output: AskUserQuestionOutput): void {
+    const resolver = this.pendingPermissions.get(toolUseId)
+    if (resolver) {
+      this.pendingPermissions.delete(toolUseId)
+      resolver({
+        behavior: 'allow',
+        updatedInput: {
+          questions: output.questions,
+          answers: output.answers,
+          ...(output.annotations ? { annotations: output.annotations } : {}),
+        },
+      })
+      return
+    }
+    // 找不到 resolver: lazy 模式 SDK 还没启动,把答案暂存,createQuery 后由 canUseTool 消费
+    this.pendingAnswers.set(toolUseId, output)
+    if (!this.queryInstance && !this.disposed && !this.completed) {
+      this.createQuery(this.initMessage, true)
     }
   }
 
@@ -189,30 +236,13 @@ export class ClaudeExecutor {
   kill(): void {
     this.disposed = true
     this.pendingCompleteResult = null
+    this.pendingAnswers.clear()
     this.rejectAllPendingPermissions('executor disposed')
     this.abortCurrentQuery()
     this.mcpServer?.instance.close().catch((err) => {
       logError('[ClaudeExecutor] mcp server close failed:', err)
     })
     this.mcpServer = null
-  }
-
-  /**
-   * 回答当前挂起的 AskUserQuestion：resolve 对应的 canUseTool Promise，
-   * SDK 随后用带 answers 的 updatedInput 执行工具并发出正规 tool_result。
-   */
-  answerQuestion(toolUseId: string, output: AskUserQuestionOutput): void {
-    const resolver = this.pendingPermissions.get(toolUseId)
-    if (!resolver) return
-    this.pendingPermissions.delete(toolUseId)
-    resolver({
-      behavior: 'allow',
-      updatedInput: {
-        questions: output.questions,
-        answers: output.answers,
-        ...(output.annotations ? { annotations: output.annotations } : {}),
-      },
-    })
   }
 
   /**
@@ -243,6 +273,19 @@ export class ClaudeExecutor {
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
     if (toolName === 'AskUserQuestion') {
+      // lazy 模式（fork 重答场景）下用户已先一步提交答案：直接 resolve,跳过挂起
+      const pending = this.pendingAnswers.get(toolUseID)
+      if (pending) {
+        this.pendingAnswers.delete(toolUseID)
+        return Promise.resolve<PermissionResult>({
+          behavior: 'allow',
+          updatedInput: {
+            questions: pending.questions,
+            answers: pending.answers,
+            ...(pending.annotations ? { annotations: pending.annotations } : {}),
+          },
+        })
+      }
       // 挂起，等待 answerQuestion() 被调用
       return new Promise<PermissionResult>((resolve) => {
         this.pendingPermissions.set(toolUseID, resolve)
@@ -277,7 +320,7 @@ export class ClaudeExecutor {
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
-  private async createQuery(message: UserMessageType) {
+  private async createQuery(message: UserMessageType, silent = false) {
     // 同一个 MCP Server 实例不能被 connect 两次（@modelcontextprotocol/sdk
     // Protocol.connect 在 _transport 已存在时直接 throw 'Already connected
     // to a transport'，SDK 把异常吞进 .catch 后只打日志，导致 system message
@@ -326,7 +369,9 @@ export class ClaudeExecutor {
         prompt: this.userInputStream.iterable,
         options,
       })
-      this.userInputStream.push(message)
+      if (!silent) {
+        this.userInputStream.push(message)
+      }
       for await (const msg of this.queryInstance) {
         if (this.disposed) break
         if (!this.initEmitted) {
