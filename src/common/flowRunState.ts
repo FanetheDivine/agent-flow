@@ -367,6 +367,22 @@ export function updateFlowRunState(
 
     // signal 统一追加到当前 session 的消息流
     if (msg.type.startsWith('flow.signal.')) {
+      // agentComplete 携带 SDK 本回合 result（含 modelUsage / total_cost_usd）：
+      // 在 push agentComplete signal 之前,先把 result 作为独立 aiMessage 落入 session,
+      // buildRenderItems 才能在生成 agent_complete 项前累计好 token,并用累计值填
+      // modelBreakdown / totalCost。原本 ClaudeExecutor 直接把 result 当 aiMessage
+      // 透传会触发 phase='result' 的"生成完毕"通知,故改走 agentComplete 通道。
+      if (msg.type === 'flow.signal.agentComplete' && msg.data.result && session) {
+        session.messages.push({
+          type: 'flow.signal.aiMessage',
+          data: {
+            flowId,
+            runId: msg.data.runId,
+            sessionId: msg.data.sessionId,
+            message: msg.data.result,
+          },
+        })
+      }
       session?.messages.push(msg as ExtensionFlowSignalMessage)
     }
 
