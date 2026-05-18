@@ -97,8 +97,9 @@ export const ChatDrawer: FC = () => {
           // key 强制 ChatPanel 在 (flowId, agentId) 切换时重新挂载,避免跨 Flow 共用
           // React 内部状态（特别是 AskUserQuestionCard 的 selections / otherStates,
           // 以及 motion.div 的 ask-card key 在 toolUseId 相同时被复用）。
-          // fork 出的新 Flow 与源 Flow 的 toolUseId 已经不同（handleFork 重新生成）,
-          // 但同步切换 ChatPanel 时仍可能短暂复用,加 key 是更彻底的隔离手段。
+          // fork 出的新 Flow 与源 Flow 的 toolUseId 实际相同(SDK forkSession 不 remap
+          // tool_use.id,本侧也不再替换),靠 ChatPanel 的 key=flowId-agentId 强制 unmount
+          // 完成内部 state 隔离;切到新 Flow 时整棵 ChatPanel 重建,卡片状态不会复用。
           <ChatPanel
             key={`${chatDrawer.flowId}-${chatDrawer.agentId}`}
             ref={chatPanelRef}

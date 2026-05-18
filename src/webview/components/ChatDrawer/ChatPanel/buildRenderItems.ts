@@ -13,10 +13,13 @@ export type ToolResult = { isError: boolean; text: string }
 
 /**
  * fork icon 显隐相关字段：
- * - `messageUuid` 是 fork 切片的 SDK 消息 UUID（user/text/thinking 用所属 SDK 消息的 uuid，
- *   turn_end 用 result 消息的 uuid）；缺失时 UI 不显示 fork icon
- * - `turnClosed` 表示该项所属 turn 是否已闭环（出现 result 视为闭环）；
- *   未闭环时 UI 不显示 fork icon，避免 fork 出悬空 tool_use 的非法 transcript
+ * - `messageUuid` 是 fork 切片的 SDK 消息 UUID（user 用上一条 SDK 消息的 uuid;
+ *   text/thinking 用所属 assistant 消息的 uuid;turn_end 用本回合最后一条带 uuid
+ *   的 SDK 消息 uuid —— 因为 SDK 不把 result 写进 transcript,result.uuid 在
+ *   forkSession 里查不到）；缺失时 UI 不显示 fork icon
+ * - `turnClosed` 仅用于消息流语义记录（result 出现后所属 turn 闭环），
+ *   不再作为 fork icon 守卫的条件 —— fork 守卫只看 messageUuid 是否存在,
+ *   避免 fork 切片末端的 thinking/text/turn_end 因 turn 未闭环而无法继续 fork。
  */
 export type RenderItem =
   | {
@@ -374,7 +377,11 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         key: `${mIdx}-result`,
         isError,
         modelUsages: modelUsages.length > 0 ? modelUsages : undefined,
-        messageUuid,
+        // SDK 不把 result 写进 transcript（SessionMessage.type 仅 'user'|'assistant'|'system'），
+        // SDKResultMessage 也不带 uuid。turn_end fork 必须落到一个能被 forkSession
+        // 识别的节点 —— 取本回合最后一条带 uuid 的 SDK 消息（通常是该回合最后一条
+        // assistant），以此为 fork 锚点等价于「fork 到回合结束」。
+        messageUuid: findPrevUuid(mIdx),
         turnClosed: true,
       })
       cached.turnStartIdx = items.length

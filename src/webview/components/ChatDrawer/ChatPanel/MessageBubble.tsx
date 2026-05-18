@@ -299,10 +299,12 @@ function renderItemToBubble(
       if (item.streaming) {
         return { key: item.key, role: 'ai', content: md }
       }
-      const fork =
-        item.turnClosed && item.messageUuid
-          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-          : undefined
+      // 与 user 对齐:只要 messageUuid 存在即放行 fork。turn 是否闭环不再作为
+      // 守卫条件 —— fork 切片末端的 text 项 turnClosed=false（切片不含后续 result）,
+      // 但 fork 本身合法,不能因此拦下。
+      const fork = item.messageUuid
+        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+        : undefined
       return {
         key: item.key,
         role: 'ai',
@@ -326,10 +328,10 @@ function renderItemToBubble(
       if (item.streaming) {
         return { key: item.key, role: 'ai', content: inner }
       }
-      const fork =
-        item.turnClosed && item.messageUuid
-          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-          : undefined
+      // 与 user 对齐:只要 messageUuid 存在即放行 fork。同 text 分支说明。
+      const fork = item.messageUuid
+        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+        : undefined
       return {
         key: item.key,
         role: 'ai',
