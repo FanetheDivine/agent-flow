@@ -1,6 +1,6 @@
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
-import { forkSession } from '@anthropic-ai/claude-agent-sdk'
+import { forkSession, getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
 import type {
   AskUserQuestionInput,
   ExtensionFlowCommandEvents,
@@ -230,14 +230,20 @@ export function activate(context: vscode.ExtensionContext) {
    * 处理 fork command：调 SDK forkSession 复制 transcript 切片，立即 spawn FlowRunner
    * (lazy 模式 resume) 拿到 runId 写入 newRunState,然后发 `flow.signal.fork`。
    *
-   * 关键修复（v2）：
+   * 关键点（v3）：
    * 1. **按 upToMessageId 裁剪 messages**：防止 webview 端切片包含切片终点之后的内容
    *    （如 thinking fork 不应显示后续 result）
-   * 2. **askUserQuestion fork 重新生成 toolUseId**：避免新/旧 Flow 共用 toolUseId
-   *    导致 React/AskUserQuestionCard 内部 state 串流；同步替换 sessions 切片中
-   *    对应 tool_use block 的 id（否则 SDK resume 时 canUseTool 用的是新 id，
-   *    而 ClaudeExecutor.pendingPermissions 也按新 id 索引，必须保持一致）
-   * 3. **同步 spawn FlowRunner**：拿到 runId 写入 newRunState,webview 后续可正常
+   * 2. **保留源 toolUseId**：SDK forkSession 只 remap message uuid,**不改 tool_use.id**;
+   *    新/旧 Flow 共用同一 toolUseId 不会污染 React state（ChatPanel 用 `key=flowId-agentId`
+   *    在切 Flow / Agent 时强制 unmount AskUserQuestionCard,内部 state 不复用）。
+   *    若替换 toolUseId,会导致 SDK resume 时 canUseTool 看到的是源 toolUseId,
+   *    pendingAnswers 用新 toolUseId 索引找不到,退化到 pendingPermissions 阻塞挂起。
+   * 3. **用 SDK getSessionMessages 对齐 webview 切片末端 session 的 message uuid**：
+   *    forkSession 会重映射所有 message UUID,若 webview 切片仍持有源 uuid,后续
+   *    在新 Flow 中再次 fork 时 locateFork 命中的 sdkMsg.uuid 是源 uuid,
+   *    forkSession(newSessionId, { upToMessageId: srcUuid }) 在新 session 中找
+   *    不到该 uuid,直接报错。
+   * 4. **同步 spawn FlowRunner**：拿到 runId 写入 newRunState,webview 后续可正常
    *    sendUserMessage / answerQuestion / interrupt（不再 silent drop）
    */
   const handleFork = async (
@@ -257,55 +263,44 @@ export function activate(context: vscode.ExtensionContext) {
     }
     const { sessionIdx, sessionId: srcSessionId, messageIdx, upToMessageId, askInput } = located
 
+    const dir = vscode.workspace.workspaceFolders?.[0].uri.fsPath
     let newSessionId: string
     try {
-      const result = await forkSession(srcSessionId, {
-        upToMessageId,
-        dir: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
-      })
+      const result = await forkSession(srcSessionId, { upToMessageId, dir })
       newSessionId = result.sessionId
     } catch (err) {
       logError('[fork] forkSession failed', err)
       return
     }
 
-    // askUserQuestion fork 重新生成 toolUseId,稍后同步替换 sessions 切片中 tool_use block 的 id
-    const newToolUseId =
-      target.kind === 'askUserQuestion' ? globalThis.crypto.randomUUID() : undefined
-
     // 复制并裁剪 sessions：保留 [0, sessionIdx)，target 所在 session
     // 替换为 newSessionId、completed 重置；messages 按 messageIdx 裁剪到切片终点（含）
     const newSessions = sourceState.sessions.slice(0, sessionIdx).map((s) => structuredClone(s))
     const targetSession = sourceState.sessions[sessionIdx]
-    const slicedMessages = targetSession.messages.slice(0, messageIdx + 1).map((m) => {
-      // askUserQuestion fork：把切片末端 assistant message 中对应 tool_use block 的 id 替换为新 id
-      if (
-        !newToolUseId ||
-        target.kind !== 'askUserQuestion' ||
-        m.type !== 'flow.signal.aiMessage'
-      ) {
-        return structuredClone(m)
+    const slicedMessages = targetSession.messages
+      .slice(0, messageIdx + 1)
+      .map((m) => structuredClone(m))
+
+    // 用 SDK 端的新 transcript uuid 覆盖切片中 user/assistant 类型 SDK 消息的 uuid
+    // —— forkSession remap 后的真实 uuid 必须同步到 webview,否则后续再 fork
+    // 时 locateFork 命中的还是源 uuid,SDK 在新 session 中查不到。
+    try {
+      const newTranscript = await getSessionMessages(newSessionId, { dir })
+      let tIdx = 0
+      for (const m of slicedMessages) {
+        if (m.type !== 'flow.signal.aiMessage') continue
+        const sdkMsg = m.data.message as { type?: string; uuid?: string }
+        if (sdkMsg.type !== 'user' && sdkMsg.type !== 'assistant') continue
+        // webview 主动 echo 的 user 通常无 uuid,不会进 transcript,跳过
+        if (!sdkMsg.uuid) continue
+        if (tIdx >= newTranscript.length) break
+        sdkMsg.uuid = newTranscript[tIdx++].uuid
       }
-      const cloned = structuredClone(m)
-      const sdkMsg = cloned.data.message as {
-        type?: string
-        message?: { content?: unknown }
-      }
-      if (sdkMsg.type !== 'assistant') return cloned
-      const blocks = sdkMsg.message?.content
-      if (!Array.isArray(blocks)) return cloned
-      for (const block of blocks) {
-        if (
-          block &&
-          typeof block === 'object' &&
-          (block as { type?: string; id?: string }).type === 'tool_use' &&
-          (block as { id?: string }).id === target.toolUseId
-        ) {
-          ;(block as { id?: string }).id = newToolUseId
-        }
-      }
-      return cloned
-    })
+    } catch (err) {
+      // 拿不到 transcript 时不阻断 fork,仅打日志;UI 仍能进入新 Flow,只是再 fork 会失败
+      logError('[fork] getSessionMessages failed, message uuid not remapped', err)
+    }
+
     newSessions.push({
       ...structuredClone(targetSession),
       sessionId: newSessionId,
@@ -317,10 +312,13 @@ export function activate(context: vscode.ExtensionContext) {
     let phase: FlowPhase = 'result'
     const pendingQuestions: FlowRunState['pendingQuestions'] = []
     const answeredQuestions = { ...sourceState.answeredQuestions }
-    if (target.kind === 'askUserQuestion' && askInput && newToolUseId) {
+    if (target.kind === 'askUserQuestion' && askInput) {
+      // 保留源 toolUseId —— 与 SDK transcript 中 tool_use.id 对齐,
+      // 用户答题时 ClaudeExecutor.pendingAnswers 按源 toolUseId 索引,
+      // SDK resume 后 canUseTool 用同一 id 直接命中
       phase = 'awaiting-question'
       pendingQuestions.push({
-        toolUseId: newToolUseId,
+        toolUseId: target.toolUseId,
         input: askInput,
         sessionId: newSessionId,
       })

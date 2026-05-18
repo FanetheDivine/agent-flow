@@ -277,10 +277,13 @@ function renderItemToBubble(
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
-      const fork =
-        item.turnClosed && item.messageUuid
-          ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-          : undefined
+      // user fork 语义 = 「让用户重新说一次」= 切到上一条 SDK 消息为止。
+      // 只要 messageUuid（findPrevUuid 找到的上一条 SDK 消息 uuid）存在就合法,
+      // 不依赖 turn 是否闭环（thinking/text fork 后切片末端 user / agent running 中
+      // 的当前 user 都属于 turn 未闭环但 fork 合法的场景）。
+      const fork = item.messageUuid
+        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
+        : undefined
       return {
         key: item.key,
         role: 'user',
