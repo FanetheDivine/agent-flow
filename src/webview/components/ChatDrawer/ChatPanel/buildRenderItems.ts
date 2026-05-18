@@ -160,19 +160,27 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
   const { items, pendingTooluse, nextScanStart } = cached
 
   /**
-   * 取「该索引之前最后一条带 uuid 的 SDK 消息」的 uuid。
-   * 用于给 user item 提供 fork 锚点：user fork 语义 = 「让用户重新说一次」=
-   * SDK forkSession upToMessageId 截到上一条但不含该 user 自己。
-   * - SDKUserMessage.uuid 是可选的（webview 主动发的消息通常没有），所以不能用
-   *   user 自己的 uuid 当锚点
+   * 取「该索引之前最后一条 SDK transcript 中带 uuid 的消息」的 uuid。
+   * 用于给 user / turn_end item 提供 fork 锚点。
+   *
+   * **必须按 message.type 白名单过滤为 'user' | 'assistant'**：
+   * `includePartialMessages: true` 时 SDK 会流出 SDKPartialAssistantMessage
+   * (`type: 'stream_event'`),其 uuid 是流式事件内部标识,不在 SDK transcript 里。
+   * 若不过滤会误命中 stream_event uuid,forkSession(srcSessionId, { upToMessageId })
+   * 直接报 `Message <uuid> not found`。SDKSystemMessage / SDKResultMessage 也无 uuid 字段。
+   *
+   * - SDKUserMessage.uuid 是可选的（webview 重放的 user 通常没有,跳过）
+   * - SDKUserMessageReplay (type='user', isReplay=true) uuid 必选
+   * - SDKAssistantMessage (type='assistant') uuid 必选
    * - 第一条 user（之前没有任何 SDK 消息）会得到 undefined,UI 不显示 fork icon
    */
   const findPrevUuid = (idx: number): string | undefined => {
     for (let j = idx - 1; j >= 0; j--) {
       const prev = msgs[j]
       if (prev.type !== 'flow.signal.aiMessage') continue
-      const u = (prev.data.message as { uuid?: string }).uuid
-      if (u) return u
+      const sdkMsg = prev.data.message as { type?: string; uuid?: string }
+      if (sdkMsg.type !== 'user' && sdkMsg.type !== 'assistant') continue
+      if (sdkMsg.uuid) return sdkMsg.uuid
     }
     return undefined
   }
