@@ -8,7 +8,7 @@ import {
   UserMessageType,
 } from '@/common'
 import { logError } from '../../logger'
-import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
+import { ClaudeExecutor, type ExecutorMode, type ExecutorResult } from './ClaudeExecutor'
 
 const MessageSchema = z.object({
   role: z.enum(['user', 'agent']),
@@ -141,13 +141,24 @@ export class FlowRunner {
   }
 
   /**
-   * fork 路径专用：以 resume 模式启动一个 lazy ClaudeExecutor，runId / sessionId
+   * fork 路径专用：以 resume 模式启动一个 ClaudeExecutor，runId / sessionId
    * 都已知，不 fire flow.signal.flowStart（fork 由 extension 端用 flow.signal.fork
-   * 替代）。executor 处于 lazy 态：构造时不 createQuery、不 push initMessage,
-   * 等用户首次 sendUserMessage / answerQuestion 触发 SDK 启动。
+   * 替代）。
+   *
+   * mode:
+   * - 'lazy': 普通 fork(user/text/thinking/turn_end)。executor 处于 lazy 态:构造
+   *   时不 createQuery、不 push initMessage,等用户首次 sendUserMessage 触发 SDK 启动。
+   * - 'resume-pending': askUserQuestion fork。executor 构造时即 createQuery + push
+   *   isSynthetic dummy 启动 SDK 但不创建新 user turn,SDK 看到 transcript 末端悬空
+   *   tool_use 自动调 canUseTool 挂起 resolver,等用户答题。
    */
-  spawnForFork(params: { runId: string; agentId: string; resumeSessionId: string }): void {
-    const { runId, agentId, resumeSessionId } = params
+  spawnForFork(params: {
+    runId: string
+    agentId: string
+    resumeSessionId: string
+    mode: ExecutorMode
+  }): void {
+    const { runId, agentId, resumeSessionId, mode } = params
     const agent = this.findAgentById(agentId)
     if (!agent) {
       this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })
@@ -156,8 +167,9 @@ export class FlowRunner {
     this.killCurrentExecutor()
     this.runState = { steps: [{ agentName: agent.agent_name, messages: [] }] }
     this.updateAgentStatus(agent.id, 'generating')
-    // dummy initMessage：lazy 模式下不会被透传到上层、也不会 push 到 SDK,仅作为
-    // ClaudeExecutor 接口占位。用户首次 sendUserMessage 会以真实消息覆盖。
+    // dummy initMessage：fork 模式下不会被透传到上层、也不会作为 SDK prompt push,
+    // 仅作为 ClaudeExecutor 接口占位。'resume-pending' 模式会用单独的 isSynthetic
+    // dummy push 给 SDK,'lazy' 模式则等用户首次 sendUserMessage 时以真实消息覆盖。
     const dummyInit: UserMessageType = {
       type: 'user',
       message: { role: 'user', content: '' },
@@ -197,7 +209,7 @@ export class FlowRunner {
         },
       },
       resumeSessionId,
-      true, // lazy
+      mode,
     )
     this.currentExecutor = executor
   }

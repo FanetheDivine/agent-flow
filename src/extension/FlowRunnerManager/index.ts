@@ -1,6 +1,7 @@
 import { match } from 'ts-pattern'
 import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from '@/common'
 import { FlowRunner } from './FlowRunner'
+import type { ExecutorMode } from './FlowRunner/ClaudeExecutor'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
 type GetLatestShareValues = (flowId: string) => Record<string, string>
@@ -81,10 +82,13 @@ export class FlowRunnerManager {
   }
 
   /**
-   * fork 路径专用：spawn 一个 lazy 模式的 FlowRunner（resume 模式启动 ClaudeExecutor）。
+   * fork 路径专用：spawn FlowRunner 并启动 ClaudeExecutor。
    * - 调用方需提前生成 runId 并写入 newRunState.runId,以便 webview 收到 signal.fork
    *   后用 (runId, sessionId) 派发 sendUserMessage / answerQuestion / interrupt
    * - 不发 flow.signal.flowStart;runId / sessionId 由 extension 端通过 signal.fork 同步
+   * - mode 决定 ClaudeExecutor 启动行为(详见 ClaudeExecutor.ExecutorMode):
+   *   - 'lazy': 普通 fork(user/text/thinking/turn_end)
+   *   - 'resume-pending': askUserQuestion fork(立即启动 SDK 等 canUseTool)
    */
   spawnForFork(params: {
     flowId: string
@@ -92,8 +96,9 @@ export class FlowRunnerManager {
     agentId: string
     resumeSessionId: string
     runId: string
+    mode: ExecutorMode
   }): void {
-    const { flowId, flow, agentId, resumeSessionId, runId } = params
+    const { flowId, flow, agentId, resumeSessionId, runId, mode } = params
     this.disposeRunner(flowId)
     const runner = new FlowRunner(flow, {
       getLatestShareValues: () => this.getLatestShareValues(flowId),
@@ -105,6 +110,6 @@ export class FlowRunnerManager {
       } as ExtensionToWebviewMessage)
     })
     this.runners.set(flowId, runner)
-    runner.spawnForFork({ runId, agentId, resumeSessionId })
+    runner.spawnForFork({ runId, agentId, resumeSessionId, mode })
   }
 }

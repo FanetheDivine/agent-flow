@@ -24,6 +24,15 @@ export type ExecutorResult = {
   shareValues?: Record<string, string>
 }
 
+/**
+ * ClaudeExecutor 启动模式:
+ * - 'eager'(默认): 普通启动,构造时立即 createQuery 并 push initMessage
+ * - 'lazy': 构造时不 createQuery,等用户首次操作触发(普通 fork:user/text/thinking/turn_end)
+ * - 'resume-pending': 构造时立即 createQuery 并 push isSynthetic dummy 启动 SDK
+ *   iteration 但不创建新 user turn(askUserQuestion fork,SDK 看到悬空 tool_use 自动调 canUseTool)
+ */
+export type ExecutorMode = 'eager' | 'lazy' | 'resume-pending'
+
 export type ExecutorEvents = {
   /** 首次获取到 SDK session_id 时触发，保证先于任何 onMessage */
   onSessionId: (sessionId: string) => void
@@ -103,12 +112,20 @@ export class ClaudeExecutor {
   /**
    * fork 模式（lazy）：构造时**不**调 createQuery、也不 push initMessage。
    * - 等用户首次 sendUserMessage 时才 createQuery + push（resume 模式下接续 SDK 会话）
-   * - awaiting-question fork 路径：用户提交答案时,answerQuestion 找不到 resolver
-   *   会把 output 暂存到 pendingAnswers,然后 createQuery 启动 SDK；SDK resume 后
-   *   重新调 canUseTool('AskUserQuestion', input, { toolUseID })，canUseTool 内
-   *   先消费 pendingAnswers 直接 resolve，跳过 pendingPermissions 挂起阶段。
+   * - 普通 fork（user/text/thinking/turn_end）走此路径
+   *
+   * fork 模式（resume-pending）：构造时立即 createQuery 启动 SDK,但 push 一条
+   * `isSynthetic: true` 的 dummy 消息让 SDK iteration 启动而**不创建新 user turn**。
+   * SDK resume 后读取 transcript 末端的悬空 AskUserQuestion tool_use,自动调
+   * canUseTool,我们把 resolver 挂起到 pendingPermissions。用户在新 Flow 提交答案
+   * 时,answerQuestion 找到 resolver 直接 resolve(走最直接路径,与原 Flow 中
+   * askUserQuestion 答题路径一致)。代价:fork 出来即占用一次 SDK resume 连接,
+   * 但 token 消耗仅 transcript resume 一次,可接受。askUserQuestion fork 走此路径。
+   *
+   * pendingAnswers 兜底：极小概率下用户在 SDK 还没调 canUseTool 就提交答案,
+   * 此时 resolver 还没挂起,把 output 暂存到 pendingAnswers,canUseTool 触发时消费。
    */
-  /** lazy 模式下未 startQuery 时,answerQuestion 的输出按 toolUseId 暂存,SDK 启动后 canUseTool 触发时消费 */
+  /** lazy / resume-pending 模式下,user 抢先于 SDK canUseTool 提交答案时的暂存 */
   private pendingAnswers = new Map<string, AskUserQuestionOutput>()
   private readonly initMessage: UserMessageType
 
@@ -118,8 +135,11 @@ export class ClaudeExecutor {
    * @param currentShareValues - Flow 全局共享上下文(仅用于注入系统提示词)
    * @param resumeSessionId - 若提供，构造时即以该 sessionId resume 已有 SDK 会话
    *   （fork 后的延续启动走此路径）；否则首次握手由 SDK 分配。
-   * @param lazy - fork 路径专用：构造时不 createQuery、不 push initMessage,等
-   *   用户首次操作（sendUserMessage / answerQuestion）触发 SDK 启动。
+   * @param mode - fork 路径专用模式:
+   *   - 'eager'(默认):构造时立即 createQuery 并 push initMessage(原非 fork 路径)
+   *   - 'lazy':构造时不 createQuery、不 push initMessage,等用户首次操作触发(普通 fork)
+   *   - 'resume-pending':构造时立即 createQuery,push 一条 isSynthetic:true 的 dummy
+   *     消息启动 SDK iteration 但不创建新 user turn(askUserQuestion fork)
    */
   constructor(
     runId: string,
@@ -128,7 +148,7 @@ export class ClaudeExecutor {
     currentShareValues: Record<string, string>,
     events: ExecutorEvents,
     resumeSessionId?: string,
-    lazy = false,
+    mode: ExecutorMode = 'eager',
   ) {
     this.runId = runId
     this.agentId = agent.id
@@ -139,20 +159,33 @@ export class ClaudeExecutor {
     // shareValues是写在系统提示词里的 不能即时读写 可以直接构造
     this.prompt = buildAgentSystemPrompt(agent, currentShareValues)
     if (resumeSessionId) {
-      // resume 模式：sessionId 已知，立即通知上层。lazy 模式下不透传 initMessage
-      // （fork 路径的 initMessage 是 dummy,sessions.messages 切片已有真实历史）。
+      // resume 模式：sessionId 已知，立即通知上层。fork 路径(lazy/resume-pending)
+      // 不透传 initMessage —— sessions.messages 切片已有真实历史,initMessage 只是
+      // 接口占位/dummy。
       this._sessionId = resumeSessionId
       this.initEmitted = true
       queueMicrotask(() => {
         this.events.onSessionId(resumeSessionId)
-        if (!lazy) {
+        if (mode === 'eager') {
           this.events.onMessage(initMessage)
         }
       })
     }
-    if (!lazy) {
+    if (mode === 'eager') {
       this.createQuery(initMessage)
+    } else if (mode === 'resume-pending') {
+      // 用 isSynthetic dummy 启动 SDK iteration 但不创建新 user turn。
+      // SDK resume 看到 transcript 末端悬空 AskUserQuestion tool_use 会自动调
+      // canUseTool,我们挂起到 pendingPermissions,等用户在 webview 提交答案。
+      const synthetic: SDKUserMessage = {
+        type: 'user',
+        message: { role: 'user', content: '' },
+        parent_tool_use_id: null,
+        isSynthetic: true,
+      }
+      this.createQuery(synthetic)
     }
+    // mode === 'lazy': 不 createQuery,等用户操作触发
   }
 
   /** 转发用户消息 */
@@ -169,10 +202,12 @@ export class ClaudeExecutor {
 
   /**
    * 回答当前挂起的 AskUserQuestion：
-   * - SDK 已挂起（pendingPermissions 有 resolver）：直接 resolve
-   * - lazy 模式 SDK 还没启动 / pending 已被 reset：把 output 暂存到 pendingAnswers,
-   *   并触发 createQuery 启动 SDK（resume 模式）。SDK 看到 transcript pending
-   *   tool_use 重新调 canUseTool 时,canUseTool 内消费 pendingAnswers 直接 resolve。
+   * - SDK 已挂起（pendingPermissions 有 resolver）：直接 resolve（'resume-pending' 模式
+   *   下,SDK 启动后调 canUseTool 已挂起 resolver,这是主路径）
+   * - lazy 模式 SDK 还没启动 / pending 已被 reset / 'resume-pending' 但用户抢先一步：
+   *   把 output 暂存到 pendingAnswers,并触发 createQuery 启动 SDK（resume 模式 +
+   *   isSynthetic dummy 启动 iteration 不创建新 user turn）。SDK 看到悬空 tool_use
+   *   重新调 canUseTool 时,canUseTool 内消费 pendingAnswers 直接 resolve。
    */
   answerQuestion(toolUseId: string, output: AskUserQuestionOutput): void {
     log('[ClaudeExecutor] answerQuestion', {
@@ -203,7 +238,15 @@ export class ClaudeExecutor {
         toolUseId,
         sessionId: this._sessionId,
       })
-      this.createQuery(this.initMessage, true)
+      // 用 isSynthetic dummy 启动 SDK iteration 不创建新 user turn,与 'resume-pending'
+      // 路径一致 —— 让 SDK 自然走到 transcript 末端的悬空 tool_use 触发 canUseTool。
+      const synthetic: SDKUserMessage = {
+        type: 'user',
+        message: { role: 'user', content: '' },
+        parent_tool_use_id: null,
+        isSynthetic: true,
+      }
+      this.createQuery(synthetic)
     }
   }
 

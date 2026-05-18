@@ -350,14 +350,21 @@ export function activate(context: vscode.ExtensionContext) {
     )
     flowRunStateManager.setRunState(newFlowId, newRunState)
 
-    // 路线 A：立即 spawn FlowRunner（lazy 模式 resume）;runId 已确定,webview 后续
-    // 派发的 userMessage / answerQuestion / interrupt 都能正常匹配到此 runner。
+    // 路线 A：立即 spawn FlowRunner 启动 SDK;runId 已确定,webview 后续派发的
+    // userMessage / answerQuestion / interrupt 都能正常匹配到此 runner。
+    // - askUserQuestion fork: 'resume-pending' 模式,构造时 push isSynthetic dummy
+    //   启动 SDK iteration 让其自然走到 transcript 末端的悬空 tool_use,触发 canUseTool
+    //   挂起 resolver。用户提交答案时 answerQuestion 直接命中 resolver。
+    // - 普通 fork(user/text/thinking/turn_end): 'lazy' 模式,等用户首次操作触发 SDK 启动。
+    const forkMode: 'lazy' | 'resume-pending' =
+      target.kind === 'askUserQuestion' ? 'resume-pending' : 'lazy'
     runnerManager.spawnForFork({
       flowId: newFlowId,
       flow: newFlow,
       agentId,
       resumeSessionId: newSessionId,
       runId: newRunId,
+      mode: forkMode,
     })
 
     postMessageToWebview({
