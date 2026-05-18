@@ -457,6 +457,7 @@ export class FlowRunner {
           content,
           output: { name: result.outputName!, newSessionId },
           shareValues: result.shareValues,
+          result: result.resultMessage,
         })
       })
     } else {
@@ -467,6 +468,7 @@ export class FlowRunner {
         sessionId: oldSessionId,
         content: result.content,
         shareValues: result.shareValues,
+        result: result.resultMessage,
       })
       this.updateAgentStatus(agent.id, 'completed')
     }

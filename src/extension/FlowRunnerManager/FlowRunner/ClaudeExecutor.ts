@@ -22,6 +22,12 @@ export type ExecutorResult = {
   outputName?: string
   content: string
   shareValues?: Record<string, string>
+  /**
+   * 本回合 SDK 最后一条 result 消息。AgentComplete 暂存后,result 不再走 onMessage
+   * 透传(否则 reducer 会触发 phase='result' 的"生成完毕"通知),改随 onComplete
+   * 上抛,由上层写入 agentComplete signal 的 result 字段。
+   */
+  resultMessage?: AIMessageType
 }
 
 /**
@@ -449,7 +455,13 @@ export class ClaudeExecutor {
           this.events.onSessionId(msg.session_id)
           this.events.onMessage(message)
         }
-        this.events?.onMessage(msg)
+        // AgentComplete 已暂存时,本回合的 result 消息不单独透传给上层(否则
+        // reducer 会把 phase 切到 'result' 触发"生成完毕"通知),改随下面的
+        // onComplete 通过 agentComplete signal 一并上抛。其他类型消息正常透传。
+        const skipForward = msg.type === 'result' && this.pendingCompleteResult !== null
+        if (!skipForward) {
+          this.events?.onMessage(msg)
+        }
         // result 是本回合最后一条消息（带 modelUsage / total_cost_usd）。
         if (msg.type === 'result') {
           // 通知正在等待 result 的 interrupt 路径可以 close 了(用户主动中断
@@ -461,7 +473,7 @@ export class ClaudeExecutor {
           if (this.pendingCompleteResult && !this.completed) {
             const pending = this.pendingCompleteResult
             this.pendingCompleteResult = null
-            this.events.onComplete(pending)
+            this.events.onComplete({ ...pending, resultMessage: msg })
             this.completed = true
           }
         }

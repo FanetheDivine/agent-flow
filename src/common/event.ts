@@ -116,6 +116,13 @@ type FlowSignalPayload = {
     output?: { name: string; newSessionId: string }
     /** Agent 通过 MCP setShareValues 写入的共享数据，作为完成信号的一部分同步给 webview */
     shareValues?: Record<string, string>
+    /**
+     * 本回合 SDK 最后一条 result 消息（含 modelUsage / total_cost_usd）。
+     * AgentComplete 暂存后,ClaudeExecutor 不再把这条 result 单独透传为 aiMessage
+     * （否则 reducer 会把 phase 切到 'result' 触发"生成完毕"通知）,改随 agentComplete
+     * 一并上抛;reducer 把它写入当前 session.messages,buildRenderItems 仍能取到算 token。
+     */
+    result?: AIMessageType
   }
   /** Agent被中断了 */
   agentInterrupted: { runId: string; sessionId: string }
