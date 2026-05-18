@@ -16,7 +16,7 @@ import {
   UserMessageType,
 } from '@/common'
 import { buildAgentMcpServer } from '@/common/extension'
-import { logError } from '../../logger'
+import { log, logError } from '../../logger'
 
 export type ExecutorResult = {
   outputName?: string
@@ -175,6 +175,14 @@ export class ClaudeExecutor {
    *   tool_use 重新调 canUseTool 时,canUseTool 内消费 pendingAnswers 直接 resolve。
    */
   answerQuestion(toolUseId: string, output: AskUserQuestionOutput): void {
+    log('[ClaudeExecutor] answerQuestion', {
+      toolUseId,
+      hasResolver: this.pendingPermissions.has(toolUseId),
+      pendingPermissionKeys: Array.from(this.pendingPermissions.keys()),
+      pendingAnswerKeys: Array.from(this.pendingAnswers.keys()),
+      hasQueryInstance: !!this.queryInstance,
+      sessionId: this._sessionId,
+    })
     const resolver = this.pendingPermissions.get(toolUseId)
     if (resolver) {
       this.pendingPermissions.delete(toolUseId)
@@ -191,6 +199,10 @@ export class ClaudeExecutor {
     // 找不到 resolver: lazy 模式 SDK 还没启动,把答案暂存,createQuery 后由 canUseTool 消费
     this.pendingAnswers.set(toolUseId, output)
     if (!this.queryInstance && !this.disposed && !this.completed) {
+      log('[ClaudeExecutor] answerQuestion → createQuery (lazy resume)', {
+        toolUseId,
+        sessionId: this._sessionId,
+      })
       this.createQuery(this.initMessage, true)
     }
   }
@@ -208,15 +220,20 @@ export class ClaudeExecutor {
     // 不要继续切到下一个 agent / 完成 flow。
     this.pendingCompleteResult = null
     this.rejectAllPendingPermissions('interrupted')
-    await this.interruptAndAwaitResult()
+    // 用户主动 interrupt：fork lazy 启动后短期内主动打断,SDK 端的 result 可能不会到,
+    // 等满 3s 兜底体感很卡。缩短到 800ms,代价是该回合 token 统计可能丢失,但
+    // 用户主动打断时这是可接受的。AgentComplete 触发的内部 interrupt 仍保留 3s。
+    await this.interruptAndAwaitResult(800)
   }
 
   /**
    * 触发 SDK interrupt 并阻塞到本回合 result 消息(含 modelUsage / total_cost_usd)
-   * 被 for-await 透传给 onMessage 后才 close,否则 token 统计会被丢。3s 兜底防止
-   * SDK 异常导致 hang。两类调用方:用户主动 interrupt + AgentComplete onComplete。
+   * 被 for-await 透传给 onMessage 后才 close,否则 token 统计会被丢。timeout 兜底防止
+   * SDK 异常导致 hang。两类调用方:
+   * - 用户主动 interrupt: 800ms（响应优先,token 统计可丢）
+   * - AgentComplete 内部 interrupt: 3000ms（保住 token 统计）
    */
-  private async interruptAndAwaitResult(): Promise<void> {
+  private async interruptAndAwaitResult(timeoutMs = 3000): Promise<void> {
     if (!this.queryInstance) return
     const resultArrived = new Promise<void>((r) => {
       this.resolveResultArrived = r
@@ -226,7 +243,7 @@ export class ClaudeExecutor {
     } catch (err) {
       logError('[ClaudeExecutor] queryInstance.interrupt() failed:', err)
     }
-    await Promise.race([resultArrived, new Promise<void>((r) => setTimeout(r, 3000))])
+    await Promise.race([resultArrived, new Promise<void>((r) => setTimeout(r, timeoutMs))])
     this.resolveResultArrived = null
     this.queryInstance?.close()
     this.queryInstance = null
@@ -273,6 +290,11 @@ export class ClaudeExecutor {
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
     if (toolName === 'AskUserQuestion') {
+      log('[ClaudeExecutor] canUseTool AskUserQuestion', {
+        toolUseID,
+        hasPendingAnswer: this.pendingAnswers.has(toolUseID),
+        pendingAnswerKeys: Array.from(this.pendingAnswers.keys()),
+      })
       // lazy 模式（fork 重答场景）下用户已先一步提交答案：直接 resolve,跳过挂起
       const pending = this.pendingAnswers.get(toolUseID)
       if (pending) {
