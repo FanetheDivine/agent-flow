@@ -173,17 +173,11 @@ export type ExtensionFlowSignalMessage = EventMessageType<ExtensionFlowSignalEve
 
 /** Flow 指令基础 payload（不含 flowId） */
 type FlowCommandPayload = {
-  /**
-   * webview 发起启动，key 传入 flow 内部用于校验响应归属。
-   * `resumeSessionId` 存在时表示 resume 一个已存在的 SDK 会话（fork 出的新 Flow
-   * 在用户首次发消息时走此路径），reducer 保留既有 sessions / answeredQuestions
-   * / shareValues 不重置。
-   */
+  /** webview 发起启动，key 传入 flow 内部用于校验响应归属。 */
   flowStart: {
     runKey: string
     agentId: string
     initMessage: UserMessageType
-    resumeSessionId?: string
   }
   /** 向当前 Agent 发送用户消息，必须在 runId + sessionId 对齐下发生 */
   userMessage: { runId: string; sessionId: string; message: UserMessageType }

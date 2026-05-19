@@ -19,7 +19,7 @@ export class FlowRunnerManager {
   handleCommand(type: string, data: any): void {
     match(type)
       .with('flow.command.flowStart', () => {
-        const { flowId, runKey, agentId, flow, initMessage, resumeSessionId } =
+        const { flowId, runKey, agentId, flow, initMessage } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow, {
@@ -32,7 +32,7 @@ export class FlowRunnerManager {
           } as ExtensionToWebviewMessage)
         })
         this.runners.set(flowId, runner)
-        runner.emit('flow.command.flowStart', { runKey, agentId, initMessage, resumeSessionId })
+        runner.emit('flow.command.flowStart', { runKey, agentId, initMessage })
       })
       .with('flow.command.userMessage', () => {
         const { flowId, ...rest } = data as ExtensionFlowCommandEvents['flow.command.userMessage']

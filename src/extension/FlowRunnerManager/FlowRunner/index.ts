@@ -245,7 +245,6 @@ export class FlowRunner {
     runKey,
     agentId,
     initMessage,
-    resumeSessionId,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
     // 中断当前运行
     this.killCurrentExecutor()
@@ -270,21 +269,14 @@ export class FlowRunner {
           parent_tool_use_id: null,
         }
       : initMessage
-    this.runAgent(
-      runId,
-      effectiveInitMessage,
-      agent,
-      this.getLatestShareValues(),
-      (sessionId) => {
-        this.fire('flow.signal.flowStart', {
-          runId,
-          runKey,
-          sessionId,
-          agentId: agent.id,
-        })
-      },
-      resumeSessionId,
-    )
+    this.runAgent(runId, effectiveInitMessage, agent, this.getLatestShareValues(), (sessionId) => {
+      this.fire('flow.signal.flowStart', {
+        runId,
+        runKey,
+        sessionId,
+        agentId: agent.id,
+      })
+    })
   }
 
   private handleUserMessage({
@@ -342,7 +334,6 @@ export class FlowRunner {
     agent: Agent,
     currentShareValues: Record<string, string>,
     onSessionId: (sessionId: string) => void,
-    resumeSessionId?: string,
   ): void {
     this.updateAgentStatus(agent.id, 'preparing')
 
@@ -386,7 +377,6 @@ export class FlowRunner {
           this.updateAgentStatus(agent.id, 'completed')
         },
       },
-      resumeSessionId,
     )
     this.currentExecutor = executor
   }

@@ -127,16 +127,8 @@ type FlowStoreType = StoreState & {
   init: (app: AppApi) => () => void
   setActiveFlowId: (id: string) => void
   setFlowListCollapsed: (collapsed: boolean) => void
-  /**
-   * 启动 Flow 运行。
-   * `resumeSessionId` 存在时表示 resume fork 出的新 Flow（不清空 sessions / 不重置 build cache）。
-   */
-  runFlow: (
-    flowId: string,
-    agentId: string,
-    initMessage: UserMessageType,
-    resumeSessionId?: string,
-  ) => void
+  /** 启动 Flow 运行。 */
+  runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   save: (updateFn: (val: Flow[]) => void) => void
   sendUserMessage: (flowId: string, content: UserMessageType['message']['content']) => void
   answerQuestion: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
@@ -387,7 +379,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       postMessageToExtension({ type: 'load', data: undefined })
       return cleanup
     },
-    runFlow: (flowId, agentId, initMessage, resumeSessionId) => {
+    runFlow: (flowId, agentId, initMessage) => {
       const { flows, flowRunStates } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
@@ -399,13 +391,9 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             parent_tool_use_id: null,
           }
         : initMessage
-      // resume 模式保留 fork 切片对应 sessions 的 build 缓存（按 newSessionId 索引），
-      // 普通启动则清除该 flow 旧 sessions 的缓存以避免内存泄漏
-      if (!resumeSessionId) {
-        const existingState = flowRunStates[flowId]
-        if (existingState?.sessions?.length) {
-          clearBuildCacheForSessions(existingState.sessions.map((s) => s.sessionId))
-        }
+      const existingState = flowRunStates[flowId]
+      if (existingState?.sessions?.length) {
+        clearBuildCacheForSessions(existingState.sessions.map((s) => s.sessionId))
       }
       const runKey = crypto.randomUUID()
       dispatchCommand({
@@ -415,7 +403,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           runKey,
           agentId,
           initMessage: effectiveInitMessage,
-          resumeSessionId,
         },
       })
     },

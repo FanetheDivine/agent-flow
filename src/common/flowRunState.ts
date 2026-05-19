@@ -348,19 +348,12 @@ export function updateFlowRunState(
       draft.phase = 'running'
       draft.currentAgentId = msg.data.agentId
       clearPendings()
-      // resume 模式：sessions 里已有匹配 sessionId（fork 切片）的会话则复用
-      const existing = draft.sessions.find((s) => s.sessionId === msg.data.sessionId)
-      if (existing) {
-        existing.completed = false
-        existing.outputName = undefined
-      } else {
-        draft.sessions.push({
-          sessionId: msg.data.sessionId,
-          agentId: msg.data.agentId,
-          messages: [],
-          completed: false,
-        })
-      }
+      draft.sessions.push({
+        sessionId: msg.data.sessionId,
+        agentId: msg.data.agentId,
+        messages: [],
+        completed: false,
+      })
       return
     }
 
