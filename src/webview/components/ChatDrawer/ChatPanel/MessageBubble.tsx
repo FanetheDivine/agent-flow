@@ -14,6 +14,7 @@ import {
   buildRenderItems,
   clearBuildCache,
   clearBuildCacheForSessions,
+  getContextUsage,
   type RenderItem,
 } from './buildRenderItems'
 
@@ -287,6 +288,7 @@ function renderItemToBubble(
   item: RenderItem,
   ctx?: BubbleCtx,
   sessionCompleted = false,
+  itemContextUsage?: { used: number; total: number },
 ): RenderedBubble | null {
   /**
    * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素,作为 Copyable.extra 注入。
@@ -455,8 +457,8 @@ function renderItemToBubble(
             {modelUsages.map((m) => (
               <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
             ))}
-            {item.contextUsage && (
-              <ContextUsageBar used={item.contextUsage.used} total={item.contextUsage.total} />
+            {itemContextUsage && (
+              <ContextUsageBar used={itemContextUsage.used} total={itemContextUsage.total} />
             )}
             <span className='text-[10px] text-[#6c7086]'>
               <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
@@ -510,17 +512,17 @@ function renderItemToBubble(
                   </div>
                 </div>
               )}
-              {(breakdown.length > 0 || item.totalCost !== undefined || item.contextUsage) && (
+              {(breakdown.length > 0 || item.totalCost !== undefined || itemContextUsage) && (
                 <div className='mt-2 border-t border-[#45475a] pt-2'>
                   <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
                   {breakdown.map((b) => (
                     <ModelUsageRow key={b.model} model={b.model} usage={b.usage} />
                   ))}
-                  {item.contextUsage && (
+                  {itemContextUsage && (
                     <div className='mt-1'>
                       <ContextUsageBar
-                        used={item.contextUsage.used}
-                        total={item.contextUsage.total}
+                        used={itemContextUsage.used}
+                        total={itemContextUsage.total}
                       />
                     </div>
                   )}
@@ -548,8 +550,21 @@ export function toBubbleItems(
   const renderItems = buildRenderItems(sessionId, msgs)
   const out: RenderedBubble[] = []
   for (const item of renderItems) {
-    const bubble = renderItemToBubble(item, ctx, sessionCompleted)
-    if (bubble) out.push(bubble)
+    const cu = getContextUsage(sessionId, item.key)
+    const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu)
+    if (!bubble) continue
+    out.push(bubble)
+    // turn_end / agent_complete 内部已经嵌入 ContextUsageBar；其余 item（user /
+    // text / thinking / tool_use / ask_user_question）若 cache 命中,则在该 bubble
+    // 后面追加一条独立的 ContextUsageBar 行,以便每条 assistant 消息后都能看到
+    // 当前上下文窗口占用。
+    if (cu && item.kind !== 'turn_end' && item.kind !== 'agent_complete') {
+      out.push({
+        key: `${item.key}-ctx`,
+        role: 'divider',
+        content: <ContextUsageBar used={cu.used} total={cu.total} />,
+      })
+    }
   }
   return out
 }
