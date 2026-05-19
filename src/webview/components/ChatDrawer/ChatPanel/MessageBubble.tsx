@@ -245,6 +245,8 @@ function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage
 /**
  * 上下文窗口占用条 —— 展示「最后一次 API 调用真实喂给模型的 input + cache 总量 / 模型上下文窗口」。
  * 占用率越高颜色越红：>=80% 红、>=50% 黄、其余灰。
+ * 仅 turn_end / agent_complete 内部使用。普通气泡（text/thinking/tool_use）改用紧凑的
+ * `tokens(pct%)` 文本展示在标题或气泡下方,见 `formatTokensCtxLabel`。
  */
 function ContextUsageBar({ used, total }: { used: number; total: number }) {
   const ratio = total > 0 ? Math.min(1, used / total) : 0
@@ -264,6 +266,22 @@ function ContextUsageBar({ used, total }: { used: number; total: number }) {
       </span>
     </div>
   )
+}
+
+/**
+ * 紧凑型 tokens / 上下文占用文本：形如 `133.3k(67%)`。
+ * - 仅 tokens 已知:返回 `133.3k`
+ * - 二者皆缺:返回 undefined,渲染层据此整段隐藏（不出现 0 / NaN）
+ */
+function formatTokensCtxLabel(
+  tokens: number | undefined,
+  ctx: { used: number; total: number } | undefined,
+): string | undefined {
+  if (!tokens || tokens <= 0) return undefined
+  const tokenStr = formatTokenCount(tokens)
+  if (!ctx || ctx.total <= 0) return tokenStr
+  const pct = Math.round((ctx.used / ctx.total) * 100)
+  return `${tokenStr}(${pct}%)`
 }
 
 /** fork 触发按钮 —— inline 元素,作为 Copyable.extra 与 CopyButton 同列垂直堆叠 */
@@ -439,6 +457,7 @@ function renderItemToBubble(
             input={item.input}
             result={item.result}
             treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('AgentComplete')}
+            tokensCtxLabel={formatTokensCtxLabel(item.tokensInput, itemContextUsage)}
           />
         ),
       }
@@ -554,16 +573,18 @@ export function toBubbleItems(
     const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu)
     if (!bubble) continue
     out.push(bubble)
-    // turn_end / agent_complete 内部已经嵌入 ContextUsageBar；其余 item（user /
-    // text / thinking / tool_use / ask_user_question）若 cache 命中,则在该 bubble
-    // 后面追加一条独立的 ContextUsageBar 行,以便每条 assistant 消息后都能看到
-    // 当前上下文窗口占用。
-    if (cu && item.kind !== 'turn_end' && item.kind !== 'agent_complete') {
-      out.push({
-        key: `${item.key}-ctx`,
-        role: 'divider',
-        content: <ContextUsageBar used={cu.used} total={cu.total} />,
-      })
+    // text / thinking 气泡下方追加一条紧凑的 `tokens(pct%)` 行;tool_use 已把
+    // 同款标签嵌进 summary 行右侧,turn_end / agent_complete 内部自有 ContextUsageBar,
+    // 都不再独立追加 ——「冗余的独立 ContextUsageBar 行」已彻底移除。
+    if (item.kind === 'text' || item.kind === 'thinking') {
+      const label = formatTokensCtxLabel(item.tokensInput, cu)
+      if (label) {
+        out.push({
+          key: `${item.key}-meta`,
+          role: 'system',
+          content: <div className='px-1 text-[10px] text-[#6c7086]'>{label}</div>,
+        })
+      }
     }
   }
   return out

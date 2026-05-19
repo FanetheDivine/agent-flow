@@ -338,6 +338,12 @@ type Props = {
   result?: ToolResult
   /** 无 result 时是否视为成功 —— 仅 AgentComplete 用 */
   treatNoResultAsSuccess?: boolean
+  /**
+   * 紧凑型 tokens / 上下文占用文本（形如 `133.3k(67%)`）。
+   * 由 MessageBubble 用所属 assistant 消息的 usage + sessionContextWindow 计算后传入,
+   * 缺数据则为 undefined,渲染层据此整段隐藏。
+   */
+  tokensCtxLabel?: string
 }
 
 export const ToolUseDetails: FC<Props> = ({
@@ -345,6 +351,7 @@ export const ToolUseDetails: FC<Props> = ({
   input,
   result,
   treatNoResultAsSuccess = false,
+  tokensCtxLabel,
 }) => {
   const { server, name } = parseToolName(toolName)
   const category = getToolCategory(toolName)
@@ -392,6 +399,9 @@ export const ToolUseDetails: FC<Props> = ({
               {meta.lines > 1 ? `${meta.lines}L · ` : ''}
               {formatChars(meta.chars)}
             </span>
+          )}
+          {tokensCtxLabel && (
+            <span className='shrink-0 text-[10px] text-[#6c7086]'>{tokensCtxLabel}</span>
           )}
         </div>
       </summary>
