@@ -241,6 +241,30 @@ function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage
   )
 }
 
+/**
+ * 上下文窗口占用条 —— 展示「最后一次 API 调用真实喂给模型的 input + cache 总量 / 模型上下文窗口」。
+ * 占用率越高颜色越红：>=80% 红、>=50% 黄、其余灰。
+ */
+function ContextUsageBar({ used, total }: { used: number; total: number }) {
+  const ratio = total > 0 ? Math.min(1, used / total) : 0
+  const pct = Math.round(ratio * 100)
+  const barColor = ratio >= 0.8 ? '#f38ba8' : ratio >= 0.5 ? '#f9e2af' : '#a6adc8'
+  return (
+    <div className='flex items-center gap-1.5 text-[10px] text-[#6c7086]'>
+      <span>上下文</span>
+      <div className='h-1 w-16 overflow-hidden rounded-full bg-[#45475a]'>
+        <div
+          className='h-full rounded-full transition-all'
+          style={{ width: `${pct}%`, backgroundColor: barColor }}
+        />
+      </div>
+      <span>
+        {formatTokenCount(used)} / {formatTokenCount(total)} ({pct}%)
+      </span>
+    </div>
+  )
+}
+
 /** fork 触发按钮 —— inline 元素,作为 Copyable.extra 与 CopyButton 同列垂直堆叠 */
 function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   return (
@@ -431,6 +455,9 @@ function renderItemToBubble(
             {modelUsages.map((m) => (
               <ModelUsageRow key={m.model} model={m.model} usage={m.usage} />
             ))}
+            {item.contextUsage && (
+              <ContextUsageBar used={item.contextUsage.used} total={item.contextUsage.total} />
+            )}
             <span className='text-[10px] text-[#6c7086]'>
               <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
               <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
@@ -483,12 +510,20 @@ function renderItemToBubble(
                   </div>
                 </div>
               )}
-              {(breakdown.length > 0 || item.totalCost !== undefined) && (
+              {(breakdown.length > 0 || item.totalCost !== undefined || item.contextUsage) && (
                 <div className='mt-2 border-t border-[#45475a] pt-2'>
                   <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
                   {breakdown.map((b) => (
                     <ModelUsageRow key={b.model} model={b.model} usage={b.usage} />
                   ))}
+                  {item.contextUsage && (
+                    <div className='mt-1'>
+                      <ContextUsageBar
+                        used={item.contextUsage.used}
+                        total={item.contextUsage.total}
+                      />
+                    </div>
+                  )}
                   {item.totalCost !== undefined && item.totalCost > 0 && (
                     <div className='mt-1 text-[10px] text-[#a6adc8]'>
                       合计 {formatTokenCost(item.totalCost)}

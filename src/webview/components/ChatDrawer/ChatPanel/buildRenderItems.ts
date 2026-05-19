@@ -65,6 +65,12 @@ export type RenderItem =
       isError: boolean
       /** 本回合（自上一条 result 之后）每模型 token 用量增量，多模型分多行展示 */
       modelUsages?: Array<{ model: string; usage: ModelTokenUsage }>
+      /**
+       * 本回合最后一次 API 调用的上下文窗口占用快照
+       * `used` = result.usage.input_tokens + cache_read + cache_creation
+       * `total` = 本回合内 modelUsage[*].contextWindow 的最大值
+       */
+      contextUsage?: { used: number; total: number }
       messageUuid?: string
       /** turn_end 永远闭环（result 一定意味着本回合 tool_use 全部已 result） */
       turnClosed: true
@@ -80,6 +86,8 @@ export type RenderItem =
       modelBreakdown?: Array<{ model: string; usage: ModelTokenUsage }>
       /** 截至本 session 结束的总成本，来自最后一条 result.total_cost_usd */
       totalCost?: number
+      /** 最后一次 API 调用的上下文窗口占用快照（同 turn_end.contextUsage） */
+      contextUsage?: { used: number; total: number }
     }
 
 type CacheEntry = {
@@ -90,6 +98,13 @@ type CacheEntry = {
   prevModelUsage: Record<string, ModelTokenUsage>
   /** 截至最近一条 result 的 total_cost_usd（session 累计成本） */
   lastTotalCost: number
+  /**
+   * 最近一条 result 的上下文窗口占用快照。
+   * `used` 来自 result.usage(snake_case) 的 input_tokens + cache_read + cache_creation
+   * （本回合最后一次 API 调用真实喂给模型的 token 数）；
+   * `total` 取 result.modelUsage[*].contextWindow 的最大值（同回合多模型时按主模型）。
+   */
+  lastContextUsage?: { used: number; total: number }
   /**
    * 当前 turn 起始 item 索引（自上一个 turn_end 之后第一条 item）。
    * 遇到 turn_end 时把 [turnStartIdx, turn_end) 区间内所有 item 的 turnClosed 置 true。
@@ -154,6 +169,34 @@ function readResultModelUsage(message: unknown): Record<string, ModelTokenUsage>
   return out
 }
 
+/**
+ * 从 result 消息抽取「当前上下文窗口占用」。
+ * - `used`：result.usage（raw API usage，snake_case）的 input + cache_read + cache_creation,
+ *   即本回合最后一次 API 调用真实输入给模型的 token 总量
+ * - `total`：result.modelUsage[*].contextWindow 的最大值（一般所有模型同窗口）
+ *
+ * 任何字段缺失（older SDK / 非 success result）则返回 undefined,UI 跳过展示。
+ */
+function readContextUsage(message: unknown): { used: number; total: number } | undefined {
+  const usage = (message as any)?.usage
+  const modelUsage = (message as any)?.modelUsage
+  if (!usage || typeof usage !== 'object') return undefined
+  const used =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  let total = 0
+  if (modelUsage && typeof modelUsage === 'object') {
+    for (const v of Object.values(modelUsage) as any[]) {
+      if (v && typeof v.contextWindow === 'number' && v.contextWindow > total) {
+        total = v.contextWindow
+      }
+    }
+  }
+  if (used <= 0 || total <= 0) return undefined
+  return { used, total }
+}
+
 // ── 核心构建 ─────────────────────────────────────────────────────────────
 
 function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry): void {
@@ -207,6 +250,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             : undefined,
         modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
         totalCost: cached.lastTotalCost > 0 ? cached.lastTotalCost : undefined,
+        contextUsage: cached.lastContextUsage,
       })
       continue
     }
@@ -371,6 +415,8 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       cached.prevModelUsage = currModelUsage
       const cost = (message as any).total_cost_usd
       if (typeof cost === 'number') cached.lastTotalCost = cost
+      const contextUsage = readContextUsage(message)
+      if (contextUsage) cached.lastContextUsage = contextUsage
 
       // 把当前 turn 内（自上一个 turn_end 之后）所有 user/text/thinking item 标记为已闭环
       for (let j = cached.turnStartIdx; j < items.length; j++) {
@@ -385,6 +431,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         key: `${mIdx}-result`,
         isError,
         modelUsages: modelUsages.length > 0 ? modelUsages : undefined,
+        contextUsage,
         // SDK 不把 result 写进 transcript（SessionMessage.type 仅 'user'|'assistant'|'system'），
         // SDKResultMessage 也不带 uuid。turn_end fork 必须落到一个能被 forkSession
         // 识别的节点 —— 取本回合最后一条带 uuid 的 SDK 消息（通常是该回合最后一条
