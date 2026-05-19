@@ -92,20 +92,21 @@ type CacheEntry = {
   lastTotalCost: number
   /**
    * 上下文窗口占用快照表：RenderItem.key → { used, total }。
-   * - 仅当本 session 已经有过 result 给出 contextWindow 时才会写入；缺失则不存,
-   *   渲染层查不到自然不展示（不做 200k 兜底）
-   * - assistant 消息：在拿到 result 时回填它的「最后一个 block」对应 RenderItem.key
-   * - turn_end：处理 result 时直接写入
-   * - agent_complete：复用最后一条 result 的快照写入
+   * 仅 turn_end / agent_complete 写入（per-block 不再展示）。
+   * 缺失则不存,渲染层查不到自然不展示（不做兜底）。
    */
   contextUsageByItemKey: Map<string, { used: number; total: number }>
   /**
-   * 等待 contextWindow 的 assistant 消息「最后一个 block」key 与该消息 used 值。
-   * 处理 result 时遍历回填到 contextUsageByItemKey,然后清空。
+   * 本 session 已知的最大 contextWindow（首条 result 出现 contextWindow 后开始缓存,sticky）。
+   * 0 表示尚未拿到过任何 contextWindow。
    */
-  pendingAssistantUsages: Array<{ itemKey: string; used: number }>
-  /** 最近一条 result 的 contextUsage 快照,供 agent_complete 复用 */
-  lastContextUsage?: { used: number; total: number }
+  sessionContextWindow: number
+  /**
+   * 最近一次见到的 used 值,即本 session 内最后一条 assistant.message.usage 的 input_total。
+   * turn_end / agent_complete 用此值与 sessionContextWindow 拼出展示数据。
+   * 不取 result.usage —— 后者是回合级累加值,工具往返多时会大幅膨胀。
+   */
+  lastObservedUsed: number
   /**
    * 当前 turn 起始 item 索引（自上一个 turn_end 之后第一条 item）。
    * 遇到 turn_end 时把 [turnStartIdx, turn_end) 区间内所有 item 的 turnClosed 置 true。
@@ -253,9 +254,13 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
         totalCost: cached.lastTotalCost > 0 ? cached.lastTotalCost : undefined,
       })
-      // agent_complete 复用最近一条 result 的 contextUsage（同 session 累计快照）
-      if (cached.lastContextUsage) {
-        cached.contextUsageByItemKey.set(completeKey, cached.lastContextUsage)
+      // agent_complete 上下文占用：只要 session 见过 contextWindow 且观测到过 used,
+      // 就稳定写入,避免「最后一条 result 缺 contextWindow」时丢失展示
+      if (cached.sessionContextWindow > 0 && cached.lastObservedUsed > 0) {
+        cached.contextUsageByItemKey.set(completeKey, {
+          used: cached.lastObservedUsed,
+          total: cached.sessionContextWindow,
+        })
       }
       continue
     }
@@ -321,9 +326,9 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         }
       }
 
-      // 跟踪本条 assistant 消息内最后一个被 push 的 RenderItem 的 key,
-      // 用于把该消息的 contextUsage 锚到「该 assistant 消息的最后一个气泡」之后。
-      let lastPushedKey: string | undefined
+      // 本条 assistant 消息的总输入 tokens —— 用作 turn_end 显示来源（lastObservedUsed）。
+      // 不再下发到具体 block：单条消息内多 block 共享同一 usage，会让用户误以为是单 block 的开销。
+      const assistantUsed = readUsageInputTotal((message as any).message?.usage)
 
       blocks.forEach((block: any, bIdx: number) => {
         // 同一条 assistant 消息中,AgentComplete 之后的 block 一律忽略。
@@ -338,7 +343,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             messageUuid,
             turnClosed: false,
           })
-          lastPushedKey = key
           return
         }
         if (block.type === 'thinking' && block.thinking) {
@@ -350,7 +354,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             messageUuid,
             turnClosed: false,
           })
-          lastPushedKey = key
           return
         }
         if (block.type === 'tool_use' || block.type === 'mcp_tool_use') {
@@ -377,7 +380,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             const input = block.input as AskUserQuestionInput | undefined
             if (input && Array.isArray(input.questions)) {
               items.push({ kind: 'ask_user_question', key, toolUseId: block.id, input })
-              lastPushedKey = key
             }
             return
           }
@@ -389,7 +391,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             input: block.input,
           })
           pendingTooluse[block.id] = items.length - 1
-          lastPushedKey = key
           return
         }
         if (block.type === 'mcp_tool_result' && block.tool_use_id) {
@@ -410,12 +411,11 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         }
       })
 
-      // 把本条 assistant 消息的「输入 used」挂到 pending 队列,等 result 拿到
-      // contextWindow 后回填。锚点是「最后一个被 push 的 RenderItem.key」,这样
-      // ContextUsageBar 渲染在该 assistant 的最后一个气泡之后。
-      const assistantUsed = readUsageInputTotal((message as any).message?.usage)
-      if (lastPushedKey && assistantUsed > 0) {
-        cached.pendingAssistantUsages.push({ itemKey: lastPushedKey, used: assistantUsed })
+      // 记录本条 assistant.message.usage 作为 lastObservedUsed,供后续 turn_end / agent_complete 使用。
+      // 不再 per-block 写 contextUsageByItemKey:同一条 assistant 多 block 共享同一 usage,
+      // 单条 block 不展示自身开销避免误导。
+      if (assistantUsed > 0) {
+        cached.lastObservedUsed = assistantUsed
       }
       continue
     }
@@ -437,20 +437,12 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       const cost = (message as any).total_cost_usd
       if (typeof cost === 'number') cached.lastTotalCost = cost
 
-      // 上下文窗口占用：本回合 contextWindow 已知时,回填本回合内堆积的 pending
-      // assistant 用量,并把本条 result 自己的 used 也写入 map。contextWindow 缺失
-      // 则跳过（不做兜底,UI 自然不展示）。
+      // 上下文窗口大小（sticky max）。turn_end 的 used 用 lastObservedUsed,不读 result.usage:
+      // result.usage 是回合内多次 API 调用的累加值,工具往返多时 cache_read 叠加 N 次,远超真实窗口。
       const contextWindow = readContextWindow((message as any).modelUsage)
-      const resultUsed = readUsageInputTotal((message as any).usage)
-      if (contextWindow > 0) {
-        for (const p of cached.pendingAssistantUsages) {
-          cached.contextUsageByItemKey.set(p.itemKey, { used: p.used, total: contextWindow })
-        }
-        if (resultUsed > 0) {
-          cached.lastContextUsage = { used: resultUsed, total: contextWindow }
-        }
+      if (contextWindow > cached.sessionContextWindow) {
+        cached.sessionContextWindow = contextWindow
       }
-      cached.pendingAssistantUsages = []
 
       // 把当前 turn 内（自上一个 turn_end 之后）所有 user/text/thinking item 标记为已闭环
       for (let j = cached.turnStartIdx; j < items.length; j++) {
@@ -473,8 +465,11 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         messageUuid: findPrevUuid(mIdx),
         turnClosed: true,
       })
-      if (contextWindow > 0 && resultUsed > 0) {
-        cached.contextUsageByItemKey.set(turnEndKey, { used: resultUsed, total: contextWindow })
+      if (cached.sessionContextWindow > 0 && cached.lastObservedUsed > 0) {
+        cached.contextUsageByItemKey.set(turnEndKey, {
+          used: cached.lastObservedUsed,
+          total: cached.sessionContextWindow,
+        })
       }
       cached.turnStartIdx = items.length
       continue
@@ -540,7 +535,8 @@ export function buildRenderItems(
         prevModelUsage: {},
         lastTotalCost: 0,
         contextUsageByItemKey: new Map(),
-        pendingAssistantUsages: [],
+        sessionContextWindow: 0,
+        lastObservedUsed: 0,
         turnStartIdx: 0,
         agentCompleteSeen: false,
       })

@@ -245,6 +245,7 @@ function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage
 /**
  * 上下文窗口占用条 —— 展示「最后一次 API 调用真实喂给模型的 input + cache 总量 / 模型上下文窗口」。
  * 占用率越高颜色越红：>=80% 红、>=50% 黄、其余灰。
+ * 仅 turn_end / agent_complete 内部使用 —— 普通气泡不展示 token,避免误以为是单 block 开销。
  */
 function ContextUsageBar({ used, total }: { used: number; total: number }) {
   const ratio = total > 0 ? Math.min(1, used / total) : 0
@@ -554,17 +555,6 @@ export function toBubbleItems(
     const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu)
     if (!bubble) continue
     out.push(bubble)
-    // turn_end / agent_complete 内部已经嵌入 ContextUsageBar；其余 item（user /
-    // text / thinking / tool_use / ask_user_question）若 cache 命中,则在该 bubble
-    // 后面追加一条独立的 ContextUsageBar 行,以便每条 assistant 消息后都能看到
-    // 当前上下文窗口占用。
-    if (cu && item.kind !== 'turn_end' && item.kind !== 'agent_complete') {
-      out.push({
-        key: `${item.key}-ctx`,
-        role: 'divider',
-        content: <ContextUsageBar used={cu.used} total={cu.total} />,
-      })
-    }
   }
   return out
 }
