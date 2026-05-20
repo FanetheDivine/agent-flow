@@ -52,14 +52,14 @@ export const AgentSchema = z.object({
     .describe(
       '无输入启动：true 时节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）',
     ),
-  allowed_read_share_values_keys: z
+  allowed_read_values_keys: z
     .array(z.string())
     .optional()
-    .describe('允许读取的 shareValues key 子集；Agent 仅能通过系统提示词看到这些 key 的当前值'),
-  allowed_write_share_values_keys: z
+    .describe('允许读取的 values key 子集；Agent 仅能通过系统提示词看到这些 key 的当前值'),
+  allowed_write_values_keys: z
     .array(z.string())
     .optional()
-    .describe('允许写入的 shareValues key 子集；Agent 仅能在 AgentComplete 时写入这些 key'),
+    .describe('允许写入的 values key 子集；Agent 仅能在 AgentComplete 时写入这些 key'),
 })
 
 /** @see {@link AgentSchema} */
@@ -241,19 +241,19 @@ export function buildAgentSystemPrompt(
     | 'agent_prompt'
     | 'outputs'
     | 'work_mode'
-    | 'allowed_read_share_values_keys'
-    | 'allowed_write_share_values_keys'
+    | 'allowed_read_values_keys'
+    | 'allowed_write_values_keys'
     | 'no_input'
     | 'agent_name'
   >,
-  currentShareValues?: Record<string, string>,
+  currentValues?: Record<string, string>,
 ): string {
   const {
     agent_prompt,
     outputs = [],
     work_mode,
-    allowed_read_share_values_keys = [],
-    allowed_write_share_values_keys = [],
+    allowed_read_values_keys = [],
+    allowed_write_values_keys = [],
   } = agent
 
   const lines: string[] = [
@@ -262,11 +262,11 @@ export function buildAgentSystemPrompt(
   ]
 
   // Flow 管控数据（可选，仅注入被授权读取的 key） 空值传入null
-  if (allowed_read_share_values_keys.length > 0) {
+  if (allowed_read_values_keys.length > 0) {
     const visibleValues: Record<string, string | null> = {}
-    for (const key of allowed_read_share_values_keys) {
-      if (currentShareValues) {
-        const value = currentShareValues[key]
+    for (const key of allowed_read_values_keys) {
+      if (currentValues) {
+        const value = currentValues[key]
         visibleValues[key] = value !== undefined && value !== '' ? value : null
       } else {
         visibleValues[key] = '<运行时替换>'
@@ -284,15 +284,15 @@ export function buildAgentSystemPrompt(
   }
 
   // 可写数据：仅在「可完成」工作模式下出现（never_complete 不能调 AgentComplete）
-  if (allowed_write_share_values_keys.length > 0 && work_mode !== 'never_complete') {
+  if (allowed_write_values_keys.length > 0 && work_mode !== 'never_complete') {
     lines.push(
       '# 可写数据',
-      '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `shareValues` 参数输出，仅在 `content` 里描述不算写入。',
-      ...allowed_write_share_values_keys.map((k) => `  - ${k}`),
+      '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `values` 参数输出，仅在 `content` 里描述不算写入。',
+      ...allowed_write_values_keys.map((k) => `  - ${k}`),
       '## 写入说明：',
       '- 仅可写入上述列出的 key',
       '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
-      '- `content` 是本次任务的结果；`shareValues` 用于按 key 记录用户要求保存的值',
+      '- `content` 是本次任务的结果；`values` 用于按 key 记录用户要求保存的值',
     )
   }
 

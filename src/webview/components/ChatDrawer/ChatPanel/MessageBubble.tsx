@@ -483,7 +483,7 @@ function renderItemToBubble(
         .filter(Boolean)
         .join('\n')
       const breakdown = item.modelBreakdown ?? []
-      const shareEntries = item.shareValues ? Object.entries(item.shareValues) : []
+      const shareEntries = item.values ? Object.entries(item.values) : []
       return {
         key: item.key,
         role: 'ai',

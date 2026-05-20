@@ -4,7 +4,7 @@
 
 ## 项目性质
 
-VSCode 插件 `agent-flow`：**用 Agent 编排工作流**。工作流（Flow）是 Agent 作为节点的有向图，每个 Agent 通过 `@anthropic-ai/claude-agent-sdk` 独立运行，拥有自己的上下文；Agent 之间通过 `shareValues`（按 key 授权的只读注入 + `AgentComplete` 写入）共享数据，通过 `outputs[i].next_agent` 决定下一跳。
+VSCode 插件 `agent-flow`：**用 Agent 编排工作流**。工作流（Flow）是 Agent 作为节点的有向图，每个 Agent 通过 `@anthropic-ai/claude-agent-sdk` 独立运行，拥有自己的上下文；Agent 之间通过 Flow 的 `shareValues` 共享数据（按 key 授权的只读注入 + `AgentComplete.values` 写入），通过 `outputs[i].next_agent` 决定下一跳。
 
 ## 代码风格
 
@@ -50,14 +50,14 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - [FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) —— 全局唯一，持有当前活跃的 `FlowRunner`
 - [FlowRunner](src/extension/FlowRunnerManager/FlowRunner/index.ts) —— 一个 Flow 的一次运行，按 `outputs[i].next_agent` 编排 Agent 切换，为每个 Agent 创建/销毁 `ClaudeExecutor`
 - [ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) —— 封装 `@anthropic-ai/claude-agent-sdk` 的 `query`，负责单个 Agent 的 prompt 流、消息收发、interrupt/resume、canUseTool 判定
-- [AgentControllerMcp](src/common/extension.ts) —— per-Agent 的 MCP server，作为 SDK `mcpServers` 配置注入；提供 `AgentComplete`（含可选 `shareValues` 参数）/ `validateFlow` / `getFlowJSONSchema` 工具
+- [AgentControllerMcp](src/common/extension.ts) —— per-Agent 的 MCP server，作为 SDK `mcpServers` 配置注入；提供 `AgentComplete`（含可选 `values` 参数，由 reducer 合并到 Flow.shareValues）/ `validateFlow` / `getFlowJSONSchema` 工具
 
 **webview 端**：组件树由 [App](src/webview/App.tsx) 起，`<AgentFlow>`（xyflow 画布）+ `<ChatDrawer>`（右侧对话抽屉）为两块主区域。所有状态收敛到单一 zustand store [useFlowStore](src/webview/store/flow.ts)（用 `immer` 写 reducer），同时持有持久化的 Flow 定义和运行时 `RunState`；从 extension 来的 signal 也由 store 收敛处理（含上述通知/自动打开 ChatPanel 的副作用）。
 
-`shareValues` 是 reducer（webview store / extension `FlowRunStateManager`）维护的运行时数据，**不以引用贯穿**所有 Agent：
-- **读**：构造 `ClaudeExecutor` 时，从 reducer 取最新值，按 `allowed_read_share_values_keys` 过滤后注入到系统提示词「# 可用数据」节，**写死在 prompt 里**，Agent 在本次会话内看到的就是这个快照（中途换值也不会重读）
-- **写**：Agent 调用 `AgentComplete` 时通过 `shareValues` 参数一次性提交，未列在 `allowed_write_share_values_keys` 的 key 会被静默丢弃；写入随 `flow.signal.agentComplete` 一并广播，由 reducer 合并到 state.shareValues
-- **手动叠加**：`FlowRunner.doOnAgentComplete` 切到下一个 agent 时，reducer 此刻还没收到 signal，因此手动 `{ ...getLatestShareValues(), ...result.shareValues }` 给 nextAgent 的 systemPrompt（这是临时计算，FlowRunner 自身不持有 shareValues 字段）
+Flow 的 `shareValues` 是 reducer（webview store / extension `FlowRunStateManager`）维护的运行时数据，**不以引用贯穿**所有 Agent。Agent 只感知自己的 `values`：
+- **读（Agent 视角 `values`）**：构造 `ClaudeExecutor` 时，从 reducer 取 Flow 最新 shareValues，按 `allowed_read_values_keys` 过滤后注入到系统提示词「# 可用数据」节，**写死在 prompt 里**，Agent 在本次会话内看到的就是这个快照（中途换值也不会重读）
+- **写（Agent 视角 `values` → Flow `shareValues`）**：Agent 调用 `AgentComplete` 时通过 `values` 参数一次性提交，未列在 `allowed_write_values_keys` 的 key 会被静默丢弃；写入随 `flow.signal.agentComplete.values` 一并广播，由 reducer 合并到 `state.shareValues`
+- **手动叠加**：`FlowRunner.doOnAgentComplete` 切到下一个 agent 时，reducer 此刻还没收到 signal，因此手动 `{ ...getLatestShareValues(), ...result.values }` 给 nextAgent 的 systemPrompt（这是临时计算，FlowRunner 自身不持有 shareValues 字段）
 
 ## 状态机（[src/common/flowState.ts](src/common/flowState.ts)）
 
@@ -92,7 +92,7 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 - **webview 粘贴双路径**：`<AgentFlow>` 内粘贴 = 粘贴 Agent（保留内部连接、ID 重映射）；画布空白 / App 层粘贴 = 作为 Flow JSON 导入
 - **代码片段（CodeRef）的 `line`**：`line?: [number, number]`，整个文件时为 `undefined`。Tag 仅在 `line` 存在时展示行范围；点击 Tag 触发 `openFile`，`line` 为 `undefined` 时只打开文件不选中行。快捷键 `Ctrl+Shift+L`（Mac: `Cmd+Shift+L`）：有选中文字时注入带行范围的片段，**无选中时注入整个文件**(`line` 省略)。
 - **assistant 消息跨 ID 重复**：某些模型（如 glm-5.1）会发 `stop_reason: null` 的完整重述消息，其 `message.id` 与 streaming 事件的 ID 不同。[buildRenderItems.ts](src/webview/components/ChatDrawer/ChatPanel/buildRenderItems.ts) 已处理：移除 trailing streaming items + 按 `stop_reason` 标记 streaming 状态。修改该文件时务必保留此逻辑。
-- **shareValues 是 prompt 快照不是实时变量**：值在构造 `ClaudeExecutor` 时注入到系统提示词后**不重读**。Agent 切换时 reducer 还没收到 `agentComplete` signal，[FlowRunner.doOnAgentComplete](src/extension/FlowRunnerManager/FlowRunner/index.ts) 必须手动 `{ ...getLatestShareValues(), ...result.shareValues }` 给下一个 Agent 的 systemPrompt，否则 nextAgent 看到的是合并前的旧快照。
+- **shareValues 是 prompt 快照不是实时变量**：值在构造 `ClaudeExecutor` 时注入到系统提示词后**不重读**。Agent 切换时 reducer 还没收到 `agentComplete` signal，[FlowRunner.doOnAgentComplete](src/extension/FlowRunnerManager/FlowRunner/index.ts) 必须手动 `{ ...getLatestShareValues(), ...result.values }` 给下一个 Agent 的 systemPrompt，否则 nextAgent 看到的是合并前的旧快照。
 - **ClaudeExecutor 自带 (runId, sessionId) 校验**：[ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) 暴露 `runId` / `sessionId` getter 与 `matches(runId, sessionId)` 方法。`FlowRunner` 不维护 `currentRunId/currentSessionId/currentAgentId` 字段，`checkSession` 直接转发到 `currentExecutor?.matches(...)`，避免过渡期切换时 webview 的旧 sessionId 把 interrupt/userMessage 误派发到新 executor。
 - **ClaudeExecutor 启动模式**：`mode: 'eager' | 'lazy' | 'resume-pending'`。`eager` 是常规启动；`lazy` 用于普通 fork（user/text/thinking/turn_end），构造时不 `createQuery` 不 push initMessage，等用户发消息或答题时再启动，lazy 期内的 `answerQuestion` 暂存到 `pendingAnswers`，SDK resume 后由 `canUseTool` 取出直接 resolve；`resume-pending` 用于 askUserQuestion fork，构造时立即 `createQuery` 并 push 一条 `isSynthetic: true` 的 dummy SDKUserMessage 启动 SDK iteration，让 SDK 走到 transcript 末端的悬空 AskUserQuestion tool_use 触发 canUseTool。修改 [ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) 的启动 / interrupt / answerQuestion 路径时务必区分这三种 mode。
 - **AgentComplete 后的 SDK result 不走 onMessage 透传**：AgentComplete 调用后 SDK 仍会发一条用于计费的 result 消息。`ClaudeExecutor` 在 AgentComplete 已暂存（`pendingCompleteResult`）时跳过该 result 的 onMessage 透传，通过 `onComplete` 一并上抛；[FlowRunner](src/extension/FlowRunnerManager/FlowRunner/index.ts) 把 result 写入 `flow.signal.agentComplete` 的 `result` 字段；reducer 处理 agentComplete 时把 result 包装成独立 aiMessage 写入当前 `session.messages`（放在 agentComplete signal 之前），避免 phase 误切到 `result` 触发"生成完毕"通知。修改这条链路时不要把 result 重新走回 onMessage。
@@ -103,16 +103,17 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 
 ## ShareValues 授权读写
 
-shareValues 是**按 key 授权的契约**，不是「Agent 自由读写的全局变量」：
+shareValues 是 Flow 级共享存储，对 Agent 暴露为按 key 授权的 `values` 契约——不是「Agent 自由读写的全局变量」：
 
-- **Flow 级声明**：`Flow.shareValuesKeys: ShareValueKey[]`（每项含 `key` 与可选 `desc`）列出本 Flow 全部可用 key（FlowEditor UI 维护）。`desc` 仅作设计期标注语义，不进入 prompt / MCP schema。删除 key 时自动从所有 Agent 的 `allowed_read/write_share_values_keys` 中清理引用
-- **Agent 级授权**：`allowed_read_share_values_keys` 和 `allowed_write_share_values_keys` 分别声明本 Agent 可读 / 可写的 key 子集。无授权时 Agent **完全感知不到** shareValues 的存在
+- **Flow 级声明**：`Flow.shareValuesKeys: ShareValueKey[]`（每项含 `key` 与可选 `desc`）列出本 Flow 全部可用 key（FlowEditor UI 维护）。`desc` 仅作设计期标注语义，不进入 prompt / MCP schema。删除 key 时自动从所有 Agent 的 `allowed_read/write_values_keys` 中清理引用
+- **Agent 级授权**：`allowed_read_values_keys` 和 `allowed_write_values_keys` 分别声明本 Agent 可读 / 可写的 key 子集。无授权时 Agent **完全感知不到** Flow shareValues 的存在
 - **读路径**：[buildAgentSystemPrompt](src/common/index.ts) 把可读 key 与当前值（缺失为 `null`）以 JSON 形式注入到「# 可用数据」节。**这是 prompt 时点的快照**，Agent 在本会话内不会重新读，运行中改值需要切到下一个 Agent 才生效
-- **写路径**：仅通过 [AgentComplete](src/common/extension.ts) 工具的 `shareValues` 参数提交，schema 由 `allowed_write_share_values_keys` 动态生成；MCP 端按白名单过滤，未授权 key 静默丢弃。`never_complete` 模式无 AgentComplete，因此也无法写入
-- **事件契约**：`flow.signal.agentComplete` 携带 `shareValues` 字段（reducer 合并到 state）；`flow.command.setShareValues`（webview→extension，full replace，**无 runId 字段**，未运行时也能编辑）。无 `flow.signal.shareValuesChanged` 与 `getShareValues` / `setShareValues` / `getAllShareValues` MCP 工具
+- **写路径**：仅通过 [AgentComplete](src/common/extension.ts) 工具的 `values` 参数提交，schema 由 `allowed_write_values_keys` 动态生成；MCP 端按白名单过滤，未授权 key 静默丢弃。`never_complete` 模式无 AgentComplete，因此也无法写入
+- **事件契约**：`flow.signal.agentComplete` 携带 `values` 字段（reducer 合并到 `state.shareValues`）；`flow.command.setShareValues`（webview→extension，full replace，**无 runId 字段**，未运行时也能编辑）。无 `flow.signal.shareValuesChanged` 与 `getShareValues` / `setShareValues` / `getAllShareValues` MCP 工具
 - **运行时取值**：[FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) 构造时接收 `getLatestShareValues(flowId)` 回调，最终指向 `FlowRunStateManager.getFlowRunStates()[flowId]?.shareValues`。`FlowRunner` 不持有 shareValues 副本
 - **UI**：[FlowEditor](src/webview/components/FlowEditor/index.tsx) 抽屉编辑 Flow 名称、`flow_desc`、`shareValuesKeys`（拖拽列表，每项支持 `key` / `desc` 编辑、重复校验、清空按钮）以及运行中各 key 当前值；[AgentEditor](src/webview/components/AgentEditor/index.tsx) 用 multi-select 维护两个授权列表，选项标签为 `key(desc)`，提交时只用 key
 - **Flow 完成清空**：reducer 在 phase 转 `completed` 时把 `state.shareValues = {}`，避免污染下一次启动；`flowStart` 保留 `state?.shareValues ?? {}` 以便 webview 在未运行时编辑的值能带入新 run
+- **命名约定**：Flow 视角的全局存储称作 `shareValues`（`FlowRunState.shareValues` / `Flow.shareValuesKeys` / `flow.command.setShareValues` / `getLatestShareValues`）；Agent 视角统一称作 `values`（`Agent.allowed_read/write_values_keys` / `AgentComplete.values` 参数 / `flow.signal.agentComplete.values` / `ClaudeExecutor` 的 `currentValues`）。两端在 reducer 合并处衔接
 
 ## Token 追踪
 

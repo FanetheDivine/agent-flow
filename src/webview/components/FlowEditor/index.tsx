@@ -174,13 +174,13 @@ export const FlowEditor: FC = () => {
       }
       target.shareValuesKeys = newKeys
       for (const agent of target.agents ?? []) {
-        if (agent.allowed_read_share_values_keys) {
-          agent.allowed_read_share_values_keys = agent.allowed_read_share_values_keys.filter(
+        if (agent.allowed_read_values_keys) {
+          agent.allowed_read_values_keys = agent.allowed_read_values_keys.filter(
             (k) => !removedKeys.includes(k),
           )
         }
-        if (agent.allowed_write_share_values_keys) {
-          agent.allowed_write_share_values_keys = agent.allowed_write_share_values_keys.filter(
+        if (agent.allowed_write_values_keys) {
+          agent.allowed_write_values_keys = agent.allowed_write_values_keys.filter(
             (k) => !removedKeys.includes(k),
           )
         }

@@ -21,7 +21,7 @@ import { log, logError } from '../../logger'
 export type ExecutorResult = {
   outputName?: string
   content: string
-  shareValues?: Record<string, string>
+  values?: Record<string, string>
   /**
    * 本回合 SDK 最后一条 result 消息。AgentComplete 暂存后,result 不再走 onMessage
    * 透传(否则 reducer 会触发 phase='result' 的"生成完毕"通知),改随 onComplete
@@ -138,7 +138,7 @@ export class ClaudeExecutor {
   /**
    * @param runId - FlowRunner 分配的本次运行 ID,贯穿整个 Flow 直到结束
    * @param agent - Agent 定义(model、outputs、prompt 等)
-   * @param currentShareValues - Flow 全局共享上下文(仅用于注入系统提示词)
+   * @param currentValues - Agent 启动时的可读 values 快照(注入系统提示词,运行中不重读)
    * @param resumeSessionId - 若提供，构造时即以该 sessionId resume 已有 SDK 会话
    *   （fork 后的延续启动走此路径）；否则首次握手由 SDK 分配。
    * @param mode - fork 路径专用模式:
@@ -151,7 +151,7 @@ export class ClaudeExecutor {
     runId: string,
     initMessage: UserMessageType,
     agent: Agent,
-    currentShareValues: Record<string, string>,
+    currentValues: Record<string, string>,
     events: ExecutorEvents,
     resumeSessionId?: string,
     mode: ExecutorMode = 'eager',
@@ -162,8 +162,8 @@ export class ClaudeExecutor {
     this.events = events
     this.initMessage = initMessage
     this.userInputStream = createMessageChannel<SDKUserMessage>()
-    // shareValues是写在系统提示词里的 不能即时读写 可以直接构造
-    this.prompt = buildAgentSystemPrompt(agent, currentShareValues)
+    // values 是写在系统提示词里的 不能即时读写 可以直接构造
+    this.prompt = buildAgentSystemPrompt(agent, currentValues)
     if (resumeSessionId) {
       // resume 模式：sessionId 已知，立即通知上层。fork 路径(lazy/resume-pending)
       // 不透传 initMessage —— sessions.messages 切片已有真实历史,initMessage 只是

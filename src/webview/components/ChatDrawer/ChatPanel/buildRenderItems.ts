@@ -74,8 +74,8 @@ export type RenderItem =
       key: string
       outputName?: string
       displayContent?: string
-      /** Agent 通过 AgentComplete 写入的 shareValues 变更 */
-      shareValues?: Record<string, string>
+      /** Agent 通过 AgentComplete 写入的 values 变更（reducer 会合并到 Flow.shareValues） */
+      values?: Record<string, string>
       /** 截至本 session 结束的 token 累计（按模型拆分），来自最后一条 result.modelUsage */
       modelBreakdown?: Array<{ model: string; usage: ModelTokenUsage }>
       /** 截至本 session 结束的总成本，来自最后一条 result.total_cost_usd */
@@ -247,9 +247,9 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         key: completeKey,
         outputName: data.output?.name,
         displayContent: data.content,
-        shareValues:
-          data.shareValues && Object.keys(data.shareValues).length > 0
-            ? data.shareValues
+        values:
+          data.values && Object.keys(data.values).length > 0
+            ? data.values
             : undefined,
         modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
         totalCost: cached.lastTotalCost > 0 ? cached.lastTotalCost : undefined,

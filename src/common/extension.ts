@@ -12,7 +12,7 @@ export type AgentMcpServerOptions = {
   onComplete: (output: {
     content: string
     outputName?: string
-    shareValues?: Record<string, string>
+    values?: Record<string, string>
   }) => void
 }
 
@@ -43,7 +43,7 @@ function withErrorBoundary<TArgs>(
  * 构建 Agent 控制用 MCP Server
  *
  * 内置工具：
- * - `AgentComplete` — 完成任务并选择输出分支（可选写入 shareValues）
+ * - `AgentComplete` — 完成任务并选择输出分支（可选写入 values）
  * - `validateFlow` — 校验工作流定义是否合法
  * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
@@ -64,8 +64,8 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
       .join('\n')
 
     const hasOutputs = outputNames.length > 0
-    const writeKeys = agent.allowed_write_share_values_keys ?? []
-    const shareValuesSchema =
+    const writeKeys = agent.allowed_write_values_keys ?? []
+    const valuesSchema =
       writeKeys.length > 0
         ? z.object(
             Object.fromEntries(
@@ -74,7 +74,7 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
           )
         : undefined
 
-    // 共享部分：调用语义 + shareValues 提示。两边（systemPrompt 与本工具描述）措辞一致，
+    // 共享部分：调用语义 + values 提示。两边（systemPrompt 与本工具描述）措辞一致，
     // 让 AI 在 systemPrompt 里读过一遍后，工具描述这里再次强化要点。
     const callSemantics = [
       '## 调用约束',
@@ -86,15 +86,15 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
         : []),
     ].join('\n')
 
-    const shareValuesNotes =
+    const valuesNotes =
       writeKeys.length > 0
         ? [
-            '## shareValues',
-            '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 `shareValues` 参数输出，仅在 `content` 里描述不算写入：',
+            '## values',
+            '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 `values` 参数输出，仅在 `content` 里描述不算写入：',
             ...writeKeys.map((k) => `  - "${k}"`),
             '- 仅可写入上述列出的 key',
             '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
-            '- `content` 是本次任务的结果文本；`shareValues` 用于按 key 记录用户要求保存的值',
+            '- `content` 是本次任务的结果文本；`values` 用于按 key 记录用户要求保存的值',
           ].join('\n')
         : ''
 
@@ -102,7 +102,7 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
       ? `当前任务已完成时调用此工具：选择输出分支并提交任务结果。\n## 可选分支\n${outputDescs}`
       : '当前任务已完成时调用此工具，提交任务结果。无输出分支。'
 
-    const completeDesc = [baseDesc, callSemantics, shareValuesNotes].filter(Boolean).join('\n\n')
+    const completeDesc = [baseDesc, callSemantics, valuesNotes].filter(Boolean).join('\n\n')
 
     const agentCompleteTool = hasOutputs
       ? tool(
@@ -113,31 +113,31 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
             content: z
               .string()
               .describe(
-                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 shareValues 的职责',
+                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 values 的职责',
               ),
-            ...(shareValuesSchema
+            ...(valuesSchema
               ? {
-                  shareValues: shareValuesSchema
+                  values: valuesSchema
                     .optional()
                     .describe(
-                      '按 key 记录用户要求保存的值；只能写入 allowed_write_share_values_keys 列出的 key。未变化的 key 省略不传',
+                      '按 key 记录用户要求保存的值；只能写入 allowed_write_values_keys 列出的 key。未变化的 key 省略不传',
                     ),
                 }
               : {}),
           },
-          withErrorBoundary('AgentComplete', async ({ output_name, content, shareValues }) => {
-            const filteredSv: Record<string, string> = {}
-            if (shareValues && writeKeys.length > 0) {
+          withErrorBoundary('AgentComplete', async ({ output_name, content, values }) => {
+            const filteredValues: Record<string, string> = {}
+            if (values && writeKeys.length > 0) {
               for (const key of writeKeys) {
-                if (key in shareValues) {
-                  filteredSv[key] = shareValues[key]
+                if (key in values) {
+                  filteredValues[key] = values[key]
                 }
               }
             }
             onComplete({
               outputName: output_name,
               content,
-              ...(Object.keys(filteredSv).length > 0 ? { shareValues: filteredSv } : {}),
+              ...(Object.keys(filteredValues).length > 0 ? { values: filteredValues } : {}),
             })
             return {
               content: [
@@ -145,8 +145,8 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
                   type: 'text',
                   text:
                     `任务完成，输出分支：${output_name}` +
-                    (Object.keys(filteredSv).length > 0
-                      ? `，写入 shareValues：${JSON.stringify(filteredSv)}`
+                    (Object.keys(filteredValues).length > 0
+                      ? `，写入 values：${JSON.stringify(filteredValues)}`
                       : ''),
                 },
               ],
@@ -160,30 +160,30 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
             content: z
               .string()
               .describe(
-                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 shareValues 的职责',
+                '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 values 的职责',
               ),
-            ...(shareValuesSchema
+            ...(valuesSchema
               ? {
-                  shareValues: shareValuesSchema
+                  values: valuesSchema
                     .optional()
                     .describe(
-                      '按 key 记录用户要求保存的值；只能写入 allowed_write_share_values_keys 列出的 key。未变化的 key 省略不传',
+                      '按 key 记录用户要求保存的值；只能写入 allowed_write_values_keys 列出的 key。未变化的 key 省略不传',
                     ),
                 }
               : {}),
           },
-          withErrorBoundary('AgentComplete', async ({ content, shareValues }) => {
-            const filteredSv: Record<string, string> = {}
-            if (shareValues && writeKeys.length > 0) {
+          withErrorBoundary('AgentComplete', async ({ content, values }) => {
+            const filteredValues: Record<string, string> = {}
+            if (values && writeKeys.length > 0) {
               for (const key of writeKeys) {
-                if (key in shareValues) {
-                  filteredSv[key] = shareValues[key]
+                if (key in values) {
+                  filteredValues[key] = values[key]
                 }
               }
             }
             onComplete({
               content,
-              ...(Object.keys(filteredSv).length > 0 ? { shareValues: filteredSv } : {}),
+              ...(Object.keys(filteredValues).length > 0 ? { values: filteredValues } : {}),
             })
             return {
               content: [
@@ -191,8 +191,8 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
                   type: 'text',
                   text:
                     '任务完成，无后续输出。' +
-                    (Object.keys(filteredSv).length > 0
-                      ? `，写入 shareValues：${JSON.stringify(filteredSv)}`
+                    (Object.keys(filteredValues).length > 0
+                      ? `，写入 values：${JSON.stringify(filteredValues)}`
                       : ''),
                 },
               ],

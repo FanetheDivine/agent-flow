@@ -332,7 +332,7 @@ export class FlowRunner {
     runId: string,
     initMessage: UserMessageType,
     agent: Agent,
-    currentShareValues: Record<string, string>,
+    currentValues: Record<string, string>,
     onSessionId: (sessionId: string) => void,
   ): void {
     this.updateAgentStatus(agent.id, 'preparing')
@@ -349,7 +349,7 @@ export class FlowRunner {
       runId,
       initMessage,
       agent,
-      currentShareValues,
+      currentValues,
       {
         onSessionId,
         onMessage: (message) => {
@@ -435,18 +435,18 @@ export class FlowRunner {
         parent_tool_use_id: null,
       }
       // 局部叠加：reducer 此刻尚未收到 agentComplete signal，getLatestShareValues 拿到
-      // 的还是合并前的值，因此手动叠加 result.shareValues 给 nextAgent 的 systemPrompt。
+      // 的还是合并前的值，因此手动叠加 result.values 给 nextAgent 的 systemPrompt。
       // FlowRunner 自身不持有 shareValues 状态——这是临时计算，不是字段维护。
-      const nextShareValues = result.shareValues
-        ? { ...this.getLatestShareValues(), ...result.shareValues }
+      const nextValues = result.values
+        ? { ...this.getLatestShareValues(), ...result.values }
         : this.getLatestShareValues()
-      this.runAgent(runId, nextInitMessage, nextAgent, nextShareValues, (newSessionId) => {
+      this.runAgent(runId, nextInitMessage, nextAgent, nextValues, (newSessionId) => {
         this.fire('flow.signal.agentComplete', {
           runId,
           sessionId: oldSessionId,
           content,
           output: { name: result.outputName!, newSessionId },
-          shareValues: result.shareValues,
+          values: result.values,
           result: result.resultMessage,
         })
       })
@@ -457,7 +457,7 @@ export class FlowRunner {
         runId,
         sessionId: oldSessionId,
         content: result.content,
-        shareValues: result.shareValues,
+        values: result.values,
         result: result.resultMessage,
       })
       this.updateAgentStatus(agent.id, 'completed')

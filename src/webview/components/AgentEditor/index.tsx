@@ -89,8 +89,8 @@ export const AgentEditor: FC = () => {
         must_confirm_tools: agent.must_confirm_tools,
         work_mode: agent.work_mode ?? 'auto_complete',
         no_input: agent.no_input ?? false,
-        allowed_read_share_values_keys: agent.allowed_read_share_values_keys ?? [],
-        allowed_write_share_values_keys: agent.allowed_write_share_values_keys ?? [],
+        allowed_read_values_keys: agent.allowed_read_values_keys ?? [],
+        allowed_write_values_keys: agent.allowed_write_values_keys ?? [],
         outputs: (agent.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
@@ -267,7 +267,7 @@ export const AgentEditor: FC = () => {
               </Flex>
 
               <FormItem
-                name='allowed_read_share_values_keys'
+                name='allowed_read_values_keys'
                 label={
                   <div className='flex items-center gap-2'>
                     <span>可读共享数据</span>
@@ -289,7 +289,7 @@ export const AgentEditor: FC = () => {
                 />
               </FormItem>
               <FormItem
-                name='allowed_write_share_values_keys'
+                name='allowed_write_values_keys'
                 label='可写共享数据'
                 tooltip='Agent 完成时通过 AgentComplete 可写入的 shareValues key 子集'
               >

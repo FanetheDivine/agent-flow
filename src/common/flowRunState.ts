@@ -424,9 +424,9 @@ export function updateFlowRunState(
         }
       })
       .with({ type: 'flow.signal.agentComplete' }, ({ data }) => {
-        // 合并 agentComplete 携带的 shareValues
-        if (data.shareValues) {
-          draft.shareValues = { ...draft.shareValues, ...data.shareValues }
+        // 合并 agentComplete 携带的 values 到 Flow shareValues
+        if (data.values) {
+          draft.shareValues = { ...draft.shareValues, ...data.values }
         }
         if (session) {
           session.completed = true
