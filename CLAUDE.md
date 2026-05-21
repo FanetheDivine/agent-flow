@@ -33,23 +33,24 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 消息类型由 `TypeWithPrefix<Payload, 'flow.signal.' | 'flow.command.'>` 生成；`match(e).with({ type: P.string.startsWith(...) }, ...)` 分发。
 
 - **方向**：`flow.command.*` 是 webview → extension，`flow.signal.*` 是 extension → webview
-- **标识符**：`flowId`(哪个 Flow) / `runKey`(webview 生成，校验 signal 归属，防止旧 runId 的信号污染新 run) / `runId`(extension 生成，代表本次运行) / `sessionId`(Claude SDK session id，**每切一次 Agent 就换一次**)。消息交互必须在两端 sessionId 对齐下发生。
+- **标识符**：`flowId`(哪个 Flow) / `runId`(一次 Agent 运行的唯一主键,所有 signal/command 载荷以此寻址) / `sessionId`(Claude SDK session id,作为运行时属性挂在 `AgentRun.sessionId` 上,**每切一次 Agent 就换一次**;不出现在 signal/command 载荷上,SDK 原生消息体内的 `session_id` 仍随 `aiMessage` 透传,reducer 据此回填到对应 AgentRun)
+- `runId` 来源:`flowStart` 路径由 webview 生成随 command 下发;`next_agent` / `fork` 路径由 extension 生成
 
 **启动握手**：
 
-1. webview 生成 `runKey`，发 `flow.command.flowStart`
-2. extension 中断旧 runner → 新建 `FlowRunner` → `ClaudeExecutor` 首次从 SDK 拿到 `session_id` → 回调外部 → 发 `flow.signal.flowStart{runKey, runId, sessionId}`
-3. webview 验证 `runKey` 一致后存 `runId/sessionId`
+1. webview 生成 `runId`,发 `flow.command.flowStart{flowId, runId, agentId, initMessage}`,reducer 据此覆盖式重置 `runs` 并以该 runId 创建首个 `AgentRun`
+2. extension 收到后 dispose 旧 runner → 新建 `FlowRunner` → 起 `ClaudeExecutor`,首条 SDK 消息携带 `session_id`,reducer 把它回填到 `runs[runId].sessionId`
+3. extension 发 `flow.signal.flowStart{flowId, runId, agentId}`,reducer 把对应 run.phase 推到 `running`
 
-**Agent 切换**（[FlowRunner.onAgentComplete](src/extension/FlowRunnerManager/FlowRunner/index.ts)）：`agentComplete` 携带 `output.newSessionId`；extension 端必须先 `killCurrentExecutor()` 再把 `currentSessionId = null`，否则旧 executor 仍能 resolve 旧 sessionId 下的 command。
+**Agent 切换**（[FlowRunner.doOnAgentComplete](src/extension/FlowRunnerManager/FlowRunner/index.ts)）：本期 runtime 单 executor 约束 —— 切换时 `killExecutor(oldRunId)`(`Map.delete`) → extension 生成 `newRunId` → `runAgent(newRunId, ...)`(`Map.set`) → 发 `flow.signal.agentComplete{runId: oldRunId, output: { name, newRunId }}`,reducer 据此把当前 run 标记 completed 并追加新 `AgentRun{runId: newRunId}`。
 
 ## 运行时层级
 
 **extension 端**：
 
-- [FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) —— 全局唯一，持有当前活跃的 `FlowRunner`
-- [FlowRunner](src/extension/FlowRunnerManager/FlowRunner/index.ts) —— 一个 Flow 的一次运行，按 `outputs[i].next_agent` 编排 Agent 切换，为每个 Agent 创建/销毁 `ClaudeExecutor`
-- [ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) —— 封装 `@anthropic-ai/claude-agent-sdk` 的 `query`，负责单个 Agent 的 prompt 流、消息收发、interrupt/resume、canUseTool 判定
+- [FlowRunnerManager](src/extension/FlowRunnerManager/index.ts) —— 全局唯一,持有 `runners: Map<flowId, FlowRunner>`,每个 Flow 一个 FlowRunner
+- [FlowRunner](src/extension/FlowRunnerManager/FlowRunner/index.ts) —— 一个 Flow 的运行时容器,持有 `executors: Map<runId, ClaudeExecutor>`(本期 runtime 单 executor 约束 `executors.size <= 1`,Map 容器为后期并发触发能力预留),按 `outputs[i].next_agent` 编排 Agent 切换,所有 command 按 runId 在 Map 中寻址
+- [ClaudeExecutor](src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) —— 纯 AI 调度工具,封装 `@anthropic-ai/claude-agent-sdk` 的 `query`,负责单个 Agent 的 prompt 流、消息收发、interrupt/resume、canUseTool 判定;不持有 run 路由信息(`runId` 由 FlowRunner 在 Map 寻址时使用,Executor 自身不知道也不需要知道绑定的 runId)
 - [AgentControllerMcp](src/common/extension.ts) —— per-Agent 的 MCP server，作为 SDK `mcpServers` 配置注入；提供 `AgentComplete`（含可选 `values` 参数，由 reducer 合并到 Flow.shareValues）/ `validateFlow` / `getFlowJSONSchema` 工具
 
 **webview 端**：组件树由 [App](src/webview/App.tsx) 起，`<AgentFlow>`（xyflow 画布）+ `<ChatDrawer>`（右侧对话抽屉）为两块主区域。所有状态收敛到单一 zustand store [useFlowStore](src/webview/store/flow.ts)（用 `immer` 写 reducer），同时持有持久化的 Flow 定义和运行时 `RunState`；从 extension 来的 signal 也由 store 收敛处理（含上述通知/自动打开 ChatPanel 的副作用）。
@@ -63,12 +64,13 @@ Flow 的 `shareValues` 是 reducer（webview store / extension `FlowRunStateMana
 
 [updateFlowRunState](src/common/flowState.ts) 是统管 Flow 运行态的**单一 reducer**：signal 路径上 extension 发出前 / webview 收到后各 reduce 一次，command 路径上 webview 发出前 / extension 收到后各 reduce 一次，两端走同一份 reducer 保证状态推进同步。
 
-- **`FlowPhase` / `AgentPhase`**：`idle | starting | running | result | awaiting-question | awaiting-tool-permission | completed | stopped | error`。`AgentPhase` 与 `FlowPhase` 同构，仅在非活跃 agent 上根据是否完成投影为 `idle`/`completed`
-- **`FlowRunState`** 字段：`runKey`（防竞态，可选）/ `runId` / `phase` / `sessions: AgentSession[]`（按 Agent 切换顺序追加）/ `answeredQuestions` / `pendingQuestion` / `answeredToolPermissions` / `pendingToolPermission` / `shareValues`（跨 Agent 共享数据，由 reducer 维护，**非引用贯穿**）
-- **守卫**：终态（`stopped` / `completed` / `error`）下除 `flowStart` / `killFlow` 外的消息直接忽略；非 `flowStart` 的消息要求 `state.runId === msg.data.runId`
+- **`FlowPhase` / `AgentPhase`**：`idle | starting | running | result | interrupted | awaiting-question | awaiting-tool-permission | completed | stopped | error`。`AgentPhase` 与 `FlowPhase` 同构,Flow / Agent phase 共用同一个 `aggregatePhase(runs)`:Flow 跨全部 run、Agent 跨该 agent 的全部 run 聚合,优先级 `error` > `awaiting-tool-permission` > `awaiting-question` > `result` > `running` > `starting` > `interrupted` > `stopped` > `completed`(任一 run 出错即整体 `error`,跨越终态边界)
+- **`FlowRunState`** 字段:`phase` / `runs: AgentRun[]`(按 Agent 切换顺序追加,每项含 `runId`(主键) / `agentId` / `sessionId?` / `messages` / `completed` / `outputName?` / `phase`) / `answeredQuestions` / `pendingQuestions[]`(本期 Flow 级,按 `runId` 区分归属) / `answeredToolPermissions` / `pendingToolPermission?`(含 `runId`) / `shareValues`(跨 Agent 共享数据)
+- **守卫**：所有 run 都终态(`stopped` / `completed` / `error`)时,除 `flowStart` / `killFlow` 外的消息直接忽略;非 `flowStart` 的消息按 `msg.data.runId` 在 `runs` 中寻址,找不到则忽略
 - **特殊入口**：`flow.command.flowStart` 覆盖式初始化（state 可为 `undefined`）；`flow.command.killFlow` 任意状态下幂等强制置 `stopped`
-- **`MessageEffect`** 的 5 个 `reason`：`result` / `awaiting-question` / `awaiting-tool-permission` / `flow-completed` / `agent-error`，由 reducer 与新 state 一并产出，调用方负责消费（见下节）
+- **`MessageEffect`** 的 5 个 `reason`：`result` / `awaiting-question` / `awaiting-tool-permission` / `flow-completed` / `agent-error`,由 reducer 与新 state 一并产出,调用方负责消费(见下节);通知/自动打开 ChatPanel 的目标 agent 取自 `getActiveAgentId(state)`
 - **UI helper**：[agentChatInputState](src/common/flowState.ts) 把 `AgentPhase` 投影为 ChatInput 的四态（`ready` / `disabled` / `loading` / `confirm-required`）；[flowIsDestructiveReadOnly](src/common/flowState.ts)（`starting` / `running` 锁定破坏性编辑）；[flowCanBeKilled](src/common/flowState.ts)（哪些 phase 允许中断）
+- **selector**：[getActiveAgentId](src/common/flowRunState.ts) 取 `runs` 末位 `agentId`(末位 phase=`idle` 时返回 `undefined`);[getAgentPhase](src/common/flowRunState.ts) 把该 agent 的全部 run 走 `aggregatePhase` 得到 phase。AgentNode 高亮、ChatDrawer 同会话追问判定、AgentFlow 自动打开 ChatPanel 都走此 helper。配套的 `getFlowPhase` / `getPendingQuestionsFor` / `getPendingToolPermissionFor` / `getAnsweredToolPermissions` 也定义在同一文件,签名 `(state: FlowRunState | undefined, ...)`。
 
 ## 与用户的特殊交互
 
