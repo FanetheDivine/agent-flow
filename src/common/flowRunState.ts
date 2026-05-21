@@ -261,7 +261,12 @@ export function updateFlowRunState(
       runId: msg.data.runId,
       agentId: msg.data.agentId,
       sessionId: undefined,
-      messages: [],
+      messages: [
+        {
+          type: 'flow.signal.aiMessage',
+          data: { ...msg.data, message: msg.data.initMessage },
+        },
+      ],
       completed: false,
     }
     const fresh: FlowRunState = {
