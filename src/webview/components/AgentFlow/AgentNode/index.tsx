@@ -3,7 +3,7 @@ import type { FC } from 'react'
 import { App, Badge, Tag, Tooltip, Typography } from 'antd'
 import { EditOutlined, MessageOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import type { Agent } from '@/common'
+import { getActiveAgentId, getFlowPhase, type Agent } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
@@ -22,17 +22,15 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
-  const flowPhase = useFlowStore((s) => s.flowRunStates[flowId]?.phase)
+  const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
 
   const { message } = App.useApp()
   const startFlow = useStartFlow()
 
-  const destructiveReadOnly = flowPhase ? flowIsDestructiveReadOnly(flowPhase) : false
+  const destructiveReadOnly = flowIsDestructiveReadOnly(flowPhase)
 
-  const isCurrentAgent = useFlowStore((s) => {
-    const fs = s.flowRunStates[flowId]
-    return fs?.currentAgentId === agentId
-  })
+  // 当前 agent 是否是 runs 末位活跃 agent（末位 phase 非 idle/completed）
+  const active = useFlowStore((s) => getActiveAgentId(s.flowRunStates[flowId]) === agentId)
   const outputs = agent?.outputs ?? []
 
   return (
@@ -40,7 +38,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
       <div
         className={cn(
           'max-w-60 min-w-45 rounded-[10px] border border-[#45475a] bg-[#1e1e2e] p-0 text-[13px] shadow-[0_4px_16px_rgba(0,0,0,0.3)] transition-[box-shadow,border-color] duration-200 hover:border-[#6366f1] hover:shadow-[0_4px_24px_rgba(99,102,241,0.25)]',
-          isCurrentAgent && 'agent-node-running border-[#a6e3a1]',
+          active && 'agent-node-running border-[#a6e3a1]',
         )}
       >
         {/* target handle：只接受连线，不允许从此拖出连线 */}
@@ -91,7 +89,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               }
             }}
           >
-            <Badge dot={isCurrentAgent} offset={[-2, 2]}>
+            <Badge dot={active} offset={[-2, 2]}>
               <MessageOutlined className='text-xs text-[#a6adc8]' />
             </Badge>
           </span>

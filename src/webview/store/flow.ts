@@ -6,7 +6,7 @@ import type { Flow } from '@/common'
 import {
   type AgentPhase,
   type AgentChatInputState,
-  type AgentSession,
+  type AgentRun,
   type ExtensionFlowCommandMessage,
   type FlowPhase,
   type FlowRunState,
@@ -20,12 +20,11 @@ import {
   agentChatInputState,
   flowCanBeKilled,
   flowIsDestructiveReadOnly,
+  getFlowPhase,
 } from '@/common'
 import type { Agent } from '@/common'
-import { clearBuildCacheForSessions } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
+import { clearBuildCacheForRuns } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
-
-// ── 选择器（webview 本地） ────────────────────────────────────────────────
 
 type StoreState = {
   loading: boolean
@@ -47,75 +46,6 @@ export type ChatDrawerState = {
   agentId: string
   agentName: string
 }
-
-const selectFlowRunState =
-  (flowId: string) =>
-  (s: StoreState): FlowRunState | undefined =>
-    s.flowRunStates[flowId]
-
-export const selectAgentPhase =
-  (flowId: string, agentId: string) =>
-  (s: StoreState): AgentPhase => {
-    const fs = selectFlowRunState(flowId)(s)
-    if (!fs) return 'idle'
-    const currentAgentId = fs.currentAgentId
-    if (currentAgentId === agentId) {
-      // FlowPhase 与 AgentPhase 现已对齐，直接透传
-      return fs.phase
-    }
-    const last = [...fs.sessions].reverse().find((sess) => sess.agentId === agentId)
-    if (last?.completed) return 'completed'
-    return 'idle'
-  }
-
-export const selectPendingQuestionFor =
-  (flowId: string, agentId: string) =>
-  (s: StoreState): PendingQuestion | undefined => {
-    const fs = selectFlowRunState(flowId)(s)
-    if (!fs || fs.currentAgentId !== agentId) return undefined
-    return fs.pendingQuestions[0]
-  }
-const EMPTY_ARRAY: any[] = []
-export const selectPendingQuestionsFor =
-  (flowId: string, agentId: string) =>
-  (s: StoreState): PendingQuestion[] => {
-    const fs = selectFlowRunState(flowId)(s)
-    if (!fs || fs.currentAgentId !== agentId) return EMPTY_ARRAY
-    return fs.pendingQuestions
-  }
-
-export const selectPendingToolPermissionFor =
-  (flowId: string, agentId: string) =>
-  (s: StoreState): PendingToolPermission | undefined => {
-    const fs = selectFlowRunState(flowId)(s)
-    if (!fs || fs.currentAgentId !== agentId) return undefined
-    return fs.pendingToolPermission
-  }
-
-export const selectAnsweredToolPermissions =
-  (flowId: string) =>
-  (s: StoreState): Record<string, { allow: boolean }> | undefined =>
-    s.flowRunStates[flowId]?.answeredToolPermissions
-
-export const selectFlowPhase =
-  (flowId: string) =>
-  (s: StoreState): FlowPhase =>
-    s.flowRunStates[flowId]?.phase ?? 'idle'
-
-export const selectCurrentSession =
-  (flowId: string) =>
-  (s: StoreState): AgentSession | undefined => {
-    const fs = selectFlowRunState(flowId)(s)
-    if (!fs) return undefined
-    return fs.sessions.find((s) => !s.completed)
-  }
-
-export const selectCurrentAgentId =
-  (flowId: string) =>
-  (s: StoreState): string | undefined => {
-    const fs = selectFlowRunState(flowId)(s)
-    return fs?.currentAgentId
-  }
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
@@ -158,13 +88,21 @@ type FlowStoreType = StoreState & {
 export type {
   AgentPhase,
   AgentChatInputState,
-  AgentSession,
+  AgentRun,
   FlowPhase,
   FlowRunState,
   PendingQuestion,
   PendingToolPermission,
 }
 export { agentChatInputState, flowCanBeKilled, flowIsDestructiveReadOnly }
+
+// 取最末一条非终态 run(避免 findLast 的 ES2023 依赖)
+const findLastActiveRun = (runs: AgentRun[]): AgentRun | undefined => {
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (!runs[i].completed) return runs[i]
+  }
+  return undefined
+}
 
 export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
@@ -341,8 +279,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         if (!existing) return
 
         // 记录 agentComplete 前的状态，用于自动切换 ChatPanel
-        const prevLastSession = existing.sessions[existing.sessions.length - 1]
-        const prevLastAgentId = prevLastSession?.agentId
+        const prevLastRun = existing.runs[existing.runs.length - 1]
+        const prevLastAgentId = prevLastRun?.agentId
 
         const { state, effects } = updateFlowRunState(msg, {
           state: existing,
@@ -352,21 +290,21 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           if (!state) return
           draft.flowRunStates[flowId] = state
 
-          // agentComplete 时：如果 ChatPanel 正打开的是已完成的 agent，切到下一个 agent
+          // agentComplete 时:如果 ChatPanel 正打开的是已完成的 agent,切到下一个 agent
           if (msg.type === 'flow.signal.agentComplete') {
-            const newLastSession = state.sessions[state.sessions.length - 1]
+            const newLastRun = state.runs[state.runs.length - 1]
             if (
               chatDrawer?.flowId === flowId &&
               chatDrawer.agentId === prevLastAgentId &&
-              newLastSession &&
-              newLastSession.agentId !== prevLastAgentId
+              newLastRun &&
+              newLastRun.agentId !== prevLastAgentId
             ) {
               const nextAgent = flows
                 .find((f) => f.id === flowId)
-                ?.agents?.find((a) => a.id === newLastSession.agentId)
+                ?.agents?.find((a) => a.id === newLastRun.agentId)
               draft.chatDrawer = {
                 flowId,
-                agentId: newLastSession.agentId,
+                agentId: newLastRun.agentId,
                 agentName: nextAgent?.agent_name ?? chatDrawer.agentName,
               }
             }
@@ -392,15 +330,16 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           }
         : initMessage
       const existingState = flowRunStates[flowId]
-      if (existingState?.sessions?.length) {
-        clearBuildCacheForSessions(existingState.sessions.map((s) => s.sessionId))
+      if (existingState?.runs?.length) {
+        clearBuildCacheForRuns(existingState.runs.map((r) => r.runId))
       }
-      const runKey = crypto.randomUUID()
+      // webview 生成 runId 随 command 下发,作为本次 run 的唯一主键
+      const runId = crypto.randomUUID()
       dispatchCommand({
         type: 'flow.command.flowStart',
         data: {
           flowId,
-          runKey,
+          runId,
           agentId,
           initMessage: effectiveInitMessage,
         },
@@ -446,14 +385,14 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     sendUserMessage: (flowId, content) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs?.runId || !sessionId) return
+      // 路由按 runId:取末位非终态 run(本期单 executor 约束)
+      const run = fs ? findLastActiveRun(fs.runs) : undefined
+      if (!run) return
       dispatchCommand({
         type: 'flow.command.userMessage',
         data: {
           flowId,
-          runId: fs.runId,
-          sessionId,
+          runId: run.runId,
           message: {
             type: 'user',
             message: { role: 'user', content },
@@ -465,38 +404,41 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     answerQuestion: (flowId, toolUseId, output) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs?.runId || !sessionId) return
+      const q = fs?.pendingQuestions.find((q) => q.toolUseId === toolUseId)
+      const runId = q?.runId ?? (fs ? findLastActiveRun(fs.runs)?.runId : undefined)
+      if (!runId) return
       dispatchCommand({
         type: 'flow.command.answerQuestion',
-        data: { flowId, runId: fs.runId, sessionId, toolUseId, output },
+        data: { flowId, runId, toolUseId, output },
       })
     },
     answerToolPermission: (flowId, toolUseId, allow) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      const sessionId = fs?.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs?.runId || !sessionId) return
+      const p = fs?.pendingToolPermission
+      const runId =
+        p?.toolUseId === toolUseId ? p.runId : fs ? findLastActiveRun(fs.runs)?.runId : undefined
+      if (!runId) return
       dispatchCommand({
         type: 'flow.command.toolPermissionResult',
-        data: { flowId, runId: fs.runId, sessionId, toolUseId, allow },
+        data: { flowId, runId, toolUseId, allow },
       })
     },
     interruptAgent: (flowId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      if (!fs || !flowCanBeKilled(fs.phase)) return
-      const sessionId = fs.sessions.find((s) => !s.completed)?.sessionId
-      if (!fs.runId || !sessionId) return
+      if (!fs || !flowCanBeKilled(getFlowPhase(fs))) return
+      const run = findLastActiveRun(fs.runs)
+      if (!run) return
       dispatchCommand({
         type: 'flow.command.interrupt',
-        data: { flowId, runId: fs.runId, sessionId },
+        data: { flowId, runId: run.runId },
       })
     },
     killFlow: (flowId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
-      if (!fs || !flowCanBeKilled(fs.phase)) return
+      if (!fs || !flowCanBeKilled(getFlowPhase(fs))) return
       dispatchCommand({
         type: 'flow.command.killFlow',
         data: { flowId },

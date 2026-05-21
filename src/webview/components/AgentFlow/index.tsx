@@ -20,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useEventListener } from 'ahooks'
 import z from 'zod'
-import { AgentSchema, type Agent } from '@/common'
+import { AgentSchema, getActiveAgentId, getFlowPhase, type Agent } from '@/common'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import AgentNodeComponent from './AgentNode'
@@ -59,7 +59,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   const openChatDrawer = useFlowStore((s) => s.openChatDrawer)
   const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
   /** 破坏性编辑禁止：删除 agent / 删除或破坏连线 */
-  const destructiveReadOnly = state ? flowIsDestructiveReadOnly(state.phase) : false
+  const destructiveReadOnly = flowIsDestructiveReadOnly(getFlowPhase(state))
   const { message } = App.useApp()
   const initial = useMemo(() => flowToReactFlow(flow), [flow])
 
@@ -68,11 +68,12 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   useEffect(() => {
     if (activeFlowId !== flowId) return
     const fs = useFlowStore.getState().flowRunStates[flowId]
-    const currentAgentId = fs?.currentAgentId
-    if (currentAgentId) {
+    // 取 runs 末位 agent；末位 phase=idle 或 completed 时不打开
+    const targetAgentId = getActiveAgentId(fs)
+    if (targetAgentId) {
       const latestFlow = useFlowStore.getState().flows.find((f) => f.id === flowId)
-      const agent = latestFlow?.agents?.find((a) => a.id === currentAgentId)
-      openChatDrawer(flowId, currentAgentId, agent?.agent_name ?? '')
+      const agent = latestFlow?.agents?.find((a) => a.id === targetAgentId)
+      openChatDrawer(flowId, targetAgentId, agent?.agent_name ?? '')
     } else {
       closeChatDrawer()
     }

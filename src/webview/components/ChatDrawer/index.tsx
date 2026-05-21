@@ -1,13 +1,14 @@
 import { useCallback, useRef, type FC } from 'react'
 import { Drawer } from 'antd'
-import type { UserMessageType } from '@/common'
-import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import {
   agentChatInputState,
-  selectAgentPhase,
-  useFlowStore,
+  getActiveAgentId,
+  getAgentPhase,
   type AgentPhase,
-} from '@/webview/store/flow'
+  type UserMessageType,
+} from '@/common'
+import { useStartFlow } from '@/webview/hooks/useStartFlow'
+import { useFlowStore } from '@/webview/store/flow'
 import { ChatInput } from './ChatInput'
 import { ChatPanel } from './ChatPanel'
 import type { ChatPanelRef } from './ChatPanel'
@@ -22,13 +23,16 @@ export const ChatDrawer: FC = () => {
 
   const agentPhase = useFlowStore((s): AgentPhase => {
     if (!s.chatDrawer) return 'idle'
-    return selectAgentPhase(s.chatDrawer.flowId, s.chatDrawer.agentId)(s)
+    return getAgentPhase(s.flowRunStates[s.chatDrawer.flowId], s.chatDrawer.agentId)
   })
 
+  /**
+   * 当前 ChatDrawer 对应的 agent 是否是「runs 末位活跃 agent」(末位非 idle/completed):
+   * 是则可走 sendUserMessage 同会话追问;否则走 startFlow。
+   */
   const isActiveAgent = useFlowStore((s) => {
     if (!s.chatDrawer) return false
-    const fs = s.flowRunStates[s.chatDrawer.flowId]
-    return fs?.currentAgentId === s.chatDrawer.agentId
+    return getActiveAgentId(s.flowRunStates[s.chatDrawer.flowId]) === s.chatDrawer.agentId
   })
 
   const inputState = agentChatInputState(agentPhase)
@@ -41,10 +45,14 @@ export const ChatDrawer: FC = () => {
       if (inputState === 'disabled' || inputState === 'loading') return false
 
       const fs = useFlowStore.getState().flowRunStates[flowId]
-      const hasRunId = !!fs?.runId
+      // 同会话追问条件:有非终态 run 在跑 + 当前活跃 agent + phase=result/interrupted
+      const hasActiveRun = !!fs?.runs.some((r) => !r.completed)
 
-      // 同会话追问：有 runId（runner 在跑）+ 当前活跃 agent + result/interrupted
-      if (hasRunId && isActiveAgent && (agentPhase === 'result' || agentPhase === 'interrupted')) {
+      if (
+        hasActiveRun &&
+        isActiveAgent &&
+        (agentPhase === 'result' || agentPhase === 'interrupted')
+      ) {
         sendUserMessage(flowId, content)
         chatPanelRef.current?.forceScrollToBottom()
         return true

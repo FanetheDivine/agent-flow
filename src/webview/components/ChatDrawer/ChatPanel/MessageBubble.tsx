@@ -13,7 +13,7 @@ import { ToolUseDetails } from './ToolUseDetails'
 import {
   buildRenderItems,
   clearBuildCache,
-  clearBuildCacheForSessions,
+  clearBuildCacheForRuns,
   getContextUsage,
   type RenderItem,
 } from './buildRenderItems'
@@ -559,7 +559,7 @@ export function toBubbleItems(
   return out
 }
 
-export { clearBuildCache, clearBuildCacheForSessions }
+export { clearBuildCache, clearBuildCacheForRuns }
 
 /**
  * 保留单气泡渲染入口（可用于调试或非列表场景）。

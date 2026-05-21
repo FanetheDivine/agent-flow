@@ -15,18 +15,17 @@ import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionOutput } from '@/common'
-import { calculateTokenCost, formatTokenCount, formatTokenCost } from '@/common'
-import type { AgentSession } from '@/webview/store/flow'
 import {
-  useFlowStore,
-  selectAgentPhase,
-  selectFlowPhase,
-  selectPendingQuestionsFor,
-  selectPendingToolPermissionFor,
-  selectAnsweredToolPermissions,
-  flowCanBeKilled,
-  type AgentPhase,
-} from '@/webview/store/flow'
+  formatTokenCount,
+  formatTokenCost,
+  getAgentPhase,
+  getAnsweredToolPermissions,
+  getFlowPhase,
+  getPendingQuestionsFor,
+  getPendingToolPermissionFor,
+} from '@/common'
+import type { AgentRun } from '@/webview/store/flow'
+import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList } from './MessageList'
@@ -68,24 +67,30 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
-  const phase = useFlowStore(selectAgentPhase(flowId, agentId))
-  const flowPhase = useFlowStore(selectFlowPhase(flowId))
-  const pendingQuestions = useFlowStore(selectPendingQuestionsFor(flowId, agentId))
-  const pendingToolPerm = useFlowStore(selectPendingToolPermissionFor(flowId, agentId))
-  const answeredToolPermissions = useFlowStore(selectAnsweredToolPermissions(flowId))
-  const allSessions = useFlowStore((s) => s.flowRunStates[flowId]?.sessions)
-  const sessions = useMemo<AgentSession[]>(
-    () => allSessions?.filter((s) => s.agentId === agentId) ?? [],
-    [allSessions, agentId],
+  const phase = useFlowStore((s) => getAgentPhase(s.flowRunStates[flowId], agentId))
+  const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
+  const pendingQuestions = useFlowStore((s) =>
+    getPendingQuestionsFor(s.flowRunStates[flowId], agentId),
+  )
+  const pendingToolPerm = useFlowStore((s) =>
+    getPendingToolPermissionFor(s.flowRunStates[flowId], agentId),
+  )
+  const answeredToolPermissions = useFlowStore((s) =>
+    getAnsweredToolPermissions(s.flowRunStates[flowId]),
+  )
+  const allRuns = useFlowStore((s) => s.flowRunStates[flowId]?.runs)
+  const runs = useMemo<AgentRun[]>(
+    () => allRuns?.filter((r) => r.agentId === agentId) ?? [],
+    [allRuns, agentId],
   )
   const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
 
-  // Flow 级累计：modelUsage 与 total_cost_usd 都是 session 累计快照,
-  // 因此每个 session 都只取「最后一条 result」,再跨 session 相加。
+  // Flow 级累计:modelUsage 与 total_cost_usd 都是 session 累计快照,
+  // 因此每个 run 都只取「最后一条 result」,再跨 run 相加。
   // tokens 含 4 字段 (input + output + cacheCreation + cacheRead),
   // 与 turn_end / agent_complete 口径一致。
   const { totalTokens, totalCost, modelBreakdown } = useMemo(() => {
-    if (!allSessions)
+    if (!allRuns)
       return {
         totalTokens: 0,
         totalCost: 0,
@@ -94,11 +99,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
     let totalTokens = 0
     let totalCost = 0
     const modelMap = new Map<string, { tokens: number; cost: number }>()
-    for (const session of allSessions) {
+    for (const run of allRuns) {
       let lastModelUsage: Record<string, unknown> | undefined
       let lastResultCost: number | undefined
-      let sessionModel: string | undefined
-      for (const msg of session.messages) {
+      let runModel: string | undefined
+      for (const msg of run.messages) {
         if (msg.type === 'flow.signal.aiMessage' && msg.data.message.type === 'result') {
           const result = msg.data.message as any
           if (result.modelUsage && typeof result.modelUsage === 'object') {
@@ -108,31 +113,31 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
             lastResultCost = result.total_cost_usd
           }
           if (typeof result.model === 'string') {
-            sessionModel = result.model
+            runModel = result.model
           }
         }
       }
-      let sessionTokens = 0
+      let runTokens = 0
       if (lastModelUsage) {
         for (const mu of Object.values(lastModelUsage) as any[]) {
-          sessionTokens +=
+          runTokens +=
             (mu.inputTokens ?? 0) +
             (mu.outputTokens ?? 0) +
             (mu.cacheCreationInputTokens ?? 0) +
             (mu.cacheReadInputTokens ?? 0)
         }
       }
-      totalTokens += sessionTokens
+      totalTokens += runTokens
       if (lastResultCost !== undefined) totalCost += lastResultCost
-      const m = sessionModel ?? session.agentId
+      const m = runModel ?? run.agentId
       const entry = modelMap.get(m) ?? { tokens: 0, cost: 0 }
-      entry.tokens += sessionTokens
+      entry.tokens += runTokens
       if (lastResultCost !== undefined) entry.cost += lastResultCost
       modelMap.set(m, entry)
     }
     const modelBreakdown = Array.from(modelMap.entries()).map(([m, v]) => ({ model: m, ...v }))
     return { totalTokens, totalCost, modelBreakdown }
-  }, [allSessions])
+  }, [allRuns])
 
   const canKillFlow = flowCanBeKilled(flowPhase)
 
@@ -295,7 +300,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   // 新消息到达时按需滚到底
   useEffect(() => {
     if (shouldScrollRef.current) scrollToBottom()
-  }, [sessions, scrollToBottom])
+  }, [runs, scrollToBottom])
 
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
@@ -363,7 +368,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
       </div>
       {/* Messages */}
       {match({
-        length: sessions.length,
+        length: runs.length,
         phase,
         flowPhase,
       })
@@ -387,7 +392,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
         .otherwise(() => (
           <MessageList
             ref={messageListRef}
-            sessions={sessions}
+            runs={runs}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
             onWheel={handleListWheel}
