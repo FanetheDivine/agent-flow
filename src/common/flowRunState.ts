@@ -223,6 +223,8 @@ export type FlowRunState = {
 export type MessageEffect = {
   flowId: string
   flowName: string
+  /** 触发副作用的 run 主键 —— 通知 key 据此区分多 run 同 reason 的并发场景 */
+  runId: string
   agentId: string
   agentName: string
   reason:
@@ -379,7 +381,7 @@ export function updateFlowRunState(
         const { message } = m.data
         if (message.type === 'result') {
           if (draft.pendingQuestions.length === 0) {
-            pushEffect({ flowId, agentId: run.agentId, reason: 'result' })
+            pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'result' })
           }
           return
         }
@@ -395,7 +397,12 @@ export function updateFlowRunState(
           }
           // 只在从无 pending 或换到新 toolUseId 时才通知
           if (found[0].toolUseId !== prevPendingToolUseId) {
-            pushEffect({ flowId, agentId: run.agentId, reason: 'awaiting-question' })
+            pushEffect({
+              flowId,
+              runId: run.runId,
+              agentId: run.agentId,
+              reason: 'awaiting-question',
+            })
           }
         }
       })
@@ -426,7 +433,7 @@ export function updateFlowRunState(
         } else {
           // Flow 走到末端:全部 run 完成,清空 shareValues 防污染下次启动
           draft.shareValues = {}
-          pushEffect({ flowId, agentId: run.agentId, reason: 'flow-completed' })
+          pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'flow-completed' })
         }
       })
       .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {
@@ -439,14 +446,19 @@ export function updateFlowRunState(
             runId: run.runId,
           })
         }
-        pushEffect({ flowId, agentId: run.agentId, reason: 'awaiting-tool-permission' })
+        pushEffect({
+          flowId,
+          runId: run.runId,
+          agentId: run.agentId,
+          reason: 'awaiting-tool-permission',
+        })
       })
       .with({ type: 'flow.signal.agentInterrupted' }, () => {
         clearPendings()
       })
-      .with({ type: 'flow.signal.agentError' }, ({ data }) => {
+      .with({ type: 'flow.signal.agentError' }, () => {
         clearPendings()
-        pushEffect({ flowId, agentId: data.agentId, reason: 'agent-error' })
+        pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'agent-error' })
       })
       .with({ type: 'flow.signal.error' }, () => {
         clearPendings()

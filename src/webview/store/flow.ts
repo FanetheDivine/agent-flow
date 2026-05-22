@@ -169,7 +169,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       }
       // 通知判定
       if (!shouldNotify(n)) continue
-      const key = `flow-notify-${n.flowId}-${n.agentId}-${n.reason}`
+      const key = `flow-notify-${n.flowId}-${n.runId}-${n.reason}`
       activeNotificationKeys.add(key)
       notificationApi?.info({
         key,
