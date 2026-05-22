@@ -142,10 +142,10 @@ type FlowSignalPayload = {
    * 会话 fork 完成：从源 Flow 复制 transcript 切片到新 Flow。
    * - flowId（由 WithFlowId 注入）= sourceFlowId（源 Flow id）
    * - newFlowId / newRunState：新 Flow 的 id 与对应运行态
-   * - agentId：fork 起点所在的 agent id（用于 webview 自动打开 ChatDrawer）
    * - runId：extension 端 fork 时同步 spawn FlowRunner 分配的运行 ID,
    *   webview 收到后写入 newRunState 对应 AgentRun;后续 sendUserMessage / answerQuestion /
-   *   interrupt 都基于此 runId 派发到 runner。
+   *   interrupt 都基于此 runId 派发到 runner。**所属 agent 由 newRunState.runs.at(-1).agentId 反推**,
+   *   不再单独携带 agentId。
    *
    * 不携带 newFlow 定义；webview 端自行根据 sourceFlowId 深拷贝 Flow 后将 id 改为
    * newFlowId 加入 flows，并通过既有 save 通道持久化。
@@ -153,7 +153,6 @@ type FlowSignalPayload = {
   fork: {
     newFlowId: string
     newRunState: FlowRunState
-    agentId: string
     runId: string
   }
 }
@@ -204,17 +203,16 @@ type FlowCommandPayload = {
   /**
    * 从源 Flow 的某个切片 fork 出新 Flow。
    * - flowId（由 WithFlowId 注入）= 源 Flow id
-   * - agentId：fork 起点所在的 agent id（用于 webview 自动打开 ChatDrawer）
-   * - target：fork 目标
+   * - target：fork 目标。**target.runId 唯一定位源 RunState 中的 AgentRun**,
+   *   extension 在该 run 的 messages 内按 messageUuid / toolUseId 找切片终点。
    *   - `message`：以指定 SDK 消息 UUID 为切片终点（含），fork 后新 Flow 进入 `result` 态
    *   - `askUserQuestion`：以包含该 toolUseId 的 assistant message 为切片终点（不含 tool_result），
    *     新 Flow 进入 `awaiting-question` 态，问题在输入区上方重弹
    */
   fork: {
-    agentId: string
     target:
-      | { kind: 'message'; messageUuid: string }
-      | { kind: 'askUserQuestion'; toolUseId: string }
+      | { kind: 'message'; runId: string; messageUuid: string }
+      | { kind: 'askUserQuestion'; runId: string; toolUseId: string }
   }
 }
 

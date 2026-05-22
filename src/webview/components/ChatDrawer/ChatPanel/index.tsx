@@ -185,15 +185,16 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   /**
    * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示
    * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
+   * target 已携带 runId,extension 端按 runId 单 loop 定位 run,无需再传 agentId。
    */
   const onForkRequest = useCallback(
     (
       target:
-        | { kind: 'message'; messageUuid: string }
-        | { kind: 'askUserQuestion'; toolUseId: string },
+        | { kind: 'message'; runId: string; messageUuid: string }
+        | { kind: 'askUserQuestion'; runId: string; toolUseId: string },
       sessionCompleted: boolean,
     ) => {
-      const doFork = () => forkFlow(flowId, agentId, target)
+      const doFork = () => forkFlow(flowId, target)
       if (!sessionCompleted) {
         doFork()
         return
@@ -206,7 +207,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
         onOk: doFork,
       })
     },
-    [forkFlow, flowId, agentId, modal],
+    [forkFlow, flowId, modal],
   )
 
   // 消息列表自动滚动控制:默认贴底,用户向上滚后停止跟随,滚回底部时恢复
@@ -453,7 +454,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
                     icon={<BranchesOutlined />}
                     onClick={() =>
                       onForkRequest(
-                        { kind: 'askUserQuestion', toolUseId: pendingQuestions[0].toolUseId },
+                        {
+                          kind: 'askUserQuestion',
+                          runId: pendingQuestions[0].runId,
+                          toolUseId: pendingQuestions[0].toolUseId,
+                        },
                         false,
                       )
                     }

@@ -84,14 +84,15 @@ type FlowStoreType = StoreState & {
   setShareValues: (flowId: string, values: Record<string, string>) => boolean
   /**
    * 触发会话 fork —— 从源 Flow 当前 transcript 切片复制出新 Flow。
+   * target.runId 已唯一定位源 RunState 中的 AgentRun;extension 从 located run 反推 agentId,
+   * webview 不再传递。
    * 仅 post command,本地不预提交 reducer,等 extension 回 `flow.signal.fork` 后再写入新 Flow。
    */
   forkFlow: (
     sourceFlowId: string,
-    agentId: string,
     target:
-      | { kind: 'message'; messageUuid: string }
-      | { kind: 'askUserQuestion'; toolUseId: string },
+      | { kind: 'message'; runId: string; messageUuid: string }
+      | { kind: 'askUserQuestion'; runId: string; toolUseId: string },
   ) => void
   openChatDrawer: (flowId: string, agentId: string, agentName: string) => void
   closeChatDrawer: () => void
@@ -259,20 +260,25 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         // fork signal：源 Flow 状态不变，需要在 store 中复制 sourceFlow 定义、
         // 写入新 RunState、切到新 Flow、打开 ChatDrawer，并触发 save 持久化。
         if (msg.type === 'flow.signal.fork') {
-          const { flowId: sourceFlowId, newFlowId, newRunState, agentId } = msg.data
+          const { flowId: sourceFlowId, newFlowId, newRunState, runId } = msg.data
           const { flows } = get()
           const sourceFlow = flows.find((f) => f.id === sourceFlowId)
           if (!sourceFlow) return
           const newFlow: Flow = { ...structuredClone(sourceFlow), id: newFlowId }
-          const nextAgent = newFlow.agents?.find((a) => a.id === agentId)
+          // fork 出的 run 永远是 newRunState.runs 末位 —— 用 runId 校验防御
+          const lastRun = newRunState.runs.at(-1)
+          const agentId = lastRun?.runId === runId ? lastRun.agentId : undefined
+          const nextAgent = agentId ? newFlow.agents?.find((a) => a.id === agentId) : undefined
           immerSet((draft) => {
             draft.flows.push(newFlow)
             draft.flowRunStates[newFlowId] = newRunState
             draft.activeFlowId = newFlowId
-            draft.chatDrawer = {
-              flowId: newFlowId,
-              agentId,
-              agentName: nextAgent?.agent_name ?? '',
+            if (agentId) {
+              draft.chatDrawer = {
+                flowId: newFlowId,
+                agentId,
+                agentName: nextAgent?.agent_name ?? '',
+              }
             }
             draft.editingAgent = undefined
           })
@@ -441,12 +447,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
       return true
     },
-    forkFlow: (sourceFlowId, agentId, target) => {
+    forkFlow: (sourceFlowId, target) => {
       // 不本地预提交：fork 由 extension 完成 SDK forkSession + 准备 newRunState 后回 signal,
       // 由 onMessage 中的 'flow.signal.fork' 路径写入新 Flow / 切 activeFlowId / 打开 ChatDrawer。
       postMessageToExtension({
         type: 'flow.command.fork',
-        data: { flowId: sourceFlowId, agentId, target },
+        data: { flowId: sourceFlowId, target },
       })
     },
     copyAgents: (newAgents, flowId) => {

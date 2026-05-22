@@ -48,8 +48,8 @@ export type BubbleCtx = {
    */
   onFork?: (
     target:
-      | { kind: 'message'; messageUuid: string }
-      | { kind: 'askUserQuestion'; toolUseId: string },
+      | { kind: 'message'; runId: string; messageUuid: string }
+      | { kind: 'askUserQuestion'; runId: string; toolUseId: string },
     sessionCompleted: boolean,
   ) => void
 }
@@ -290,6 +290,7 @@ function renderItemToBubble(
   ctx?: BubbleCtx,
   sessionCompleted = false,
   itemContextUsage?: { used: number; total: number },
+  runId?: string,
 ): RenderedBubble | null {
   /**
    * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素,作为 Copyable.extra 注入。
@@ -297,8 +298,8 @@ function renderItemToBubble(
    */
   const buildForkIcon = (
     target:
-      | { kind: 'message'; messageUuid: string }
-      | { kind: 'askUserQuestion'; toolUseId: string },
+      | { kind: 'message'; runId: string; messageUuid: string }
+      | { kind: 'askUserQuestion'; runId: string; toolUseId: string },
   ): ReactNode | undefined => {
     if (!ctx?.onFork) return undefined
     return <ForkButton onFork={() => ctx.onFork!(target, sessionCompleted)} />
@@ -310,9 +311,10 @@ function renderItemToBubble(
       // 只要 messageUuid（findPrevUuid 找到的上一条 SDK 消息 uuid）存在就合法,
       // 不依赖 turn 是否闭环（thinking/text fork 后切片末端 user / agent running 中
       // 的当前 user 都属于 turn 未闭环但 fork 合法的场景）。
-      const fork = item.messageUuid
-        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-        : undefined
+      const fork =
+        runId && item.messageUuid
+          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'user',
@@ -331,9 +333,10 @@ function renderItemToBubble(
       // 与 user 对齐:只要 messageUuid 存在即放行 fork。turn 是否闭环不再作为
       // 守卫条件 —— fork 切片末端的 text 项 turnClosed=false（切片不含后续 result）,
       // 但 fork 本身合法,不能因此拦下。
-      const fork = item.messageUuid
-        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-        : undefined
+      const fork =
+        runId && item.messageUuid
+          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'ai',
@@ -358,9 +361,10 @@ function renderItemToBubble(
         return { key: item.key, role: 'ai', content: inner }
       }
       // 与 user 对齐:只要 messageUuid 存在即放行 fork。同 text 分支说明。
-      const fork = item.messageUuid
-        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-        : undefined
+      const fork =
+        runId && item.messageUuid
+          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          : undefined
       return {
         key: item.key,
         role: 'ai',
@@ -393,7 +397,9 @@ function renderItemToBubble(
           answeredValues={answered?.values}
         />
       )
-      const fork = buildForkIcon({ kind: 'askUserQuestion', toolUseId: item.toolUseId })
+      const fork = runId
+        ? buildForkIcon({ kind: 'askUserQuestion', runId, toolUseId: item.toolUseId })
+        : undefined
       // ask_user_question 卡片自带样式,不通过 Copyable 包裹（无文本可复制）;
       // fork icon 用 inline-flex 直接挂在卡片右侧。
       const content = fork ? (
@@ -446,9 +452,10 @@ function renderItemToBubble(
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
-      const fork = item.messageUuid
-        ? buildForkIcon({ kind: 'message', messageUuid: item.messageUuid })
-        : undefined
+      const fork =
+        runId && item.messageUuid
+          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          : undefined
       // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
       // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
       // 在 divider 容器层级也会失效。所以 fork icon 必须 inline 渲染在 content 内。
@@ -552,7 +559,9 @@ export function toBubbleItems(
   const out: RenderedBubble[] = []
   for (const item of renderItems) {
     const cu = getContextUsage(sessionId, item.key)
-    const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu)
+    // sessionId 在 MessageList 调用点传的是 run.runId(buildRenderItems 的 cache key 历史命名),
+    // 这里把它作为 runId 透传给 buildForkIcon 拼 fork target
+    const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu, sessionId)
     if (!bubble) continue
     out.push(bubble)
   }
