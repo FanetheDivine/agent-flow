@@ -4,6 +4,7 @@ import type {
   ExtensionFlowCommandMessage,
   ExtensionFlowSignalMessage,
   ExtensionToWebviewMessage,
+  UserMessageType,
 } from './event'
 import type { AskUserQuestionInput, AskUserQuestionOutput, Agent, Flow } from './index'
 
@@ -422,12 +423,30 @@ export function updateFlowRunState(
           : undefined
         const nextAgent = output ? flow?.agents?.find((a) => a.id === output.next_agent) : undefined
         if (nextAgent && data.output) {
-          // 追加新 AgentRun(由 extension 端生成的 newRunId)
+          // 追加新 AgentRun(由 extension 端生成的 newRunId)。
+          // 把 AgentComplete 的 content 作为下一个 Agent 的首条用户消息回显 ——
+          // FlowRunner.doOnAgentComplete 已经把同一份 content 喂给了 SDK prompt,
+          // 这里只是让 UI 与运行时输入对齐(no_input 的 next agent 用 '开始',与
+          // FlowRunner 的 nextInitMessage 同源)。
+          const nextInitMessage: UserMessageType = {
+            type: 'user',
+            message: { role: 'user', content: nextAgent.no_input ? '开始' : data.content },
+            parent_tool_use_id: null,
+          }
           draft.runs.push({
             runId: data.output.newRunId,
             agentId: nextAgent.id,
             sessionId: undefined,
-            messages: [],
+            messages: [
+              {
+                type: 'flow.signal.aiMessage',
+                data: {
+                  flowId,
+                  runId: data.output.newRunId,
+                  message: nextInitMessage,
+                },
+              },
+            ],
             completed: false,
           })
         } else {
