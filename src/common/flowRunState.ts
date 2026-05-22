@@ -586,19 +586,6 @@ function extractPendingQuestions(
 
 const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
 
-/**
- * 取「活跃 agent」—— runs 末位 agent。
- * - 末位 phase=idle / completed / stopped → undefined(flow 走到末端或刚被 kill)
- * - 否则返回末位 run 的 agentId
- */
-export function getActiveAgentId(state: FlowRunState | undefined): string | undefined {
-  const last = state?.runs.at(-1)
-  if (!state || !last) return undefined
-  const phase = getRunPhase(last, state)
-  if (phase === 'idle' || phase === 'completed' || phase === 'stopped') return undefined
-  return last.agentId
-}
-
 export function getFlowPhase(state: FlowRunState | undefined): FlowPhase {
   if (!state) return 'idle'
   return aggregatePhase(state.runs.map((r) => getRunPhase(r, state)))

@@ -1,9 +1,9 @@
-import { useCallback, useRef, type FC } from 'react'
+import { useCallback, useEffect, useRef, type FC } from 'react'
 import { Drawer } from 'antd'
 import {
   agentChatInputState,
-  getActiveAgentId,
   getAgentPhase,
+  getRunPhase,
   type AgentPhase,
   type UserMessageType,
 } from '@/common'
@@ -15,11 +15,33 @@ import type { ChatPanelRef } from './ChatPanel'
 
 export const ChatDrawer: FC = () => {
   const chatDrawer = useFlowStore((s) => s.chatDrawer)
+  const activeFlowId = useFlowStore((s) => s.activeFlowId)
+  const openChatDrawer = useFlowStore((s) => s.openChatDrawer)
   const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
   const interruptAgent = useFlowStore((s) => s.interruptAgent)
   const startFlow = useStartFlow()
   const chatPanelRef = useRef<ChatPanelRef>(null)
+
+  // activeFlowId 切换时,按 runs 末位 agent 决定打开/关闭 ChatPanel。
+  // runs 末位 agent = 用户当前要看的对象;runs 为空(idle)或无 active flow 则关闭。
+  // completed 且已流转的中间 agent 不会出现在末位(reducer 切换时立刻追加新 run);
+  // completed 且无 next_agent 的 flow 末端仍在末位,自动打开让用户看结果。
+  // 依赖只放 activeFlowId,flow 定义/runs 现取,避免编辑 Agent 等无关变更触发自动开关。
+  useEffect(() => {
+    if (!activeFlowId) {
+      closeChatDrawer()
+      return
+    }
+    const targetAgentId = useFlowStore.getState().flowRunStates[activeFlowId]?.runs.at(-1)?.agentId
+    if (targetAgentId) {
+      const latestFlow = useFlowStore.getState().flows.find((f) => f.id === activeFlowId)
+      const agent = latestFlow?.agents?.find((a) => a.id === targetAgentId)
+      openChatDrawer(activeFlowId, targetAgentId, agent?.agent_name ?? '')
+    } else {
+      closeChatDrawer()
+    }
+  }, [activeFlowId, openChatDrawer, closeChatDrawer])
 
   const agentPhase = useFlowStore((s): AgentPhase => {
     if (!s.chatDrawer) return 'idle'
@@ -27,12 +49,16 @@ export const ChatDrawer: FC = () => {
   })
 
   /**
-   * 当前 ChatDrawer 对应的 agent 是否是「runs 末位活跃 agent」(末位非 idle/completed):
+   * 当前 ChatDrawer 绑定的 (flowId, agentId) 是否对应「末位活跃 run」:
    * 是则可走 sendUserMessage 同会话追问;否则走 startFlow。
    */
-  const isActiveAgent = useFlowStore((s) => {
+  const isActiveRun = useFlowStore((s) => {
     if (!s.chatDrawer) return false
-    return getActiveAgentId(s.flowRunStates[s.chatDrawer.flowId]) === s.chatDrawer.agentId
+    const fs = s.flowRunStates[s.chatDrawer.flowId]
+    const last = fs?.runs.at(-1)
+    if (!fs || !last || last.agentId !== s.chatDrawer.agentId) return false
+    const phase = getRunPhase(last, fs)
+    return phase !== 'idle' && phase !== 'completed' && phase !== 'stopped'
   })
 
   const inputState = agentChatInputState(agentPhase)
@@ -50,7 +76,7 @@ export const ChatDrawer: FC = () => {
 
       if (
         hasActiveRun &&
-        isActiveAgent &&
+        isActiveRun &&
         (agentPhase === 'result' || agentPhase === 'interrupted')
       ) {
         sendUserMessage(flowId, content)
@@ -68,7 +94,7 @@ export const ChatDrawer: FC = () => {
       if (started) chatPanelRef.current?.forceScrollToBottom()
       return started
     },
-    [chatDrawer, inputState, agentPhase, isActiveAgent, startFlow, sendUserMessage, chatPanelRef],
+    [chatDrawer, inputState, agentPhase, isActiveRun, startFlow, sendUserMessage, chatPanelRef],
   )
 
   return (
