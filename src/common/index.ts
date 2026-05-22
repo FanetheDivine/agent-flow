@@ -341,7 +341,7 @@ export function buildAgentSystemPrompt(
         if (mode === 'silent_task') {
           lines.push(
             '## 中止任务',
-            '只有在已经穷尽所有可行手段、确定**无法**完成任务时（例如缺失关键信息且无工具可获取、环境异常等极端情况），才调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。优先尝试用 AgentComplete 提交部分结果;只有连部分结果都给不出时才用 terminateTask。',
+            '只有在已经穷尽所有可行手段、确定**无法**完成任务时（例如缺失任务目标、缺失关键信息且无工具可获取、环境异常等极端情况），才调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。优先尝试用 AgentComplete 提交部分结果;只有连部分结果都给不出时才用 terminateTask。',
           )
         }
         lines.push(
