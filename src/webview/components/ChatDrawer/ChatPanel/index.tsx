@@ -37,7 +37,6 @@ export type ChatPanelRef = {
 type Props = {
   flowId: string
   agentId: string
-  agentName: string
   onClose?: () => void
   ref?: React.Ref<ChatPanelRef>
 }
@@ -60,12 +59,17 @@ function buildAnsweredMap(
   return answeredMap
 }
 
-export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref }) => {
+export const ChatPanel: FC<Props> = ({ flowId, agentId, onClose, ref }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
+
+  const agentName = useFlowStore(
+    (s) =>
+      s.flows.find((f) => f.id === flowId)?.agents?.find((a) => a.id === agentId)?.agent_name ?? '',
+  )
 
   const phase = useFlowStore((s) => getAgentPhase(s.flowRunStates[flowId], agentId))
   const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
