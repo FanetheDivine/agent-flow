@@ -49,7 +49,7 @@ function withErrorBoundary<TArgs>(
  */
 export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
-  if (agent.work_mode !== 'never_complete') {
+  if (agent.work_mode !== 'chat') {
     const outputs = agent.outputs ?? []
     const outputNames = outputs.map((o) => o.output_name)
     const outputDescs = outputs
@@ -78,12 +78,7 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
     // 让 AI 在 systemPrompt 里读过一遍后，工具描述这里再次强化要点。
     const callSemantics = [
       '## 调用约束',
-      '- 调用此工具会**立即终止本 Agent**，不可撤销；只在「任务描述」的结束条件已经达成、且与用户对齐之后调用',
-      ...(agent.work_mode === 'require_confirm'
-        ? [
-            '- **必须**先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用本工具',
-          ]
-        : []),
+      '调用此工具会**终止会话**，不可撤销；只在「任务描述」的结束条件已经达成、且与用户对齐之后调用',
     ].join('\n')
 
     const valuesNotes =

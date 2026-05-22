@@ -87,7 +87,7 @@ export const AgentEditor: FC = () => {
         agent_prompt: agent.agent_prompt,
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
-        work_mode: agent.work_mode ?? 'auto_complete',
+        work_mode: agent.work_mode ?? 'task',
         no_input: agent.no_input ?? false,
         allowed_read_values_keys: agent.allowed_read_values_keys ?? [],
         allowed_write_values_keys: agent.allowed_write_values_keys ?? [],
@@ -241,17 +241,18 @@ export const AgentEditor: FC = () => {
               </FormItem>
 
               <Flex gap={16}>
-                <FormItem
-                  name='work_mode'
-                  label='完成方式'
-                  tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
-                >
+                <FormItem name='work_mode' label='工作模式'>
                   <Select
-                    className='w-40'
+                    className='w-80'
                     options={[
-                      { value: 'auto_complete', label: '自动完成' },
-                      { value: 'require_confirm', label: '用户确认后完成' },
-                      { value: 'never_complete', label: '永不完成' },
+                      {
+                        value: 'task',
+                        label: '任务模式 · AI会执行任务并提交结果',
+                      },
+                      {
+                        value: 'chat',
+                        label: '对话模式 · 永不终止的多轮对话',
+                      },
                     ]}
                   />
                 </FormItem>

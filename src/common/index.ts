@@ -1,5 +1,5 @@
 import { groupBy } from 'lodash-es'
-import { match, P } from 'ts-pattern'
+import { match } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
@@ -42,10 +42,8 @@ export const AgentSchema = z.object({
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
     ),
   work_mode: z
-    .enum(['auto_complete', 'require_confirm', 'never_complete'])
-    .describe(
-      '工作方式：auto_complete（自动完成）任务达成后直接调用 AgentComplete；require_confirm（用户确认后完成）调用 AgentComplete 前必须先用 AskUserQuestion 确认；never_complete（永不完成）禁止调用 AgentComplete，agent_prompt 视作长期对话规则而非一次性任务',
-    ),
+    .enum(['task', 'chat'])
+    .describe('工作方式：task-任务达成后调用提交结果；chat-与用户的持续长期对话'),
   no_input: z
     .boolean()
     .optional()
@@ -230,9 +228,9 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  * 构建 Agent 系统提示词
  *
  * 根据 `work_mode` 选取不同的提示词骨架：
- * - `auto_complete` / `require_confirm`：把 `agent_prompt` 视作**任务描述**，
- *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete（自动 / 用户确认后）
- * - `never_complete`：把 `agent_prompt` 视作**长期对话规则**，
+ * - `task`：把 `agent_prompt` 视作**任务描述**，
+ *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete
+ * - `chat`：把 `agent_prompt` 视作**长期对话规则**，
  *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
  */
 export function buildAgentSystemPrompt(
@@ -287,8 +285,8 @@ export function buildAgentSystemPrompt(
     }
   }
 
-  // 可写数据：仅在「可完成」工作模式下出现（never_complete 不能调 AgentComplete）
-  if (allowed_write_values_keys.length > 0 && work_mode !== 'never_complete') {
+  // 可写数据：仅在「可完成」工作模式下出现（chat 不能调 AgentComplete）
+  if (allowed_write_values_keys.length > 0 && work_mode !== 'chat') {
     lines.push(
       '# 可写数据',
       '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `values` 参数输出，仅在 `content` 里描述不算写入。',
@@ -303,10 +301,10 @@ export function buildAgentSystemPrompt(
   // 对话规则：长期对话规则 / 围绕任务描述完成任务（含完成任务、输出分支）
   if (agent_prompt) {
     match(work_mode)
-      .with('never_complete', () => {
+      .with('chat', () => {
         lines.push('# 对话规则', agent_prompt)
       })
-      .with(P.union('auto_complete', 'require_confirm'), (mode) => {
+      .with('task', () => {
         lines.push(
           '# 对话规则',
           '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
@@ -314,23 +312,7 @@ export function buildAgentSystemPrompt(
           '## 任务描述',
           agent_prompt,
           '## 完成任务',
-        )
-        match(mode)
-          .with('auto_complete', () =>
-            lines.push(
-              '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-              '直接调用 AgentComplete，无需向用户额外确认。',
-            ),
-          )
-          .with('require_confirm', () =>
-            lines.push(
-              '如果「任务描述」规定的结束条件已经达成时，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-              '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
-            ),
-          )
-          .exhaustive()
-
-        lines.push(
+          '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
           '## 输出分支',
           match(outputs.length)
             .with(0, () => '此任务没有输出分支。')
