@@ -332,6 +332,9 @@ export function buildAgentSystemPrompt(
             '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
           )
         }
+        if (mode === 'silent_task') {
+          lines.push('你需要围绕该目标，充分利用自身能力推进任务，自行决策，避免询问用户。')
+        }
         lines.push(
           '## 任务描述',
           agent_prompt,
