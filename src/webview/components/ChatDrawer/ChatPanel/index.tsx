@@ -1,17 +1,14 @@
 import {
   useCallback,
-  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type FC,
-  type WheelEventHandler,
 } from 'react'
 import { App, Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
-import type { BubbleListRef } from '@ant-design/x/es/bubble/interface'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
 import type { AskUserQuestionOutput } from '@/common'
@@ -29,7 +26,7 @@ import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
-import { MessageList } from './MessageList'
+import { MessageList, type MessageListRef } from './MessageList'
 
 export type ChatPanelRef = {
   forceScrollToBottom: () => void
@@ -250,32 +247,13 @@ export const ChatPanel: FC<Props> = ({
     [forkFlow, flowId, modal],
   )
 
-  // 消息列表自动滚动控制:默认贴底,用户向上滚后停止跟随,滚回底部时恢复
-  const messageListRef = useRef<BubbleListRef>(null)
-  const shouldScrollRef = useRef(true)
-
-  const handleListWheel = useCallback<WheelEventHandler<HTMLDivElement>>((e) => {
-    const dom = messageListRef.current?.scrollBoxNativeElement
-    if (!dom) return
-    // wheel 事件触发时 scrollTop 尚未更新,叠加 deltaY 预测滚动后位置
-    const projectedScrollTop = Math.max(
-      0,
-      Math.min(dom.scrollHeight - dom.clientHeight, dom.scrollTop + e.deltaY),
-    )
-    const atBottom = dom.scrollHeight - projectedScrollTop - dom.clientHeight < 30
-    shouldScrollRef.current = atBottom
-  }, [])
-
-  // 切换 agent 时
-  useEffect(() => {
-    shouldScrollRef.current = true
-  }, [flowId, agentId])
+  // 消息列表自动滚动:Virtuoso 内部 followOutput='auto' 已实现「在底部时跟随、用户上滑后停留」,
+  // ChatPanel 只需在主动场景(回答 question 后、外部 forceScrollToBottom)强制贴底。
+  // MessageList.scrollToBottom 内部用双 RAF 等 React commit + Virtuoso 测量后再滚,无需在外面 setTimeout。
+  const messageListRef = useRef<MessageListRef>(null)
 
   const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      const dom = messageListRef.current?.scrollBoxNativeElement
-      dom?.scroll({ top: dom.scrollHeight, behavior: 'instant' })
-    }, 0)
+    messageListRef.current?.scrollToBottom('auto')
   }, [])
 
   const onActiveSubmit = useCallback(
@@ -301,7 +279,6 @@ export const ChatPanel: FC<Props> = ({
         })
       }
 
-      shouldScrollRef.current = true
       scrollToBottom()
     },
     [answerQuestion, flowId, pendingQuestions, scrollToBottom],
@@ -346,17 +323,11 @@ export const ChatPanel: FC<Props> = ({
     ref,
     () => ({
       forceScrollToBottom: () => {
-        shouldScrollRef.current = true
         scrollToBottom()
       },
     }),
     [scrollToBottom],
   )
-
-  // 新消息到达时按需滚到底
-  useEffect(() => {
-    if (shouldScrollRef.current) scrollToBottom()
-  }, [runs, scrollToBottom])
 
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
@@ -451,7 +422,6 @@ export const ChatPanel: FC<Props> = ({
             runs={runs}
             ctx={ctx}
             loading={phase === 'running' || phase === 'starting'}
-            onWheel={handleListWheel}
           />
         ))}
 
