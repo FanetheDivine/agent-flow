@@ -9,7 +9,13 @@ import {
   CloseOutlined,
 } from '@ant-design/icons'
 import type { Agent } from '@/common'
-import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/common'
+import {
+  BUILTIN_TOOL_NAMES,
+  EFFORT_OPTIONS,
+  MCP_WILDCARD,
+  MODEL_OPTIONS,
+  buildAgentSystemPrompt,
+} from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { Md } from '../text-components'
@@ -183,19 +189,7 @@ export const AgentEditor: FC = () => {
                   <AutoComplete
                     placeholder='选择或输入模型名称'
                     allowClear
-                    options={[
-                      { value: 'opus', label: 'opus' },
-                      { value: 'gpt-5.5', label: 'gpt-5.5' },
-                      { value: 'glm-5.1', label: 'glm-5.1' },
-                      { value: 'DeepSeek-V4-Pro', label: 'DeepSeek-V4-Pro' },
-                      { value: 'claude-opus-4-7', label: 'opus4.7' },
-                      { value: 'claude-opus-4-6-v1', label: 'opus4.6' },
-                      { value: 'sonnet', label: 'sonnet' },
-                      { value: 'haiku', label: 'haiku' },
-                      { value: 'gpt-5.4', label: 'gpt-5.4' },
-                      { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
-                      { value: 'DeepSeek-V4-flash', label: 'DeepSeek-V4-flash' },
-                    ]}
+                    options={MODEL_OPTIONS}
                     filterOption={(inputValue, option) =>
                       (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ??
                       option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
@@ -205,17 +199,7 @@ export const AgentEditor: FC = () => {
                 </FormItem>
 
                 <FormItem name='effort' label='努力程度' className='mb-0 w-56'>
-                  <Select
-                    placeholder='默认（不指定）'
-                    allowClear
-                    options={[
-                      { label: 'low — 简单任务', value: 'low' },
-                      { label: 'medium — 日常任务', value: 'medium' },
-                      { label: 'high — 复杂任务', value: 'high' },
-                      { label: 'xhigh — 长程任务(opus4.7+)', value: 'xhigh' },
-                      { label: 'max — 最大性能(opus4.6+)', value: 'max' },
-                    ]}
-                  />
+                  <Select placeholder='默认（不指定）' allowClear options={EFFORT_OPTIONS} />
                 </FormItem>
               </Flex>
 

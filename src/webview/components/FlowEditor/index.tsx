@@ -1,5 +1,16 @@
 import { useEffect, useState, type FC } from 'react'
-import { Drawer, Form, Input, Button, Switch, Tag, Tooltip, message } from 'antd'
+import {
+  Drawer,
+  Form,
+  Input,
+  Button,
+  Switch,
+  Tooltip,
+  Select,
+  AutoComplete,
+  Flex,
+  message,
+} from 'antd'
 import {
   CloseOutlined,
   EyeOutlined,
@@ -21,14 +32,17 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { ShareValueKey } from '@/common'
+import type { Flow, ShareValueKey } from '@/common'
+import { EFFORT_OPTIONS, MODEL_OPTIONS, buildHostSystemPrompt } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { Md } from '../text-components'
 
 type FormValues = {
   name: string
-  flow_desc?: string
+  host_model?: string
+  host_effort?: Flow['host_effort']
+  host_prompt?: string
   shareValuesKeys: ShareValueKey[]
   shareValues: Record<string, string>
 }
@@ -116,11 +130,13 @@ export const FlowEditor: FC = () => {
 
   const [form] = Form.useForm<FormValues>()
   const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit')
+  const [shareValuePreviewMode, setShareValuePreviewMode] = useState<'edit' | 'preview'>('edit')
+  const [hostPromptPreviewMode, setHostPromptPreviewMode] = useState<'edit' | 'preview'>('preview')
   const [newKeyInput, setNewKeyInput] = useState('')
 
   const watchedShareValues = (Form.useWatch('shareValues', form) ?? {}) as Record<string, string>
   const watchedKeys = (Form.useWatch('shareValuesKeys', form) ?? []) as ShareValueKey[]
+  const watchedHostPrompt = (Form.useWatch('host_prompt', form) ?? '') as string
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -134,7 +150,9 @@ export const FlowEditor: FC = () => {
       form.resetFields()
       form.setFieldsValue({
         name: flow.name,
-        flow_desc: flow.flow_desc ?? '',
+        host_model: flow.host_model,
+        host_effort: flow.host_effort,
+        host_prompt: flow.host_prompt ?? '',
         shareValuesKeys: flow.shareValuesKeys ?? [],
         shareValues: runShareValues ?? {},
       })
@@ -166,12 +184,14 @@ export const FlowEditor: FC = () => {
       const target = draft.find((f) => f.id === flow.id)
       if (!target) return
       target.name = values.name.trim() || target.name
-      const desc = values.flow_desc?.trim()
-      if (desc) {
-        target.flow_desc = desc
-      } else {
-        delete target.flow_desc
-      }
+      const hostModel = values.host_model?.trim()
+      if (hostModel) target.host_model = hostModel
+      else delete target.host_model
+      if (values.host_effort) target.host_effort = values.host_effort
+      else delete target.host_effort
+      const hostPrompt = values.host_prompt?.trim()
+      if (hostPrompt) target.host_prompt = hostPrompt
+      else delete target.host_prompt
       target.shareValuesKeys = newKeys
       for (const agent of target.agents ?? []) {
         if (agent.allowed_read_values_keys) {
@@ -201,11 +221,12 @@ export const FlowEditor: FC = () => {
       placement='left'
       open={open}
       onClose={handleClose}
-      size='auto'
+      defaultSize={1200}
+      resizable
       styles={{
         header: { display: 'none' },
         body: { padding: 0 },
-        wrapper: { transition: 'none' },
+        wrapper: { transition: 'none', minWidth: 1200 },
       }}
       footer={null}
     >
@@ -222,7 +243,8 @@ export const FlowEditor: FC = () => {
         onPaste={(e) => e.stopPropagation()}
         onFinish={handleFinish}
       >
-        <div className='flex w-150 flex-col'>
+        {/* 左侧表单 — 独立滚动 */}
+        <div className='flex w-120 grow-0 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
             <CloseOutlined onClick={handleClose} className='mr-2' />
             <span>编辑工作流</span>
@@ -237,9 +259,24 @@ export const FlowEditor: FC = () => {
                 <Input placeholder='工作流名称' />
               </Form.Item>
 
-              <Form.Item name='flow_desc' label='简介'>
-                <Input placeholder='Flow 描述' />
-              </Form.Item>
+              <Flex gap={16}>
+                <Form.Item name='host_model' label='托管模型' className='mb-4 flex-1'>
+                  <AutoComplete
+                    placeholder='选择或输入模型名称'
+                    allowClear
+                    options={MODEL_OPTIONS}
+                    filterOption={(inputValue, option) =>
+                      (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                      option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                      false
+                    }
+                  />
+                </Form.Item>
+
+                <Form.Item name='host_effort' label='托管 effort' className='mb-4 w-56'>
+                  <Select placeholder='请输入托管模型' allowClear options={EFFORT_OPTIONS} />
+                </Form.Item>
+              </Flex>
 
               <Form.Item
                 className='[&_.ant-form-item-explain-error:empty]:hidden'
@@ -310,7 +347,7 @@ export const FlowEditor: FC = () => {
                                   onClickKey={() => {
                                     if (!k) return
                                     setEditingKey((curK) => (k === curK ? null : k))
-                                    setPreviewMode('preview')
+                                    setShareValuePreviewMode('preview')
                                   }}
                                   onRemove={() => {
                                     if (editingKey === k) setEditingKey(null)
@@ -355,28 +392,36 @@ export const FlowEditor: FC = () => {
           </div>
         </div>
 
-        {editingKey && (
-          <div className='flex h-full w-150 flex-col overflow-hidden border-l border-[#313244]'>
+        {/* 右侧面板：默认 host_prompt 编辑/预览；点击共享 key 时切换为该 key 的值编辑 */}
+        {editingKey ? (
+          <div className='flex h-full flex-1 flex-col overflow-hidden border-l border-[#313244]'>
             <div className='flex items-center gap-2 px-3 py-2'>
-              <span className='text-[12px] text-[#a6adc8]'>{editingKey}</span>
+              <span className='text-base font-medium'>共享数据 · {editingKey}</span>
               <Switch
                 size='small'
-                checked={previewMode === 'preview'}
-                onChange={(v) => setPreviewMode(v ? 'preview' : 'edit')}
+                checked={shareValuePreviewMode === 'preview'}
+                onChange={(v) => setShareValuePreviewMode(v ? 'preview' : 'edit')}
                 checkedChildren={<EyeOutlined />}
                 unCheckedChildren={<EditOutlined />}
               />
+              <Button type='link' size='small' onClick={() => setEditingKey(null)}>
+                返回托管提示词
+              </Button>
             </div>
-            <div className={cn('flex-1 overflow-hidden', { 'px-2': previewMode === 'edit' })}>
+            <div
+              className={cn('flex-1 overflow-hidden', {
+                'px-2': shareValuePreviewMode === 'edit',
+              })}
+            >
               <Form.Item key={editingKey} name={['shareValues', editingKey]} noStyle>
                 <Input.TextArea
                   className={cn('hidden h-full w-full resize-none overflow-auto', {
-                    block: previewMode === 'edit',
+                    block: shareValuePreviewMode === 'edit',
                   })}
                   placeholder='输入共享数据内容'
                 />
               </Form.Item>
-              {previewMode === 'preview' && (
+              {shareValuePreviewMode === 'preview' && (
                 <Md
                   content={editingValue}
                   className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'
@@ -384,7 +429,47 @@ export const FlowEditor: FC = () => {
               )}
             </div>
           </div>
-        )}
+        ) : null}
+        {/* 编辑共享存储时不展示 但应当在FormItem中注册 */}
+        <div
+          className={cn('flex h-full flex-1 flex-col overflow-hidden border-l border-[#313244]', {
+            hidden: editingKey,
+          })}
+        >
+          <div className='flex items-center gap-2 px-3 py-2'>
+            <span className='text-base font-medium'>托管提示词</span>
+            <Switch
+              checked={hostPromptPreviewMode === 'preview'}
+              onChange={(v) => setHostPromptPreviewMode(v ? 'preview' : 'edit')}
+              checkedChildren={<EyeOutlined />}
+              unCheckedChildren={<EditOutlined />}
+            />
+          </div>
+          <div
+            className={cn('flex-1 overflow-hidden', {
+              'px-2': hostPromptPreviewMode === 'edit',
+            })}
+          >
+            <Form.Item name='host_prompt' noStyle>
+              <Input.TextArea
+                className={cn('hidden h-full w-full resize-none overflow-auto', {
+                  block: hostPromptPreviewMode === 'edit',
+                })}
+                placeholder='请输入托管提示词'
+              />
+            </Form.Item>
+            {hostPromptPreviewMode === 'preview' && (
+              <Md
+                className='h-full overflow-auto p-3 break-all whitespace-pre-wrap'
+                content={buildHostSystemPrompt({
+                  host_prompt: watchedHostPrompt,
+                  shareValuesKeys: (watchedKeys ?? []).filter((k) => !!k?.key),
+                  agents: flow.agents,
+                })}
+              ></Md>
+            )}
+          </div>
+        </div>
       </Form>
     </Drawer>
   )

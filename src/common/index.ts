@@ -78,7 +78,12 @@ export type ShareValueKey = z.infer<typeof ShareValueKeySchema>
 export const FlowSchema = z.object({
   id: z.string().describe('Flow 唯一标识'),
   name: z.string().describe('Flow 名称'),
-  flow_desc: z.string().optional().describe('Flow 描述'),
+  host_model: z.string().optional().describe('托管模型：负责整体编排/兜底的模型名称'),
+  host_effort: z
+    .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+    .optional()
+    .describe('托管模型的努力程度'),
+  host_prompt: z.string().optional().describe('托管提示词：注入给托管模型的系统提示词'),
   agents: z.array(AgentSchema).optional().describe('当前 Flow 内的 agent，其 outputs 定义了连接边'),
   shareValuesKeys: z.array(ShareValueKeySchema).optional().describe('Flow 可用的共享数据 key 集合'),
 })
@@ -126,6 +131,8 @@ export type FlowValidationResult = {
   invalidNextAgent?: Record<string, string[]>
   /** 同一 agent 内重复的 output_name，按 agent_name 分组，值为重复的 output_name 数组 */
   duplicateOutputNames?: Record<string, string[]>
+  /** 使用了保留 ID（HOST_AGENT_ID）的 agent_name 列表 */
+  reservedAgentIds?: string[]
 }
 
 /**
@@ -151,6 +158,12 @@ export function validateFlow(flow: Flow): FlowValidationResult {
     .map(([id]) => id)
   if (duplicateAgentIds.length > 0) {
     result.duplicateAgentIds = duplicateAgentIds
+  }
+
+  // 校验 id 不能使用保留值 HOST_AGENT_ID
+  const reservedAgentIds = agents.filter((a) => a.id === HOST_AGENT_ID).map((a) => a.agent_name)
+  if (reservedAgentIds.length > 0) {
+    result.reservedAgentIds = reservedAgentIds
   }
 
   // 校验"output_name 在同一 agent 内唯一"/"next_agent 引用的 agent id 存在"
@@ -189,6 +202,33 @@ export function validateFlow(flow: Flow): FlowValidationResult {
 
 /** 通配符：匹配所有 `mcp__*` 工具。用于 auto_allowed_tools / must_confirm_tools 的字符串项 */
 export const MCP_WILDCARD = 'MCP'
+
+/** Hosted Flow 的托管 Agent 固定 ID。普通 Agent **禁止**使用此 ID。 */
+export const HOST_AGENT_ID = '__HOST_AGENT_ID' as const
+
+/** AgentEditor / FlowEditor 共用的模型候选项（AutoComplete 选项） */
+export const MODEL_OPTIONS = [
+  { value: 'opus', label: 'opus' },
+  { value: 'gpt-5.5', label: 'gpt-5.5' },
+  { value: 'glm-5.1', label: 'glm-5.1' },
+  { value: 'DeepSeek-V4-Pro', label: 'DeepSeek-V4-Pro' },
+  { value: 'claude-opus-4-7', label: 'opus4.7' },
+  { value: 'claude-opus-4-6-v1', label: 'opus4.6' },
+  { value: 'sonnet', label: 'sonnet' },
+  { value: 'haiku', label: 'haiku' },
+  { value: 'gpt-5.4', label: 'gpt-5.4' },
+  { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+  { value: 'DeepSeek-V4-flash', label: 'DeepSeek-V4-flash' },
+]
+
+/** AgentEditor / FlowEditor 共用的努力程度候选项（Select 选项） */
+export const EFFORT_OPTIONS = [
+  { label: 'low — 简单任务', value: 'low' },
+  { label: 'medium — 日常任务', value: 'medium' },
+  { label: 'high — 复杂任务', value: 'high' },
+  { label: 'xhigh — 长程任务(opus4.7+)', value: 'xhigh' },
+  { label: 'max — 最大性能(opus4.6+)', value: 'max' },
+]
 
 /** Claude Code 预设提供的常见工具名，用于 AgentEditModal 的候选项 */
 export const BUILTIN_TOOL_NAMES = [
@@ -339,5 +379,85 @@ export function buildAgentSystemPrompt(
       })
       .exhaustive()
   }
+  return lines.join('\n')
+}
+
+/**
+ * 构建 Hosted Flow 托管模型的系统提示词
+ *
+ * 注入：
+ * - Flow 共享数据 key 列表与语义
+ * - 各 Agent 的 id / name / desc / no_input / 可读写 key 授权
+ * - runAgent 工具说明（接受 id 与 values，返回 content + values；失败抛错）
+ * - 用户填写的 host_prompt 作为最终任务描述
+ */
+export function buildHostSystemPrompt(
+  flow: Pick<Flow, 'host_prompt' | 'shareValuesKeys' | 'agents'>,
+): string {
+  const { host_prompt, shareValuesKeys = [], agents = [] } = flow
+
+  const lines: string[] = [
+    '你是 Hosted Flow 的**托管编排器**：调度下述 Agent 协同完成用户交付的任务。',
+    '始终使用**中文**进行思考和回复。',
+    '信息不足时，**禁止**凭空推测，应当尝试读取文件、执行命令行或使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
+  ]
+
+  // 共享数据
+  if (shareValuesKeys.length > 0) {
+    lines.push(
+      '# 共享数据',
+      '本 Flow 内可用的共享数据 key 集合（运行时由托管器与各 Agent 通过 `values` 读写共享）：',
+      ...shareValuesKeys.map((k) => (k.desc ? `  - \`${k.key}\`: ${k.desc}` : `  - \`${k.key}\``)),
+    )
+  }
+
+  // 可调度 Agents
+  if (agents.length > 0) {
+    const agentsJson = agents.map((a) => ({
+      id: a.id,
+      agent_name: a.agent_name,
+      ...(a.agent_desc ? { agent_desc: a.agent_desc } : {}),
+      no_input: !!a.no_input,
+      allowed_read_values_keys: a.allowed_read_values_keys ?? [],
+      allowed_write_values_keys: a.allowed_write_values_keys ?? [],
+    }))
+    lines.push(
+      '# 可调度的 Agents',
+      '通过 `runAgent` 工具调度以下 Agent。每个 Agent 都是独立的任务执行单元，拥有自己的上下文，仅能感知被授权的共享数据。',
+      '## 字段含义',
+      '- `id`: Agent 唯一标识，调用 `runAgent` 时必须严格匹配此值（不要把 `agent_name` 当 id 传）',
+      '- `agent_name`: Agent 名称，仅供阅读',
+      '- `agent_desc`: Agent 简介（可选），描述其职责与适用场景',
+      '- `no_input`: 是否忽略用户输入；`true` 表示该 Agent 自动启动，调用 `runAgent` 时无需 / 不应再额外提供输入消息',
+      '- `allowed_read_values_keys`: 该 Agent 可读的共享数据 key 子集；调用 `runAgent` 时通过 `values` 入参注入，未列出的 key 会被静默丢弃',
+      '- `allowed_write_values_keys`: 该 Agent 可写的共享数据 key 子集；会出现在 `runAgent` 返回的 `values` 中，未列出的 key 不会被返回',
+      '## 数据',
+      '```json',
+      JSON.stringify(agentsJson, null, 2),
+      '```',
+    )
+  }
+
+  // 工具
+  lines.push(
+    '# 工具：runAgent',
+    '调度指定 Agent 执行任务并等待其完成。',
+    '- 入参 `id`: 上方列出的 Agent id（必须严格匹配，不要传 agent_name）',
+    '- 入参 `values?`: 提供给该 Agent 的共享数据值（可选）；仅 Agent 在「可读共享数据」中声明的 key 会被使用，其余被忽略',
+    '- 返回 `content`: Agent 完成时提交的产物文本',
+    '- 返回 `values`: Agent 写入的共享数据增量；仅包含其「可写共享数据」中声明的 key',
+    '- **异常**: Agent 执行失败、用户中止、超时等情况下抛出，请妥善处理或如实告知用户',
+    '调度策略：',
+    '- 优先按用户意图选择最合适的 Agent；必要时串联多个 Agent 完成复杂任务',
+    '- 在调用前先想清楚需要给 Agent 提供哪些 `values`',
+    '- 调度结果中的 `values` 视情况合并到后续 Agent 调用的 `values` 入参里',
+  )
+
+  // 任务
+  const trimmedTask = host_prompt?.trim()
+  if (trimmedTask) {
+    lines.push('# 任务', trimmedTask)
+  }
+
   return lines.join('\n')
 }
