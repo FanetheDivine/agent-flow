@@ -243,7 +243,7 @@ export const AgentEditor: FC = () => {
               <Flex gap={16}>
                 <FormItem name='work_mode' label='工作模式'>
                   <Select
-                    className='w-80'
+                    className='w-70'
                     options={[
                       {
                         value: 'task',
@@ -252,6 +252,10 @@ export const AgentEditor: FC = () => {
                       {
                         value: 'chat',
                         label: '对话模式 · 永不终止的多轮对话',
+                      },
+                      {
+                        value: 'silent_task',
+                        label: '静默任务 · 无交互执行任务',
                       },
                     ]}
                   />

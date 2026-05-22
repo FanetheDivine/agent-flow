@@ -475,6 +475,13 @@ export function updateFlowRunState(
       .with({ type: 'flow.signal.agentInterrupted' }, () => {
         clearPendings()
       })
+      .with({ type: 'flow.signal.answerQuestion' }, ({ data }) => {
+        // silent_task 自动应答路径：与 command.answerQuestion 同语义
+        draft.answeredQuestions[data.toolUseId] = data.output
+        draft.pendingQuestions = draft.pendingQuestions.filter(
+          (q) => q.toolUseId !== data.toolUseId,
+        )
+      })
       .with({ type: 'flow.signal.agentError' }, () => {
         clearPendings()
         pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'agent-error' })

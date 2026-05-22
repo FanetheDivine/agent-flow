@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import {
   Agent,
   AIMessageType,
+  AskUserQuestionInput,
   AskUserQuestionOutput,
   buildAgentSystemPrompt,
   matchTool,
@@ -46,6 +47,12 @@ export type ExecutorEvents = {
   onComplete: (result: ExecutorResult) => void
   /** 工具调用命中 must_confirm 或兜底，等待用户确认 */
   onToolPermissionRequest: (req: { toolUseId: string; toolName: string; input: unknown }) => void
+  /**
+   * silent_task 模式下 AskUserQuestion 被自动应答时触发,
+   * 上层据此 fire `flow.signal.answerQuestion`,reducer 写入 answeredQuestions
+   * 并移出 pendingQuestions —— 让 webview 在无人值守模式下也能看到自动答案。
+   */
+  onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -143,6 +150,9 @@ export class ClaudeExecutor {
   /** 转发用户消息 */
   async sendUserMessage(message: SDKUserMessage) {
     if (this.disposed || this.completed) return
+    // silent_task 是无人值守模式,result 后由内部自动注入「继续」推进,
+    // 不接受外部 send;ChatInput 在 webview 端也不显示发送框。
+    if (this.agent.work_mode === 'silent_task') return
     if (this.queryInstance) {
       // 当前 query 仍在运行（如等待 AskUserQuestion 的 tool_result），直接推入流
       this.userInputStream.push(message)
@@ -259,6 +269,23 @@ export class ClaudeExecutor {
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
     if (toolName === 'AskUserQuestion') {
+      // silent_task 是无人值守模式：直接以占位字符串自动应答，不挂起。
+      // 同步 fire onAnswerQuestion 让 webview 通过 flow.signal.answerQuestion 看到自动答案,
+      // 与人工回答的展示路径(answeredQuestions / 移出 pendingQuestions)保持一致。
+      if (this.agent.work_mode === 'silent_task') {
+        const askInput = input as AskUserQuestionInput
+        const questions = askInput.questions ?? []
+        const answers: Record<string, string> = {}
+        for (const q of questions) {
+          answers[q.question] = SILENT_ASK_AUTO_ANSWER
+        }
+        const output: AskUserQuestionOutput = { questions, answers }
+        this.events.onAnswerQuestion?.(toolUseID, output)
+        return Promise.resolve({
+          behavior: 'allow',
+          updatedInput: { questions, answers },
+        })
+      }
       log('[ClaudeExecutor] canUseTool AskUserQuestion', { toolUseID })
       // 挂起，等待 answerQuestion() 被调用
       return new Promise<PermissionResult>((resolve) => {
@@ -277,7 +304,13 @@ export class ClaudeExecutor {
     if (auto_allowed_tools && matchTool(toolName, auto_allowed_tools)) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input })
     }
-    // 兜底：未覆盖的工具默认要求用户确认
+    // 兜底：silent_task 永远没有用户在场,未授权工具直接 deny;否则要求用户确认
+    if (this.agent.work_mode === 'silent_task') {
+      return Promise.resolve({
+        behavior: 'deny',
+        message: `silent_task 模式未授权工具 "${toolName}",请在 auto_allowed_tools 中显式加入。`,
+      })
+    }
     return this.requestToolPermission(toolUseID, toolName, input)
   }
 
@@ -294,7 +327,8 @@ export class ClaudeExecutor {
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
-  private async createQuery(message: UserMessageType, silent = false) {
+  private async createQuery(message: UserMessageType, skipPushInit = false) {
+    const isSilentMode = this.agent.work_mode === 'silent_task'
     // 同一个 MCP Server 实例不能被 connect 两次（@modelcontextprotocol/sdk
     // Protocol.connect 在 _transport 已存在时直接 throw 'Already connected
     // to a transport'，SDK 把异常吞进 .catch 后只打日志，导致 system message
@@ -323,6 +357,19 @@ export class ClaudeExecutor {
           logError('[ClaudeExecutor] interrupt after AgentComplete failed:', err)
         })
       },
+      onTerminate: (reason) => {
+        // silent_task 专用:模型确定无法完成时调 terminateTask 工具触发。
+        // 标记 disposed 让 for-await 退出,fire onError 让 reducer 把 run 推到 error 终态;
+        // 同时 interrupt SDK 让流尽快收尾(不阻塞回调,异常吞掉即可)。
+        if (this.completed || this.disposed) return
+        this.disposed = true
+        this.pendingCompleteResult = null
+        this.rejectAllPendingPermissions('terminated')
+        this.events.onError(new Error(`terminateTask: ${reason}`))
+        this.queryInstance?.interrupt().catch((err) => {
+          logError('[ClaudeExecutor] interrupt after terminateTask failed:', err)
+        })
+      },
     })
     const options: Options = {
       model: this.agent.model,
@@ -342,7 +389,7 @@ export class ClaudeExecutor {
         prompt: this.userInputStream.iterable,
         options,
       })
-      if (!silent) {
+      if (!skipPushInit) {
         this.userInputStream.push(message)
       }
       for await (const msg of this.queryInstance) {
@@ -376,6 +423,20 @@ export class ClaudeExecutor {
             this.pendingCompleteResult = null
             this.events.onComplete({ ...pending, resultMessage: msg })
             this.completed = true
+          } else if (
+            // silent_task 自动续轮:本回合无 AgentComplete、未中断、未销毁、SDK 未报错,
+            // 直接 push 一条「继续」让模型推进下一步。直到模型调 AgentComplete 或
+            // maxTurns 触发 error_max_turns。
+            isSilentMode &&
+            !this.completed &&
+            !this.disposed &&
+            msg.subtype === 'success'
+          ) {
+            const continueMsg = buildSilentContinueMessage(this._sessionId)
+            // 同步透传给上层,让 webview 通过 flow.signal.aiMessage 看到自动「继续」消息
+            // (SDK 不会 mirror 通过 input stream push 的 user message,这里手动 echo)。
+            this.events.onMessage(continueMsg)
+            this.userInputStream.push(continueMsg)
           }
         }
       }
@@ -422,4 +483,24 @@ function createMessageChannel<T>() {
   }
 
   return { push, iterable }
+}
+
+/**
+ * silent_task 模式自动应答 / 续轮 / 兜底常量。
+ * - SILENT_ASK_AUTO_ANSWER: AskUserQuestion 被调用时填给每个 question 的 answer。
+ *   语义上让模型知道用户不在场,继续自行决策即可。
+ * - SILENT_CONTINUE_TEXT: 每轮 result 后系统自动注入的用户消息内容,推动模型推进下一步。
+ * - SILENT_MAX_TURNS: 给 SDK options.maxTurns 兜底,防止模型不调 AgentComplete 无限循环。
+ */
+const SILENT_ASK_AUTO_ANSWER = '自行处理'
+const SILENT_CONTINUE_TEXT = '自行处理'
+
+/** silent_task 自动续轮用的 user 消息。session_id 在 result 之后已确定。 */
+function buildSilentContinueMessage(sessionId: string | null): SDKUserMessage {
+  return {
+    type: 'user',
+    message: { role: 'user', content: SILENT_CONTINUE_TEXT },
+    parent_tool_use_id: null,
+    session_id: sessionId ?? '',
+  }
 }

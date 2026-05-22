@@ -1,5 +1,5 @@
 import { groupBy } from 'lodash-es'
-import { match } from 'ts-pattern'
+import { match, P } from 'ts-pattern'
 import { z } from 'zod'
 
 export * from './event'
@@ -42,8 +42,10 @@ export const AgentSchema = z.object({
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
     ),
   work_mode: z
-    .enum(['task', 'chat'])
-    .describe('工作方式：task-任务达成后调用提交结果；chat-与用户的持续长期对话'),
+    .enum(['task', 'chat', 'silent_task'])
+    .describe(
+      '工作方式：task-任务达成后调用 AgentComplete 提交结果；chat-与用户的持续长期对话；silent_task-无人值守自动循环，必须通过 AgentComplete 终止',
+    ),
   no_input: z
     .boolean()
     .optional()
@@ -124,6 +126,8 @@ export type FlowValidationResult = {
   invalidNextAgent?: Record<string, string[]>
   /** 同一 agent 内重复的 output_name，按 agent_name 分组，值为重复的 output_name 数组 */
   duplicateOutputNames?: Record<string, string[]>
+  /** silent_task 模式但 outputs 为空（无可调用的终止出口）的 agent_name 列表 */
+  silentAgentMissingOutputs?: string[]
 }
 
 /**
@@ -134,6 +138,7 @@ export type FlowValidationResult = {
  * - agent_name 在 flow 内唯一
  * - output_name 在同一 agent 内唯一
  * - next_agent 引用的 agent id 存在
+ * - silent_task 模式必须至少一个 output（否则 Agent 永远调不到 AgentComplete 出口，会无限自循环）
  *
  * @param flow - 待校验的 Flow 对象
  */
@@ -154,10 +159,11 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   // 校验"output_name 在同一 agent 内唯一"/"next_agent 引用的 agent id 存在"
   const duplicateOutputNames: Record<string, string[]> = {}
   const invalidNextAgent: Record<string, string[]> = {}
+  const silentAgentMissingOutputs: string[] = []
   const validAgentIds = new Set(agentIds)
 
   for (const agent of agents) {
-    const { agent_name, outputs = [] } = agent
+    const { agent_name, outputs = [], work_mode } = agent
     const outputsGroupedByName = groupBy(outputs, (v) => v.output_name)
     const dupOutputs = Object.entries(outputsGroupedByName)
       .filter(([, items]) => items.length > 1)
@@ -173,6 +179,10 @@ export function validateFlow(flow: Flow): FlowValidationResult {
     if (badNextAgents.length > 0) {
       invalidNextAgent[agent_name] = badNextAgents
     }
+
+    if (work_mode === 'silent_task' && outputs.length === 0) {
+      silentAgentMissingOutputs.push(agent_name)
+    }
   }
 
   if (Object.keys(duplicateOutputNames).length > 0) {
@@ -180,6 +190,9 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   }
   if (Object.keys(invalidNextAgent).length > 0) {
     result.invalidNextAgent = invalidNextAgent
+  }
+  if (silentAgentMissingOutputs.length > 0) {
+    result.silentAgentMissingOutputs = silentAgentMissingOutputs
   }
 
   return result
@@ -232,6 +245,8 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete
  * - `chat`：把 `agent_prompt` 视作**长期对话规则**，
  *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
+ * - `silent_task`：无人值守自动循环，AskUserQuestion 会被自动应答，
+ *   每轮 result 后由系统自动以「继续」续轮，必须通过 AgentComplete 终止
  */
 export function buildAgentSystemPrompt(
   agent: Pick<
@@ -260,9 +275,15 @@ export function buildAgentSystemPrompt(
     '仅修改**用户指定的代码或文件**，**禁止**更改其他任何内容。',
     '**禁止**道歉、表明身份、免责声明等与任务无关的一切内容。',
     '**严格按需求执行**，**禁止**主动优化代码。',
-    '**禁止**凭空推测，使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
   ]
-
+  match(agent.work_mode)
+    .with(P.union('task', 'chat'), () => {
+      lines.push('**禁止**凭空推测，使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。')
+    })
+    .with('silent_task', () => {
+      lines.push('**禁止**凭空推测，必须通过 Tool 获取有效信息。')
+    })
+    .exhaustive()
   // Flow 管控数据（可选，仅注入被授权读取的 key） 空值传入null
   if (allowed_read_values_keys.length > 0) {
     const visibleValues: Record<string, string | null> = {}
@@ -285,7 +306,7 @@ export function buildAgentSystemPrompt(
     }
   }
 
-  // 可写数据：仅在「可完成」工作模式下出现（chat 不能调 AgentComplete）
+  // 可写数据：chat 不能写（不调 AgentComplete）；task / silent_task 都通过 AgentComplete 的 values 写入
   if (allowed_write_values_keys.length > 0 && work_mode !== 'chat') {
     lines.push(
       '# 可写数据',
@@ -294,33 +315,42 @@ export function buildAgentSystemPrompt(
       '## 写入说明：',
       '- 仅可写入上述列出的 key',
       '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
-      '- `content` 是本次任务的结果；`values` 用于按 key 记录用户要求保存的值',
+      '- `content` 是本次任务的结果文本；`values` 用于按 key 记录用户要求保存的值',
     )
   }
 
-  // 对话规则：长期对话规则 / 围绕任务描述完成任务（含完成任务、输出分支）
+  // 对话规则：长期对话 / 围绕任务描述完成任务 / 无人值守循环执行
   if (agent_prompt) {
     match(work_mode)
       .with('chat', () => {
         lines.push('# 对话规则', agent_prompt)
       })
-      .with('task', () => {
+      .with(P.union('silent_task', 'task'), (mode) => {
+        lines.push('# 对话规则', '下方「任务描述」是本次会话的**最终目标**，全程固定不变。')
+        if (mode === 'task') {
+          lines.push(
+            '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
+          )
+        }
         lines.push(
-          '# 对话规则',
-          '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
-          '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
           '## 任务描述',
           agent_prompt,
           '## 完成任务',
-          '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
+          '一旦达成「任务描述」的结束条件，**立即**调用 AgentControllerMcp 的 AgentComplete 工具提交结果并选择输出分支，否则系统会持续以「继续」让你循环。',
+        )
+        if (mode === 'silent_task') {
+          lines.push(
+            '## 中止任务',
+            '只有在已经穷尽所有可行手段、确定**无法**完成任务时（例如缺失关键信息且无工具可获取、环境异常等极端情况），才调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。优先尝试用 AgentComplete 提交部分结果;只有连部分结果都给不出时才用 terminateTask。',
+          )
+        }
+        lines.push(
           '## 输出分支',
-          match(outputs.length)
-            .with(0, () => '此任务没有输出分支。')
-            .otherwise(() =>
-              outputs
+          outputs.length === 0
+            ? '此任务没有输出分支。'
+            : outputs
                 .map((o) => `  - "${o.output_name}"${o.output_desc ? `: ${o.output_desc}` : ''}`)
                 .join('\n'),
-            ),
         )
       })
       .exhaustive()
