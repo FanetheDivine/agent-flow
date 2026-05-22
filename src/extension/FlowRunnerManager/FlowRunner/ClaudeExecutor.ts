@@ -325,7 +325,6 @@ export class ClaudeExecutor {
       },
     })
     const options: Options = {
-      maxTurns: 1000,
       model: this.agent.model,
       effort: this.agent.effort,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: this.prompt },
