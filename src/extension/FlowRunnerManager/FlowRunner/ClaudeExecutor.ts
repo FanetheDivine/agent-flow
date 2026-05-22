@@ -381,6 +381,9 @@ export class ClaudeExecutor {
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
       includePartialMessages: true,
     }
+    if (this.agent.work_mode === 'silent_task') {
+      options.maxTurns = 10
+    }
     if (this._sessionId) {
       options.resume = this._sessionId
     }
