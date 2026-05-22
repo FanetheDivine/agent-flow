@@ -313,6 +313,13 @@ export function updateFlowRunState(
   const pushEffect = (opts: Omit<MessageEffect, 'flowName' | 'agentName'>) => {
     const flow = findFlow(opts.flowId)
     const agent = findAgent(flow, opts.agentId)
+    // 静默模式的agent减少通知
+    if (
+      agent?.work_mode === 'silent_task' &&
+      opts.reason !== 'agent-error' &&
+      opts.reason !== 'flow-completed'
+    )
+      return
     effects.push({
       ...opts,
       flowName: flow?.name ?? '',
