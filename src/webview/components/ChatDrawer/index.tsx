@@ -49,16 +49,20 @@ export const ChatDrawer: FC = () => {
   })
 
   /**
-   * 当前 ChatDrawer 绑定的 (flowId, agentId) 是否对应「末位活跃 run」:
-   * 是则可走 sendUserMessage 同会话追问;否则走 startFlow。
+   * 当前 ChatDrawer 绑定的 (flowId, agentId) 对应「末位活跃 run」的 runId:
+   * - 末位 run 必须命中当前 chatDrawer.agentId(否则不是用户在看的 run)
+   * - phase 必须可继续追问/中断(非 idle/completed/stopped)
+   * 命中时返回 runId,sendUserMessage / interruptAgent 直接拿来派发;否则返回 undefined,
+   * onSend 走 startFlow 路径。
    */
-  const isActiveRun = useFlowStore((s) => {
-    if (!s.chatDrawer) return false
+  const activeRunId = useFlowStore((s): string | undefined => {
+    if (!s.chatDrawer) return undefined
     const fs = s.flowRunStates[s.chatDrawer.flowId]
     const last = fs?.runs.at(-1)
-    if (!fs || !last || last.agentId !== s.chatDrawer.agentId) return false
+    if (!fs || !last || last.agentId !== s.chatDrawer.agentId) return undefined
     const phase = getRunPhase(last, fs)
-    return phase !== 'idle' && phase !== 'completed' && phase !== 'stopped'
+    if (phase === 'idle' || phase === 'completed' || phase === 'stopped') return undefined
+    return last.runId
   })
 
   const inputState = agentChatInputState(agentPhase)
@@ -70,16 +74,12 @@ export const ChatDrawer: FC = () => {
       // disabled / loading 状态不允许发送
       if (inputState === 'disabled' || inputState === 'loading') return false
 
-      const fs = useFlowStore.getState().flowRunStates[flowId]
-      // 同会话追问条件:有非终态 run 在跑 + 当前活跃 agent + phase=result/interrupted
-      const hasActiveRun = !!fs?.runs.some((r) => !r.completed)
-
+      // 同会话追问条件:有 active run + phase=result/interrupted
       if (
-        hasActiveRun &&
-        isActiveRun &&
+        activeRunId &&
         (agentPhase === 'result' || agentPhase === 'interrupted')
       ) {
-        sendUserMessage(flowId, content)
+        sendUserMessage(flowId, activeRunId, content)
         chatPanelRef.current?.forceScrollToBottom()
         return true
       }
@@ -94,7 +94,7 @@ export const ChatDrawer: FC = () => {
       if (started) chatPanelRef.current?.forceScrollToBottom()
       return started
     },
-    [chatDrawer, inputState, agentPhase, isActiveRun, startFlow, sendUserMessage, chatPanelRef],
+    [chatDrawer, inputState, agentPhase, activeRunId, startFlow, sendUserMessage, chatPanelRef],
   )
 
   return (
@@ -134,8 +134,8 @@ export const ChatDrawer: FC = () => {
           onSend={onSend}
           status={inputState}
           onCancel={() => {
-            if (chatDrawer) {
-              interruptAgent(chatDrawer.flowId)
+            if (chatDrawer && activeRunId) {
+              interruptAgent(chatDrawer.flowId, activeRunId)
             }
           }}
         />

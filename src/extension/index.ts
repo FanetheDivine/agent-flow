@@ -339,7 +339,7 @@ export function activate(context: vscode.ExtensionContext) {
       answeredQuestions,
       answeredToolPermissions: { ...sourceState.answeredToolPermissions },
       pendingQuestions,
-      pendingToolPermission: undefined,
+      pendingToolPermissions: [],
       shareValues: { ...sourceState.shareValues },
     }
 

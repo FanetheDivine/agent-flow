@@ -22,7 +22,7 @@ import {
   getAnsweredToolPermissions,
   getFlowPhase,
   getPendingQuestionsFor,
-  getPendingToolPermissionFor,
+  getPendingToolPermissionsFor,
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
@@ -72,8 +72,8 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   const pendingQuestions = useFlowStore((s) =>
     getPendingQuestionsFor(s.flowRunStates[flowId], agentId),
   )
-  const pendingToolPerm = useFlowStore((s) =>
-    getPendingToolPermissionFor(s.flowRunStates[flowId], agentId),
+  const pendingToolPerms = useFlowStore((s) =>
+    getPendingToolPermissionsFor(s.flowRunStates[flowId], agentId),
   )
   const answeredToolPermissions = useFlowStore((s) =>
     getAnsweredToolPermissions(s.flowRunStates[flowId]),
@@ -166,12 +166,20 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
 
   const showCard = mergedInput.questions.length > 0
   const onToolPermissionAllow = useCallback(
-    (toolUseId: string) => answerToolPermission(flowId, toolUseId, true),
-    [answerToolPermission, flowId],
+    (toolUseId: string) => {
+      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
+      if (!p) return
+      answerToolPermission(flowId, p.runId, toolUseId, true)
+    },
+    [answerToolPermission, flowId, pendingToolPerms],
   )
   const onToolPermissionDeny = useCallback(
-    (toolUseId: string) => answerToolPermission(flowId, toolUseId, false),
-    [answerToolPermission, flowId],
+    (toolUseId: string) => {
+      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
+      if (!p) return
+      answerToolPermission(flowId, p.runId, toolUseId, false)
+    },
+    [answerToolPermission, flowId, pendingToolPerms],
   )
 
   /**
@@ -246,7 +254,10 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
           const ans = answersPerQuestion[q.question] ?? []
           pqAnswers[q.question] = ans.join('\x1F')
         }
-        answerQuestion(flowId, pq.toolUseId, { questions: pq.input.questions, answers: pqAnswers })
+        answerQuestion(flowId, pq.runId, pq.toolUseId, {
+          questions: pq.input.questions,
+          answers: pqAnswers,
+        })
       }
 
       shouldScrollRef.current = true
@@ -256,7 +267,11 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
   )
 
   const pendingToolUseId = showCard ? mergedInput.toolUseIds[0] : undefined
-  const pendingToolPermissionToolUseId = pendingToolPerm?.toolUseId
+  const pendingToolPermissionToolUseIds = useMemo(
+    () =>
+      pendingToolPerms.length > 0 ? new Set(pendingToolPerms.map((p) => p.toolUseId)) : undefined,
+    [pendingToolPerms],
+  )
   const pendingToolUseIds = useMemo(
     () => (mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined),
     [mergedInput.toolUseIds],
@@ -267,7 +282,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
       pendingToolUseIds,
       answeredMap,
       onActiveSubmit,
-      pendingToolPermissionToolUseId,
+      pendingToolPermissionToolUseIds,
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
@@ -278,7 +293,7 @@ export const ChatPanel: FC<Props> = ({ flowId, agentId, agentName, onClose, ref 
       pendingToolUseIds,
       answeredMap,
       onActiveSubmit,
-      pendingToolPermissionToolUseId,
+      pendingToolPermissionToolUseIds,
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,

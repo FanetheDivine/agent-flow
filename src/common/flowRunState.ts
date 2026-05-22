@@ -165,7 +165,7 @@ export type AgentPhase =
 /**
  * 单个 Agent 运行实例 —— phase 由 [getRunPhase](src/common/flowRunState.ts) 从
  * `messages` + `completed` + `state.killed` + `state.pendingQuestions` /
- * `state.pendingToolPermission` 推断,不存字段。
+ * `state.pendingToolPermissions` 推断,不存字段。
  */
 export type AgentRun = {
   /** 主键 —— flowStart 路径由 webview 生成,next_agent / fork 路径由 extension 生成 */
@@ -208,12 +208,12 @@ export type FlowRunState = {
   runs: AgentRun[]
   /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
   answeredQuestions: Record<string, AskUserQuestionOutput>
-  /** 当前未回答的 AskUserQuestion 队列 */
+  /** 当前未回答的 AskUserQuestion 队列(按 runId 区分归属) */
   pendingQuestions: PendingQuestion[]
   /** 已回答的工具权限请求：toolUseId -> allow，用于 UI 回显历史态 */
   answeredToolPermissions: Record<string, { allow: boolean }>
-  /** 当前未回答的工具权限请求 */
-  pendingToolPermission?: PendingToolPermission
+  /** 当前未回答的工具权限请求队列(按 runId 区分归属) */
+  pendingToolPermissions: PendingToolPermission[]
   /** Flow 运行时的共享数据 */
   shareValues: Record<string, string>
 }
@@ -275,6 +275,7 @@ export function updateFlowRunState(
       answeredQuestions: {},
       answeredToolPermissions: {},
       pendingQuestions: [],
+      pendingToolPermissions: [],
       shareValues: state?.shareValues ?? {},
     }
     return {
@@ -290,6 +291,7 @@ export function updateFlowRunState(
       answeredQuestions: {},
       answeredToolPermissions: {},
       pendingQuestions: [],
+      pendingToolPermissions: [],
       ...state,
       shareValues: msg.data.values,
     }
@@ -319,7 +321,7 @@ export function updateFlowRunState(
     const flowId = msg.data.flowId
     const clearPendings = () => {
       draft.pendingQuestions = []
-      draft.pendingToolPermission = undefined
+      draft.pendingToolPermissions = []
     }
 
     // ── command.killFlow:任何状态下强制终止(包括终态,幂等) ──────────
@@ -428,11 +430,14 @@ export function updateFlowRunState(
         }
       })
       .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {
-        draft.pendingToolPermission = {
-          toolUseId: data.toolUseId,
-          toolName: data.toolName,
-          input: data.input,
-          runId: run.runId,
+        // 队列追加(toolUseId 去重),理论上单 executor 不会出现重复请求
+        if (!draft.pendingToolPermissions.some((p) => p.toolUseId === data.toolUseId)) {
+          draft.pendingToolPermissions.push({
+            toolUseId: data.toolUseId,
+            toolName: data.toolName,
+            input: data.input,
+            runId: run.runId,
+          })
         }
         pushEffect({ flowId, agentId: run.agentId, reason: 'awaiting-tool-permission' })
       })
@@ -470,9 +475,9 @@ export function updateFlowRunState(
       })
       .with({ type: 'flow.command.toolPermissionResult' }, ({ data }) => {
         draft.answeredToolPermissions[data.toolUseId] = { allow: data.allow }
-        if (draft.pendingToolPermission?.toolUseId === data.toolUseId) {
-          draft.pendingToolPermission = undefined
-        }
+        draft.pendingToolPermissions = draft.pendingToolPermissions.filter(
+          (p) => p.toolUseId !== data.toolUseId,
+        )
       })
       // ── fork：源 Flow 状态完全不变,新 Flow 的 RunState 由调用方在 store 外侧写入 ──
       .with({ type: 'flow.signal.fork' }, () => {})
@@ -491,13 +496,13 @@ const isTerminalPhase = (p: AgentPhase): boolean =>
 
 /**
  * 按 run 自身的数据推断 phase —— SSOT 是 `run.messages` + `run.completed` +
- * `state.killed` + `state.pendingQuestions` / `state.pendingToolPermission`。
+ * `state.killed` + `state.pendingQuestions` / `state.pendingToolPermissions`。
  *
  * 单个 run 的优先级:
  * - error                       消息流中出现过 agentError / error signal
  * - completed                   run.completed === true
  * - stopped                     state.killed (未已终态时投影为 stopped)
- * - awaiting-tool-permission    state.pendingToolPermission 属于本 run
+ * - awaiting-tool-permission    state.pendingToolPermissions 中有属于本 run 的项
  * - awaiting-question           state.pendingQuestions 中有属于本 run 的项
  * - interrupted                 末条 aiMessage 之后出现过 agentInterrupted
  * - result / running            末条 aiMessage 是 result type / 其它
@@ -511,7 +516,8 @@ export function getRunPhase(run: AgentRun, state: FlowRunState): AgentPhase {
   }
   if (run.completed) return 'completed'
   if (state.killed) return 'stopped'
-  if (state.pendingToolPermission?.runId === run.runId) return 'awaiting-tool-permission'
+  if (state.pendingToolPermissions.some((p) => p.runId === run.runId))
+    return 'awaiting-tool-permission'
   if (state.pendingQuestions.some((q) => q.runId === run.runId)) return 'awaiting-question'
   // 倒序找:agentInterrupted 在末条 aiMessage 之后出现 → interrupted;反之视为已恢复
   for (let i = run.messages.length - 1; i >= 0; i--) {
@@ -599,18 +605,6 @@ export function getAgentPhase(state: FlowRunState | undefined, agentId: string):
   )
 }
 
-/** 取队首属于该 agent 的 PendingQuestion */
-export function getPendingQuestionFor(
-  state: FlowRunState | undefined,
-  agentId: string,
-): PendingQuestion | undefined {
-  if (!state) return undefined
-  const q = state.pendingQuestions[0]
-  if (!q) return undefined
-  const run = state.runs.find((r) => r.runId === q.runId)
-  return run?.agentId === agentId ? q : undefined
-}
-
 /**
  * 取属于该 agent 的 pendingQuestions —— 引用稳定:
  * - 所有 q 都属于该 agent → 直接返回 state.pendingQuestions(原引用)
@@ -637,14 +631,29 @@ export function getPendingQuestionsFor(
   return list.filter((q) => runIdToAgent.get(q.runId) === agentId)
 }
 
-export function getPendingToolPermissionFor(
+const EMPTY_PENDING_TOOL_PERMISSIONS: PendingToolPermission[] = []
+
+/**
+ * 取属于该 agent 的 pendingToolPermissions —— 引用稳定策略与 getPendingQuestionsFor 一致。
+ */
+export function getPendingToolPermissionsFor(
   state: FlowRunState | undefined,
   agentId: string,
-): PendingToolPermission | undefined {
-  const p = state?.pendingToolPermission
-  if (!state || !p) return undefined
-  const run = state.runs.find((r) => r.runId === p.runId)
-  return run?.agentId === agentId ? p : undefined
+): PendingToolPermission[] {
+  if (!state) return EMPTY_PENDING_TOOL_PERMISSIONS
+  const list = state.pendingToolPermissions
+  if (list.length === 0) return EMPTY_PENDING_TOOL_PERMISSIONS
+  const runIdToAgent = new Map(state.runs.map((r) => [r.runId, r.agentId]))
+  let allBelong = true
+  let anyBelong = false
+  for (const p of list) {
+    const a = runIdToAgent.get(p.runId)
+    if (a === agentId) anyBelong = true
+    else allBelong = false
+  }
+  if (allBelong) return list
+  if (!anyBelong) return EMPTY_PENDING_TOOL_PERMISSIONS
+  return list.filter((p) => runIdToAgent.get(p.runId) === agentId)
 }
 
 export function getAnsweredToolPermissions(

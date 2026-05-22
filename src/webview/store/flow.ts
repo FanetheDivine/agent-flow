@@ -60,10 +60,26 @@ type FlowStoreType = StoreState & {
   /** 启动 Flow 运行。 */
   runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
   save: (updateFn: (val: Flow[]) => void) => void
-  sendUserMessage: (flowId: string, content: UserMessageType['message']['content']) => void
-  answerQuestion: (flowId: string, toolUseId: string, output: AskUserQuestionOutput) => void
-  answerToolPermission: (flowId: string, toolUseId: string, allow: boolean) => void
-  interruptAgent: (flowId: string) => void
+  /**
+   * 同会话追问 —— 调用方必须在 chatDrawer 上下文里挑出目标 run 的 runId 后传入,
+   * store 不再回退到末位非终态 run(多 run 场景下回退会乱派发)。
+   */
+  sendUserMessage: (
+    flowId: string,
+    runId: string,
+    content: UserMessageType['message']['content'],
+  ) => void
+  /** 回答 AskUserQuestion —— 调用方持有 pendingQuestion.runId 直接传入 */
+  answerQuestion: (
+    flowId: string,
+    runId: string,
+    toolUseId: string,
+    output: AskUserQuestionOutput,
+  ) => void
+  /** 回答工具权限请求 —— 调用方持有 pendingToolPermission.runId 直接传入 */
+  answerToolPermission: (flowId: string, runId: string, toolUseId: string, allow: boolean) => void
+  /** 中断当前 run —— 调用方决定要中断哪个 run */
+  interruptAgent: (flowId: string, runId: string) => void
   killFlow: (flowId: string) => void
   setShareValues: (flowId: string, values: Record<string, string>) => boolean
   /**
@@ -95,14 +111,6 @@ export type {
   PendingToolPermission,
 }
 export { agentChatInputState, flowCanBeKilled, flowIsDestructiveReadOnly }
-
-// 取最末一条非终态 run(避免 findLast 的 ES2023 依赖)
-const findLastActiveRun = (runs: AgentRun[]): AgentRun | undefined => {
-  for (let i = runs.length - 1; i >= 0; i--) {
-    if (!runs[i].completed) return runs[i]
-  }
-  return undefined
-}
 
 export const useFlowStore = create<FlowStoreType>((set, get) => {
   const immerSet = (updateFn: (draft: FlowStoreType) => void) => {
@@ -382,17 +390,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
       postMessageToExtension({ type: 'save', data: get().flows })
     },
-    sendUserMessage: (flowId, content) => {
-      const { flowRunStates } = get()
-      const fs = flowRunStates[flowId]
-      // 路由按 runId:取末位非终态 run(本期单 executor 约束)
-      const run = fs ? findLastActiveRun(fs.runs) : undefined
-      if (!run) return
+    sendUserMessage: (flowId, runId, content) => {
       dispatchCommand({
         type: 'flow.command.userMessage',
         data: {
           flowId,
-          runId: run.runId,
+          runId,
           message: {
             type: 'user',
             message: { role: 'user', content },
@@ -401,38 +404,25 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         },
       })
     },
-    answerQuestion: (flowId, toolUseId, output) => {
-      const { flowRunStates } = get()
-      const fs = flowRunStates[flowId]
-      const q = fs?.pendingQuestions.find((q) => q.toolUseId === toolUseId)
-      const runId = q?.runId ?? (fs ? findLastActiveRun(fs.runs)?.runId : undefined)
-      if (!runId) return
+    answerQuestion: (flowId, runId, toolUseId, output) => {
       dispatchCommand({
         type: 'flow.command.answerQuestion',
         data: { flowId, runId, toolUseId, output },
       })
     },
-    answerToolPermission: (flowId, toolUseId, allow) => {
-      const { flowRunStates } = get()
-      const fs = flowRunStates[flowId]
-      const p = fs?.pendingToolPermission
-      const runId =
-        p?.toolUseId === toolUseId ? p.runId : fs ? findLastActiveRun(fs.runs)?.runId : undefined
-      if (!runId) return
+    answerToolPermission: (flowId, runId, toolUseId, allow) => {
       dispatchCommand({
         type: 'flow.command.toolPermissionResult',
         data: { flowId, runId, toolUseId, allow },
       })
     },
-    interruptAgent: (flowId) => {
+    interruptAgent: (flowId, runId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
       if (!fs || !flowCanBeKilled(getFlowPhase(fs))) return
-      const run = findLastActiveRun(fs.runs)
-      if (!run) return
       dispatchCommand({
         type: 'flow.command.interrupt',
-        data: { flowId, runId: run.runId },
+        data: { flowId, runId },
       })
     },
     killFlow: (flowId) => {
