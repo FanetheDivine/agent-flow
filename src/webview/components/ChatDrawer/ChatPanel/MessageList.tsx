@@ -69,7 +69,7 @@ export const MessageList = forwardRef<MessageListRef, Props>(function MessageLis
     return [
       ...items,
       {
-        key: '__loading__',
+        key: '__loading__' + items.length,
         role: 'ai',
         content: null,
         loading: true,
@@ -136,11 +136,13 @@ const virtuosoComponents: Components<BubbleItemType> = {
 }
 
 function renderItem(item: Item) {
+  // key 必须从 spread 中剥离 —— React 19 禁止把 key 通过 props 对象间接传入 JSX
+  const { key, ...rest } = item
   return match(item.role)
-    .with('divider', () => <Bubble.Divider {...item} />)
-    .with('system', () => <Bubble.System {...item} />)
+    .with('divider', () => <Bubble.Divider key={key} {...rest} />)
+    .with('system', () => <Bubble.System key={key} {...rest} />)
     .otherwise((role) => {
       const cfg = roleStyles[role as keyof typeof roleStyles] ?? {}
-      return <Bubble {...cfg} {...item} />
+      return <Bubble key={key} {...cfg} {...rest} />
     })
 }

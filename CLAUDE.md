@@ -56,6 +56,7 @@ Agent schema 字段用 snake_case 与 prompt 对齐，**不要**改成 camelCase
 **webview 端**：组件树由 [App](src/webview/App.tsx) 起，`<AgentFlow>`（xyflow 画布）+ `<ChatDrawer>`（右侧对话抽屉）为两块主区域。所有状态收敛到单一 zustand store [useFlowStore](src/webview/store/flow.ts)（用 `immer` 写 reducer），同时持有持久化的 Flow 定义和运行时 `RunState`；从 extension 来的 signal 也由 store 收敛处理（含上述通知/自动打开 ChatPanel 的副作用）。
 
 Flow 的 `shareValues` 是 reducer（webview store / extension `FlowRunStateManager`）维护的运行时数据，**不以引用贯穿**所有 Agent。Agent 只感知自己的 `values`：
+
 - **读（Agent 视角 `values`）**：构造 `ClaudeExecutor` 时，从 reducer 取 Flow 最新 shareValues，按 `allowed_read_values_keys` 过滤后注入到系统提示词「# 可用数据」节，**写死在 prompt 里**，Agent 在本次会话内看到的就是这个快照（中途换值也不会重读）
 - **写（Agent 视角 `values` → Flow `shareValues`）**：Agent 调用 `AgentComplete` 时通过 `values` 参数一次性提交，未列在 `allowed_write_values_keys` 的 key 会被静默丢弃；写入随 `flow.signal.agentComplete.values` 一并广播，由 reducer 合并到 `state.shareValues`
 - **手动叠加**：`FlowRunner.doOnAgentComplete` 切到下一个 agent 时，reducer 此刻还没收到 signal，因此手动 `{ ...getLatestShareValues(), ...result.values }` 给 nextAgent 的 systemPrompt（这是临时计算，FlowRunner 自身不持有 shareValues 字段）
@@ -107,6 +108,10 @@ Flow 的 `shareValues` 是 reducer（webview store / extension `FlowRunStateMana
   - `answerQuestion` 用 `pendingQuestion.runId`,`answerToolPermission` 在 `pendingToolPermissions` 中按 `toolUseId` 反查 runId
   - 没有 runId 时直接放弃派发,不要回退到任何"猜测"。
 - **ChatPanel 跨 Flow 切换必须 unmount**：[ChatDrawer](src/webview/components/ChatDrawer.tsx) 给 ChatPanel 加 `key={flowId-agentId}` 强制跨 Flow 切换重新挂载，避免 AskUserQuestionCard 内部 selections / motion.div 的 ask-card key 在新旧 Flow 间被 React 复用。
+- **zustand selector 禁止返回新数组/新对象**：`useFlowStore((s) => s.x.filter(...))` / `... ?? []` / `... ?? {}` 等写法在每次组件渲染时都会产生**新引用**。zustand 基于 `useSyncExternalStore`，会用 `Object.is` 比较 selector 返回值，新引用会被判定为快照变化 → 调度重渲染 → selector 再次返回新引用 → **`Maximum update depth exceeded`**。**Why**：[ChatPanel](src/webview/components/ChatDrawer/ChatPanel/index.tsx) 历史上写过 `useFlowStore((s) => s.flowRunStates[fid]?.pendingQuestions.filter(q => q.runId === runId) ?? [])`，触发死循环。**How to apply**：
+  - 取原始引用稳定的字段（`s.flowRunStates[fid]` / `s.flowRunStates[fid]?.pendingQuestions`），过滤 / 转换在 `useMemo` 里做
+  - 空结果用模块级常量（如 `EMPTY_PENDING_QUESTIONS`），不要每次返回 `[]` 字面量
+  - 需要派生多个值时拆成多个 selector 各自取原始字段，不要在 selector 内构造对象
 
 ## ShareValues 授权读写
 

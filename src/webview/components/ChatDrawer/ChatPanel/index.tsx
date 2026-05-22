@@ -11,7 +11,7 @@ import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionOutput } from '@/common'
+import type { AskUserQuestionOutput, PendingQuestion, PendingToolPermission } from '@/common'
 import {
   formatTokenCount,
   formatTokenCost,
@@ -27,6 +27,11 @@ import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList, type MessageListRef } from './MessageList'
+
+// 模块级常量 —— 用于 useMemo 在「无 pending」时返回稳定空数组,
+// 避免每次渲染产生新引用触发上层 effect / virtuoso 重测量
+const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
+const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
 
 export type ChatPanelRef = {
   forceScrollToBottom: () => void
@@ -97,17 +102,34 @@ export const ChatPanel: FC<Props> = ({
     return getAgentPhase(fs, agentId)
   })
   const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
-  // pendingQuestions / pendingToolPerms:runId 视图按 runId 过滤,agentId 视图按 agent 过滤
-  const pendingQuestions = useFlowStore((s) => {
-    const fs = s.flowRunStates[flowId]
-    if (runId) return fs?.pendingQuestions.filter((q) => q.runId === runId) ?? []
+  // pendingQuestions / pendingToolPerms:
+  // selector 必须返回稳定引用,否则 useSyncExternalStore 在 store 未变时仍因引用不同
+  // 持续判定快照变化触发重渲染 → "Maximum update depth exceeded"。
+  // 直接取 fs(immer 保证 fs 在状态未变时引用稳定),在 useMemo 内做过滤;
+  // 过滤前后长度相同则透传原数组,空结果用模块级常量,保证不变时引用稳定。
+  const fs = useFlowStore((s) => s.flowRunStates[flowId])
+  const pendingQuestions = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_QUESTIONS
+    if (runId) {
+      const list = fs.pendingQuestions
+      const filtered = list.filter((q) => q.runId === runId)
+      if (filtered.length === list.length) return list
+      if (filtered.length === 0) return EMPTY_PENDING_QUESTIONS
+      return filtered
+    }
     return getPendingQuestionsFor(fs, agentId)
-  })
-  const pendingToolPerms = useFlowStore((s) => {
-    const fs = s.flowRunStates[flowId]
-    if (runId) return fs?.pendingToolPermissions.filter((p) => p.runId === runId) ?? []
+  }, [fs, runId, agentId])
+  const pendingToolPerms = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_TOOL_PERMS
+    if (runId) {
+      const list = fs.pendingToolPermissions
+      const filtered = list.filter((p) => p.runId === runId)
+      if (filtered.length === list.length) return list
+      if (filtered.length === 0) return EMPTY_PENDING_TOOL_PERMS
+      return filtered
+    }
     return getPendingToolPermissionsFor(fs, agentId)
-  })
+  }, [fs, runId, agentId])
   const answeredToolPermissions = useFlowStore((s) =>
     getAnsweredToolPermissions(s.flowRunStates[flowId]),
   )
