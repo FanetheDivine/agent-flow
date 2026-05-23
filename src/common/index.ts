@@ -281,7 +281,10 @@ export function buildAgentSystemPrompt(
       lines.push('**禁止**凭空推测，使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。')
     })
     .with('silent_task', () => {
-      lines.push('**禁止**凭空推测，必须通过 Tool 获取有效信息。')
+      lines.push(
+        '**禁止**凭空推测，必须通过 Tool 获取有效信息。',
+        '自行决策，避免使用 AskUserQuestion 和咨询用户。',
+      )
     })
     .exhaustive()
   // Flow 管控数据（可选，仅注入被授权读取的 key） 空值传入null
