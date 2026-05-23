@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { FC } from 'react'
-import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex } from 'antd'
+import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex, Modal } from 'antd'
 import {
   PlusOutlined,
   MinusCircleOutlined,
@@ -75,6 +75,9 @@ export const AgentEditor: FC = () => {
   const [form] = Form.useForm()
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
 
+  // 首次切到 silent_task 时弹一次警告;Agent 本身已是静默模式则不再提示
+  const silentWarnedRef = useRef(false)
+
   const watchedValues = Form.useWatch([], form)
 
   useEffect(() => {
@@ -98,6 +101,7 @@ export const AgentEditor: FC = () => {
         })),
       }
       form.setFieldsValue(newFormValue)
+      silentWarnedRef.current = (agent.work_mode ?? 'task') === 'silent_task'
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewMode('preview')
@@ -142,6 +146,16 @@ export const AgentEditor: FC = () => {
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
+        onValuesChange={(changed: Partial<Agent>) => {
+          if (changed.work_mode === 'silent_task' && !silentWarnedRef.current) {
+            silentWarnedRef.current = true
+            Modal.warning({
+              title: '谨慎使用静默模式',
+              content:
+                '静默模式下，用户无法参与多轮对话，无法中断对话，AskUserQuestion 和普通消息会被自动应答，直到 Agent 自行完成任务。请谨慎选择模型、effort，并确保输入和提示词的完整。',
+            })
+          }
+        }}
         onFinish={(val: Omit<Agent, 'id'>) => {
           save((draftFlows) => {
             const f = draftFlows.find((f) => f.id === editingAgent!.flowId)
@@ -241,7 +255,11 @@ export const AgentEditor: FC = () => {
               </FormItem>
 
               <Flex gap={16}>
-                <FormItem name='work_mode' label='工作模式'>
+                <FormItem
+                  name='work_mode'
+                  label='工作模式'
+                  tooltip='静默模式下，用户无法与AI进行多轮对话，无法中断会话'
+                >
                   <Select
                     className='w-70'
                     options={[
@@ -255,7 +273,7 @@ export const AgentEditor: FC = () => {
                       },
                       {
                         value: 'silent_task',
-                        label: '静默任务 · 无交互执行任务',
+                        label: '静默模式 · 无交互执行任务',
                       },
                     ]}
                   />

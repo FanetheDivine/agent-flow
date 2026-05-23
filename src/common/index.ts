@@ -356,8 +356,8 @@ export function buildAgentSystemPrompt(
 
   if (agent.work_mode === 'silent_task') {
     lines.push(
-      '# 停止会话',
-      '确定无法完成任务时，调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。例如缺失任务目标、缺失关键信息且无工具可获取、环境异常等极端情况。',
+      '# **停止会话**',
+      '**确定无法完成任务时**，调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。例如缺失任务目标、缺失关键信息且无工具可获取、环境异常等极端情况。',
     )
   }
   return lines.join('\n')
