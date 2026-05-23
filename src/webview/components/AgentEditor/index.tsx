@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { FC } from 'react'
-import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex, Modal } from 'antd'
+import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex, Modal, App } from 'antd'
 import {
   PlusOutlined,
   MinusCircleOutlined,
@@ -55,6 +55,7 @@ const AutoAllowedToolsField: FC<{
 }
 
 export const AgentEditor: FC = () => {
+  const { modal } = App.useApp()
   const editingAgent = useFlowStore((s) => s.editingAgent)
   const flows = useFlowStore((s) => s.flows)
   const save = useFlowStore((s) => s.save)
@@ -149,7 +150,7 @@ export const AgentEditor: FC = () => {
         onValuesChange={(changed: Partial<Agent>) => {
           if (changed.work_mode === 'silent_task' && !silentWarnedRef.current) {
             silentWarnedRef.current = true
-            Modal.warning({
+            modal.warning({
               title: '谨慎使用静默模式',
               content:
                 '静默模式下，用户无法参与多轮对话，无法中断对话，AskUserQuestion 和普通消息会被自动应答，直到 Agent 自行完成任务。请谨慎选择模型、effort，并确保输入和提示词的完整。',
