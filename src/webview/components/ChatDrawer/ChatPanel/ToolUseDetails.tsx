@@ -369,8 +369,8 @@ export const ToolUseDetails: FC<Props> = ({
           </span>
           <Tag
             color={CATEGORY_COLORS[category]}
-            className='m-0 shrink-0 px-1 py-0 text-[10px] leading-[14px]'
-            bordered={false}
+            className='m-0 shrink-0 px-1 py-0 text-[10px] leading-3.5'
+            variant='filled'
           >
             {server ?? name}
           </Tag>
@@ -383,7 +383,7 @@ export const ToolUseDetails: FC<Props> = ({
             <span className='shrink-0 text-[10px] text-[#6c7086]'>运行中…</span>
           )}
           {state === 'error' && (
-            <Tag color='error' className='m-0 shrink-0 text-[10px]' bordered={false}>
+            <Tag color='error' className='m-0 shrink-0 text-[10px]' variant='filled'>
               失败
             </Tag>
           )}

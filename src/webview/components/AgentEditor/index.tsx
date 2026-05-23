@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { FC } from 'react'
-import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex } from 'antd'
+import { Drawer, Form, Input, Switch, Select, AutoComplete, Button, Flex, Modal, App } from 'antd'
 import {
   PlusOutlined,
   MinusCircleOutlined,
@@ -55,6 +55,7 @@ const AutoAllowedToolsField: FC<{
 }
 
 export const AgentEditor: FC = () => {
+  const { modal } = App.useApp()
   const editingAgent = useFlowStore((s) => s.editingAgent)
   const flows = useFlowStore((s) => s.flows)
   const save = useFlowStore((s) => s.save)
@@ -75,6 +76,9 @@ export const AgentEditor: FC = () => {
   const [form] = Form.useForm()
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
 
+  // 首次切到 silent_task 时弹一次警告;Agent 本身已是静默模式则不再提示
+  const silentWarnedRef = useRef(false)
+
   const watchedValues = Form.useWatch([], form)
 
   useEffect(() => {
@@ -87,7 +91,7 @@ export const AgentEditor: FC = () => {
         agent_prompt: agent.agent_prompt,
         auto_allowed_tools: agent.auto_allowed_tools,
         must_confirm_tools: agent.must_confirm_tools,
-        work_mode: agent.work_mode ?? 'auto_complete',
+        work_mode: agent.work_mode ?? 'task',
         no_input: agent.no_input ?? false,
         allowed_read_values_keys: agent.allowed_read_values_keys ?? [],
         allowed_write_values_keys: agent.allowed_write_values_keys ?? [],
@@ -98,6 +102,7 @@ export const AgentEditor: FC = () => {
         })),
       }
       form.setFieldsValue(newFormValue)
+      silentWarnedRef.current = (agent.work_mode ?? 'task') === 'silent_task'
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewMode('preview')
@@ -142,6 +147,16 @@ export const AgentEditor: FC = () => {
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
+        onValuesChange={(changed: Partial<Agent>) => {
+          if (changed.work_mode === 'silent_task' && !silentWarnedRef.current) {
+            silentWarnedRef.current = true
+            modal.warning({
+              title: '谨慎使用静默模式',
+              content:
+                '静默模式下，用户无法参与多轮对话，无法中断对话，AskUserQuestion 和普通消息会被自动应答，直到 Agent 自行完成任务。请谨慎选择模型、effort，并确保输入和提示词的完整。',
+            })
+          }
+        }}
         onFinish={(val: Omit<Agent, 'id'>) => {
           save((draftFlows) => {
             const f = draftFlows.find((f) => f.id === editingAgent!.flowId)
@@ -243,15 +258,24 @@ export const AgentEditor: FC = () => {
               <Flex gap={16}>
                 <FormItem
                   name='work_mode'
-                  label='完成方式'
-                  tooltip='auto：直接调用 AgentComplete；confirm：需先用 AskUserQuestion 确认；never：禁止调用 AgentComplete'
+                  label='工作模式'
+                  tooltip='静默模式下，用户无法与AI进行多轮对话，无法中断会话'
                 >
                   <Select
-                    className='w-40'
+                    className='w-70'
                     options={[
-                      { value: 'auto_complete', label: '自动完成' },
-                      { value: 'require_confirm', label: '用户确认后完成' },
-                      { value: 'never_complete', label: '永不完成' },
+                      {
+                        value: 'task',
+                        label: '任务模式 · AI会执行任务并提交结果',
+                      },
+                      {
+                        value: 'chat',
+                        label: '对话模式 · 永不终止的多轮对话',
+                      },
+                      {
+                        value: 'silent_task',
+                        label: '静默模式 · 无交互执行任务',
+                      },
                     ]}
                   />
                 </FormItem>

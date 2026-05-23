@@ -2,6 +2,7 @@ import { match } from 'ts-pattern'
 import {
   type Agent,
   type AIMessageType,
+  type AskUserQuestionOutput,
   type FlowRunnerCommandEvents,
   type Flow,
   type FlowRunnerSignalEvents,
@@ -296,6 +297,9 @@ export class FlowRunner {
           toolName,
           input,
         })
+      },
+      onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => {
+        this.fire('flow.signal.answerQuestion', { runId, toolUseId, output })
       },
       onError: (err: Error) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)
