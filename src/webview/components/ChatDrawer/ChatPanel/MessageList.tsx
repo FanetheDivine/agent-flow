@@ -1,8 +1,9 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
-import { Virtuoso, type Components, type VirtuosoHandle } from 'react-virtuoso'
+import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
 import { Divider } from 'antd'
 import { Bubble } from '@ant-design/x'
 import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { useMemoizedFn } from 'ahooks'
 import { match } from 'ts-pattern'
 import type { AgentRun } from '@/webview/store/flow'
 import { toBubbleItems, type BubbleCtx } from './MessageBubble'
@@ -69,7 +70,7 @@ export const MessageList = forwardRef<MessageListRef, Props>(function MessageLis
     return [
       ...items,
       {
-        key: '__loading__' + items.length,
+        key: '__loading__',
         role: 'ai',
         content: null,
         loading: true,
@@ -77,10 +78,38 @@ export const MessageList = forwardRef<MessageListRef, Props>(function MessageLis
     ]
   }, [items, loading, lastRunCompleted])
 
-  const virtuosoRef = useRef<VirtuosoHandle>(null)
-  const scrollerElRef = useRef<HTMLElement | null>(null)
-  // 仅在首次挂载时定位到末尾;后续长度变化由 followOutput='auto' 接管
-  const initialIndexRef = useRef<number>(Math.max(0, finalItems.length - 1))
+  const scrollerElRef = useRef<HTMLDivElement | null>(null)
+  // 是否粘底:用户向上滚则置 false,滚回底部 32px 内置 true
+  const shouldScrollRef = useRef(true)
+
+  const virtualizer = useVirtualizer({
+    count: finalItems.length,
+    getScrollElement: () => scrollerElRef.current,
+    // estimateSize 尽量贴近真实平均高度。常规一行气泡 ~50px、tooluse ~30px,
+    estimateSize: () => 50,
+    // 视口上下预渲染窗口
+    overscan: 20,
+    getItemKey: (idx) => String(finalItems[idx].key),
+  })
+
+  const virtualItems = virtualizer.getVirtualItems()
+  const totalSize = virtualizer.getTotalSize()
+  /**
+   * 直接把 scrollTop 怼到 scrollHeight,与 DOM 真实高度对齐 ——
+   * 不走 virtualizer.scrollToIndex,避开「估算高度先算偏移、精确高度异步回填」
+   * 导致末尾消息越长越偏的老问题。
+   */
+  const scrollToEnd = useMemoizedFn((behavior: 'auto' | 'smooth' = 'auto') => {
+    const el = scrollerElRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior })
+  })
+
+  useLayoutEffect(() => {
+    if (!shouldScrollRef.current) return
+    scrollToEnd()
+    // 有AI消息/首次进入/渲染变化时滚动
+  }, [finalItems, totalSize, scrollToEnd])
 
   useImperativeHandle(
     ref,
@@ -89,51 +118,41 @@ export const MessageList = forwardRef<MessageListRef, Props>(function MessageLis
         return scrollerElRef.current
       },
       scrollToBottom(behavior: 'auto' | 'smooth' = 'auto') {
-        setTimeout(() => {
-          virtuosoRef.current?.scrollToIndex({
-            index: 'LAST',
-            align: 'end',
-            behavior,
-          })
-        })
+        shouldScrollRef.current = true
+        setTimeout(() => scrollToEnd(behavior))
       },
     }),
-    [],
+    [scrollToEnd],
   )
 
   return (
-    <Virtuoso
-      ref={virtuosoRef}
-      data={finalItems}
-      computeItemKey={(_idx, it) => String(it.key)}
-      followOutput='auto'
-      atBottomThreshold={30}
-      increaseViewportBy={400}
-      initialTopMostItemIndex={initialIndexRef.current}
-      scrollerRef={(el) => {
-        scrollerElRef.current = (el as HTMLElement | null) ?? null
+    <div
+      ref={scrollerElRef}
+      onScroll={(e) => {
+        const dom = e.target as HTMLDivElement
+        shouldScrollRef.current = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 32
       }}
-      // 只锁 X 溢出 — Virtuoso 的 viewport 是 absolute,scroller 的 padding 会被吃掉
-      // 所以左右 padding 改到 components.List(普通 div,padding 生效)
-      className='chat-bubble-compact min-h-0 flex-1 overflow-x-hidden'
-      components={virtuosoComponents}
-      itemContent={(_idx, item) => renderItem(item)}
-    />
+      className='chat-bubble-compact min-h-0 flex-1 overflow-x-hidden overflow-y-auto'
+    >
+      <div className='relative w-full max-w-full overflow-hidden' style={{ height: totalSize }}>
+        {virtualItems.map((vi) => {
+          const item = finalItems[vi.index]
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              className='absolute top-0 left-0 w-full px-3'
+              style={{ transform: `translateY(${vi.start}px)` }}
+            >
+              {renderItem(item)}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 })
-
-// padding-inline 给 List 层(普通定位 div),左右留白才会生效
-// padding-block 不要写在这里 — Virtuoso 会通过 inline style 设 paddingTop/paddingBottom
-// 占位被回收 item 的高度,我们的 class padding-block 会被 inline 覆盖
-const VirtuosoList: NonNullable<Components<BubbleItemType>['List']> = forwardRef(
-  function VirtuosoList({ style, ...rest }, ref) {
-    return <div {...rest} ref={ref} style={style} className='px-3' />
-  },
-)
-
-const virtuosoComponents: Components<BubbleItemType> = {
-  List: VirtuosoList,
-}
 
 function renderItem(item: Item) {
   // key 必须从 spread 中剥离 —— React 19 禁止把 key 通过 props 对象间接传入 JSX
