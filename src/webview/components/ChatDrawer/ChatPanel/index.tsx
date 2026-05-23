@@ -1,37 +1,25 @@
-import {
-  useCallback,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-  type FC,
-} from 'react'
-import { App, Button, Skeleton, Tag, Tooltip } from 'antd'
+import { useCallback, useImperativeHandle, useMemo, useRef, useState, type FC } from 'react'
+import { Button, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionOutput, PendingQuestion, PendingToolPermission } from '@/common'
+import type { AskUserQuestionOutput, PendingQuestion } from '@/common'
 import {
   formatTokenCount,
   formatTokenCost,
   getAgentPhase,
-  getAnsweredToolPermissions,
   getFlowPhase,
   getPendingQuestionsFor,
-  getPendingToolPermissionsFor,
   getRunPhase,
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
-import type { AnsweredInfo, BubbleCtx } from './MessageBubble'
 import { MessageList, type MessageListRef } from './MessageList'
 
-// 模块级常量 —— 用于 useMemo 在「无 pending」时返回稳定空数组,
-// 避免每次渲染产生新引用触发上层 effect / virtuoso 重测量
+// 模块级常量 —— useMemo 在「无 pending」时返回稳定空数组,避免新引用触发上层 effect。
 const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
-const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
 
 export type ChatPanelRef = {
   forceScrollToBottom: () => void
@@ -54,24 +42,6 @@ type Props = {
   ref?: React.Ref<ChatPanelRef>
 }
 
-/** 从 answeredQuestions 构建 toolUseId -> AnsweredInfo 映射 */
-function buildAnsweredMap(
-  answeredQuestions: Record<string, AskUserQuestionOutput>,
-): Map<string, AnsweredInfo> {
-  const answeredMap = new Map<string, AnsweredInfo>()
-  for (const [toolUseId, output] of Object.entries(answeredQuestions)) {
-    const values: Record<string, string[]> = {}
-    for (const [q, a] of Object.entries(output.answers ?? {})) {
-      values[q] = (a ?? '')
-        .split('\x1F')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-    answeredMap.set(toolUseId, { values })
-  }
-  return answeredMap
-}
-
 export const ChatPanel: FC<Props> = ({
   flowId,
   agentId,
@@ -82,9 +52,6 @@ export const ChatPanel: FC<Props> = ({
 }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
-  const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
-  const forkFlow = useFlowStore((s) => s.forkFlow)
-  const { modal } = App.useApp()
 
   const agentName = useFlowStore(
     (s) =>
@@ -102,11 +69,9 @@ export const ChatPanel: FC<Props> = ({
     return getAgentPhase(fs, agentId)
   })
   const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
-  // pendingQuestions / pendingToolPerms:
+  // pendingQuestions 仅给底部 AskUserQuestionCard 用;ctx / pendingToolPerms / answered* 已搬到 MessageList。
   // selector 必须返回稳定引用,否则 useSyncExternalStore 在 store 未变时仍因引用不同
   // 持续判定快照变化触发重渲染 → "Maximum update depth exceeded"。
-  // 直接取 fs(immer 保证 fs 在状态未变时引用稳定),在 useMemo 内做过滤;
-  // 过滤前后长度相同则透传原数组,空结果用模块级常量,保证不变时引用稳定。
   const fs = useFlowStore((s) => s.flowRunStates[flowId])
   const pendingQuestions = useMemo(() => {
     if (!fs) return EMPTY_PENDING_QUESTIONS
@@ -119,22 +84,8 @@ export const ChatPanel: FC<Props> = ({
     }
     return getPendingQuestionsFor(fs, agentId)
   }, [fs, runId, agentId])
-  const pendingToolPerms = useMemo(() => {
-    if (!fs) return EMPTY_PENDING_TOOL_PERMS
-    if (runId) {
-      const list = fs.pendingToolPermissions
-      const filtered = list.filter((p) => p.runId === runId)
-      if (filtered.length === list.length) return list
-      if (filtered.length === 0) return EMPTY_PENDING_TOOL_PERMS
-      return filtered
-    }
-    return getPendingToolPermissionsFor(fs, agentId)
-  }, [fs, runId, agentId])
-  const answeredToolPermissions = useFlowStore((s) =>
-    getAnsweredToolPermissions(s.flowRunStates[flowId]),
-  )
   const allRuns = useFlowStore((s) => s.flowRunStates[flowId]?.runs)
-  // runs:runId 视图 = 单条 run(找不到则空);agentId 视图 = 该 agent 全部 runs
+  // runs:仅本组件 token 统计 + Welcome / Skeleton 长度判断用;消息渲染由 MessageList 自己派生
   const runs = useMemo<AgentRun[]>(() => {
     if (!allRuns) return []
     if (runId) {
@@ -143,14 +94,13 @@ export const ChatPanel: FC<Props> = ({
     }
     return allRuns.filter((r) => r.agentId === agentId)
   }, [allRuns, agentId, runId])
-  const answeredQuestions = useFlowStore((s) => s.flowRunStates[flowId]?.answeredQuestions)
 
   // Token / cost 累计:tokenMode = 'flow' 跨 Flow 全部 runs;'view' 用当前视图选出的 runs。
   // modelUsage 与 total_cost_usd 都是 session 累计快照,因此每个 run 都只取「最后一条 result」,
   // 再跨 run 相加。tokens 含 4 字段 (input + output + cacheCreation + cacheRead),
   // 与 turn_end / agent_complete 口径一致。
   const tokenSourceRuns = tokenMode === 'view' ? runs : allRuns
-  const { totalTokens, totalCost, modelBreakdown } = useMemo(() => {
+  const { totalTokens, totalCost } = useMemo(() => {
     if (!tokenSourceRuns)
       return {
         totalTokens: 0,
@@ -205,7 +155,6 @@ export const ChatPanel: FC<Props> = ({
   // AskUserQuestionCard 容器高度,用户可上下拖动调整
   const [cardHeight, setCardHeight] = useState(240)
   const [dragging, setDragging] = useState(false)
-  const answeredMap = useMemo(() => buildAnsweredMap(answeredQuestions ?? {}), [answeredQuestions])
 
   // 合并所有 pending questions 的 questions 数组到一张卡片
   const mergedInput = useMemo(() => {
@@ -226,56 +175,10 @@ export const ChatPanel: FC<Props> = ({
   }, [pendingQuestions])
 
   const showCard = mergedInput.questions.length > 0
-  const onToolPermissionAllow = useCallback(
-    (toolUseId: string) => {
-      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
-      if (!p) return
-      answerToolPermission(flowId, p.runId, toolUseId, true)
-    },
-    [answerToolPermission, flowId, pendingToolPerms],
-  )
-  const onToolPermissionDeny = useCallback(
-    (toolUseId: string) => {
-      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
-      if (!p) return
-      answerToolPermission(flowId, p.runId, toolUseId, false)
-    },
-    [answerToolPermission, flowId, pendingToolPerms],
-  )
 
-  /**
-   * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示
-   * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
-   * target 已携带 runId,extension 端按 runId 单 loop 定位 run,无需再传 agentId。
-   */
-  const onForkRequest = useCallback(
-    (
-      target: { kind: 'message'; runId: string; messageUuid: string },
-      sessionCompleted: boolean,
-    ) => {
-      const doFork = () => forkFlow(flowId, target)
-      if (!sessionCompleted) {
-        doFork()
-        return
-      }
-      modal.confirm({
-        title: '从历史会话 fork',
-        content: '该会话已完成，shareValues 在 fork 后可能与原值不一致。是否继续？',
-        okText: 'fork',
-        cancelText: '取消',
-        onOk: doFork,
-      })
-    },
-    [forkFlow, flowId, modal],
-  )
-
-  // 消息列表自动滚动:Virtuoso 内部 followOutput='auto' 已实现「在底部时跟随、用户上滑后停留」,
-  // ChatPanel 只需在主动场景(回答 question 后、外部 forceScrollToBottom)强制贴底。
-  // MessageList.scrollToBottom 内部用双 RAF 等 React commit + Virtuoso 测量后再滚,无需在外面 setTimeout。
   const messageListRef = useRef<MessageListRef>(null)
-
   const scrollToBottom = useCallback(() => {
-    messageListRef.current?.scrollToBottom('auto')
+    messageListRef.current?.scrollToBottom()
   }, [])
 
   const onActiveSubmit = useCallback(
@@ -304,41 +207,6 @@ export const ChatPanel: FC<Props> = ({
       scrollToBottom()
     },
     [answerQuestion, flowId, pendingQuestions, scrollToBottom],
-  )
-
-  const pendingToolUseId = showCard ? mergedInput.toolUseIds[0] : undefined
-  const pendingToolPermissionToolUseIds = useMemo(
-    () =>
-      pendingToolPerms.length > 0 ? new Set(pendingToolPerms.map((p) => p.toolUseId)) : undefined,
-    [pendingToolPerms],
-  )
-  const pendingToolUseIds = useMemo(
-    () => (mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined),
-    [mergedInput.toolUseIds],
-  )
-  const ctx = useMemo<BubbleCtx>(
-    () => ({
-      pendingToolUseId,
-      pendingToolUseIds,
-      answeredMap,
-      onActiveSubmit,
-      pendingToolPermissionToolUseIds,
-      answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      onFork: onForkRequest,
-    }),
-    [
-      pendingToolUseId,
-      pendingToolUseIds,
-      answeredMap,
-      onActiveSubmit,
-      pendingToolPermissionToolUseIds,
-      answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      onForkRequest,
-    ],
   )
 
   useImperativeHandle(
@@ -441,8 +309,9 @@ export const ChatPanel: FC<Props> = ({
         .otherwise(() => (
           <MessageList
             ref={messageListRef}
-            runs={runs}
-            ctx={ctx}
+            flowId={flowId}
+            agentId={agentId}
+            runId={runId}
             loading={phase === 'running' || phase === 'starting'}
           />
         ))}
