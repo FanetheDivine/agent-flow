@@ -59,13 +59,23 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   // 如果当前 flow 是 manual 模式且非 idle,点 AI icon 弹通知(模式互斥)。
   const hostFlowPhase = getFlowPhase(runState)
   const hostRunningNonIdle =
-    runState?.mode === 'host' && hostFlowPhase !== 'idle' && hostFlowPhase !== 'completed'
+    runState?.mode === 'host' &&
+    hostFlowPhase !== 'idle' &&
+    hostFlowPhase !== 'completed' &&
+    hostFlowPhase !== 'stopped' &&
+    hostFlowPhase !== 'error'
   const onClickHostIcon = (e: React.MouseEvent) => {
     e.stopPropagation()
     setActiveFlowId(id)
     setFlowListCollapsed(false)
     // 互斥提示:flow 在 manual 模式运行中,不允许启动 host
-    if (runState?.mode === 'manual' && hostFlowPhase !== 'idle' && hostFlowPhase !== 'completed') {
+    if (
+      runState?.mode === 'manual' &&
+      hostFlowPhase !== 'idle' &&
+      hostFlowPhase !== 'completed' &&
+      hostFlowPhase !== 'stopped' &&
+      hostFlowPhase !== 'error'
+    ) {
       notification.warning({
         message: '工作流正在以普通模式运行,无法启动 AI 托管模式',
         description: '请等待当前运行结束或先停止当前运行',
