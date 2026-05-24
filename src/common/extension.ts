@@ -14,6 +14,11 @@ export type AgentMcpServerOptions = {
     outputName?: string
     values?: Record<string, string>
   }) => void
+  /**
+   * silent_task 模式专用:模型确定无法完成任务时调用 `terminateTask` 工具,
+   * 由此回调上抛 reason,executor 据此走 error 路径终止本 run。
+   */
+  onTerminate?: (reason: string) => void
 }
 
 /** host run 调度子 Agent 的入参 */
@@ -63,12 +68,13 @@ function withErrorBoundary<TArgs>(
  *
  * 内置工具：
  * - `AgentComplete` — 完成任务并选择输出分支（可选写入 values）
+ * - `terminateTask` — silent_task 专用,极端情况(确定无法完成)时中止任务
  * - `validateFlow` — 校验工作流定义是否合法
  * - `getFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
  */
-export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions) {
+export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
-  if (agent.work_mode !== 'never_complete') {
+  if (agent.work_mode !== 'chat') {
     const outputs = agent.outputs ?? []
     const outputNames = outputs.map((o) => o.output_name)
     const outputDescs = outputs
@@ -97,12 +103,7 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
     // 让 AI 在 systemPrompt 里读过一遍后，工具描述这里再次强化要点。
     const callSemantics = [
       '## 调用约束',
-      '- 调用此工具会**立即终止本 Agent**，不可撤销；只在「任务描述」的结束条件已经达成、且与用户对齐之后调用',
-      ...(agent.work_mode === 'require_confirm'
-        ? [
-            '- **必须**先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用本工具',
-          ]
-        : []),
+      '调用此工具会**终止会话**，不可撤销；只在「任务描述」的结束条件已经达成、且与用户对齐之后调用',
     ].join('\n')
 
     const valuesNotes =
@@ -219,6 +220,29 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
           }),
         )
     tools.push(agentCompleteTool)
+  }
+  // silent_task 专用:极端情况(确定无法完成)时中止任务,走 error 路径终止本 run。
+  if (agent.work_mode === 'silent_task') {
+    const terminateTaskTool = tool(
+      'terminateTask',
+      [
+        '当确定**无法完成**「任务描述」时调用此工具中止任务。',
+        '## 调用约束',
+        '- 调用此工具会**强制终止本次会话**,不可撤销;只在已经穷尽所有可行手段、确认任务不可达成时调用',
+        '- 必须在 reason 中说明无法完成的具体原因(缺失关键信息 / 工具不可用 / 环境异常等)',
+        '- 优先尝试 AgentComplete 提交部分结果;只有连部分结果都给不出时才用本工具',
+      ].join('\n'),
+      {
+        reason: z.string().describe('无法完成任务的具体原因,简洁明确'),
+      },
+      withErrorBoundary('terminateTask', async ({ reason }) => {
+        onTerminate?.(reason)
+        return {
+          content: [{ type: 'text', text: `任务已中止:${reason}` }],
+        }
+      }),
+    )
+    tools.push(terminateTaskTool)
   }
   const validateFlowTool = tool(
     'validateFlow',

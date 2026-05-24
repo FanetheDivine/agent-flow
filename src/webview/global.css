@@ -38,8 +38,44 @@
 }
 
 @layer components {
+  /* 滚动条:6px 白色 50% 透明 thumb,无上下箭头,gutter 常驻防止内容左右晃动 */
+  .chat-bubble-compact {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
+  }
+
+  .chat-bubble-compact::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .chat-bubble-compact::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .chat-bubble-compact::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 9999px;
+  }
+
+  .chat-bubble-compact::-webkit-scrollbar-button {
+    display: none;
+  }
+
   .chat-bubble-compact .ant-bubble {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
     margin-block: 2px;
+  }
+
+  /* 替补原 .ant-bubble-list 提供的 ai / user 留白 —— 改用 Virtuoso 后自己写 */
+  .chat-bubble-compact .ant-bubble-start:not(.ant-bubble-divider):not(.ant-bubble-system) {
+    padding-inline-end: 15%;
+  }
+
+  .chat-bubble-compact .ant-bubble-end:not(.ant-bubble-divider):not(.ant-bubble-system) {
+    padding-inline-start: 15%;
   }
 
   .chat-bubble-compact .ant-bubble-content {

@@ -87,21 +87,26 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
             }}
           />
 
-          <span
-            className='cursor-pointer text-xs text-[#a6adc8] transition-colors hover:text-[#6366f1]'
-            onClick={() => {
-              const { chatDrawer, openChatDrawer, closeChatDrawer } = useFlowStore.getState()
-              if (chatDrawer?.flowId === flowId && chatDrawer?.agentId === agentId) {
-                closeChatDrawer()
-              } else {
-                openChatDrawer({ flowId, agentId })
-              }
-            }}
-          >
-            <Badge dot={isAgentActive} offset={[-2, 2]}>
-              <MessageOutlined className='text-xs text-[#a6adc8]' />
-            </Badge>
-          </span>
+          <Tooltip>
+            <span
+              className={cn(
+                'text-xs text-[#a6adc8] transition-colors',
+                'cursor-pointer hover:text-[#6366f1]',
+              )}
+              onClick={() => {
+                const { chatDrawer, openChatDrawer, closeChatDrawer } = useFlowStore.getState()
+                if (chatDrawer?.flowId === flowId && chatDrawer?.agentId === agentId) {
+                  closeChatDrawer()
+                } else {
+                  openChatDrawer({ flowId, agentId })
+                }
+              }}
+            >
+              <Badge dot={isAgentActive} offset={[-2, 2]}>
+                <MessageOutlined className='text-xs text-[#a6adc8]' />
+              </Badge>
+            </span>
+          </Tooltip>
           {agent?.no_input && (
             <Tooltip title='直接启动'>
               <span

@@ -195,7 +195,7 @@ export function reactFlowToFlow(flow: Flow, nodes: AgentNode[], edges: Edge[]): 
         agent_name: node.data.agentName,
         model: '',
         agent_prompt: '',
-        work_mode: 'auto_complete' as const,
+        work_mode: 'task' as const,
       }),
       agent_name: node.data.agentName,
       outputs: originalAgent?.outputs?.map((o) => ({ ...o, next_agent: undefined })) ?? [],

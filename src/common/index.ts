@@ -43,9 +43,9 @@ export const AgentSchema = z.object({
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。特殊值 "MCP" 匹配所有 mcp__* 工具',
     ),
   work_mode: z
-    .enum(['auto_complete', 'require_confirm', 'never_complete'])
+    .enum(['task', 'chat', 'silent_task'])
     .describe(
-      '工作方式：auto_complete（自动完成）任务达成后直接调用 AgentComplete；require_confirm（用户确认后完成）调用 AgentComplete 前必须先用 AskUserQuestion 确认；never_complete（永不完成）禁止调用 AgentComplete，agent_prompt 视作长期对话规则而非一次性任务',
+      '工作方式：task-任务达成后调用 AgentComplete 提交结果；chat-与用户的持续长期对话；silent_task-无人值守自动循环，必须通过 AgentComplete 终止',
     ),
   no_input: z
     .boolean()
@@ -268,10 +268,12 @@ export function matchTool(toolName: string, patterns: readonly string[]): boolea
  * 构建 Agent 系统提示词
  *
  * 根据 `work_mode` 选取不同的提示词骨架：
- * - `auto_complete` / `require_confirm`：把 `agent_prompt` 视作**任务描述**，
- *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete（自动 / 用户确认后）
- * - `never_complete`：把 `agent_prompt` 视作**长期对话规则**，
+ * - `task`：把 `agent_prompt` 视作**任务描述**，
+ *   要求 Agent 围绕该任务推进，并在产物达成后调用 AgentComplete
+ * - `chat`：把 `agent_prompt` 视作**长期对话规则**，
  *   会话不会结束、禁止调用 AgentComplete，用户消息就是新的对话输入
+ * - `silent_task`：无人值守自动循环，AskUserQuestion 会被自动应答，
+ *   每轮 result 后由系统自动以「继续」续轮，必须通过 AgentComplete 终止
  */
 export function buildAgentSystemPrompt(
   agent: Pick<
@@ -295,10 +297,33 @@ export function buildAgentSystemPrompt(
   } = agent
 
   const lines: string[] = [
-    '始终使用**中文**进行思考和回复。',
-    '信息不足时，**禁止**凭空推测，应当尝试读取文件、执行命令行或使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
+    '中文思考与回复，简洁输出，直接给代码或结果，不解释推导过程。',
+    '理解用户真实需求，精确改动相关代码。',
+    '**禁止**主动优化、重构或任何无关改动，严格遵循代码库既有规范与风格。',
+    '**禁止**道歉、表明身份、免责声明等与任务无关的内容。',
+    '改动代码前**必须**先阅读所有调用方，理解代码含义与影响范围后再动手。',
   ]
-
+  match(agent.work_mode)
+    .with('task', () => {
+      lines.push(
+        '**禁止**凭空推测，使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
+        '遇到冲突、歧义或无法满足的需求**必须**明确暴露：通过 AskUserQuestion 询问用户，或写入 AgentComplete 的 `content`，**禁止**静默忽略或绕开。',
+      )
+    })
+    .with('chat', () => {
+      lines.push(
+        '**禁止**凭空推测，使用 Tool 获取有效信息，或使用 AskUserQuestion 询问用户。',
+        '遇到冲突、歧义或无法满足的需求**必须**明确告知用户，**禁止**静默忽略或绕开。',
+      )
+    })
+    .with('silent_task', () => {
+      lines.push(
+        '**禁止**凭空推测，必须通过 Tool 获取有效信息。',
+        '**自行决策**，避免使用 AskUserQuestion，不询问用户意见。',
+        '决策中遇到的冲突、歧义、风险或不确定项**必须**完整写入 AgentComplete 的 `content`，**禁止**静默忽略。',
+      )
+    })
+    .exhaustive()
   // Flow 管控数据（可选，仅注入被授权读取的 key） 空值传入null
   if (allowed_read_values_keys.length > 0) {
     const visibleValues: Record<string, string | null> = {}
@@ -321,8 +346,8 @@ export function buildAgentSystemPrompt(
     }
   }
 
-  // 可写数据：仅在「可完成」工作模式下出现（never_complete 不能调 AgentComplete）
-  if (allowed_write_values_keys.length > 0 && work_mode !== 'never_complete') {
+  // 可写数据：chat 不能写（不调 AgentComplete）；task / silent_task 都通过 AgentComplete 的 values 写入
+  if (allowed_write_values_keys.length > 0 && work_mode !== 'chat') {
     lines.push(
       '# 可写数据',
       '当用户要求"记录"、"保存"或"写入"以下任一 key 的值时，**必须**通过 AgentComplete 工具的 `values` 参数输出，仅在 `content` 里描述不算写入。',
@@ -330,52 +355,47 @@ export function buildAgentSystemPrompt(
       '## 写入说明：',
       '- 仅可写入上述列出的 key',
       '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
-      '- `content` 是本次任务的结果；`values` 用于按 key 记录用户要求保存的值',
+      '- `content` 是本次任务的结果文本；`values` 用于按 key 记录用户要求保存的值',
     )
   }
 
-  // 对话规则：长期对话规则 / 围绕任务描述完成任务（含完成任务、输出分支）
+  // 对话规则：长期对话 / 围绕任务描述完成任务 / 无人值守循环执行
   if (agent_prompt) {
     match(work_mode)
-      .with('never_complete', () => {
+      .with('chat', () => {
         lines.push('# 对话规则', agent_prompt)
       })
-      .with(P.union('auto_complete', 'require_confirm'), (mode) => {
+      .with(P.union('silent_task', 'task'), (mode) => {
+        lines.push('# 对话规则', '下方「任务描述」是本次会话的**最终目标**，全程固定不变。')
+        if (mode === 'task') {
+          lines.push(
+            '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
+          )
+        }
+        if (mode === 'silent_task') {
+          lines.push('你需要围绕该目标，充分利用自身能力推进任务，自行决策，避免询问用户。')
+        }
         lines.push(
-          '# 对话规则',
-          '下方「任务描述」是本次对话的**最终目标**，在整个对话过程中固定不变。',
-          '你需要围绕该目标与用户进行多轮对话：根据用户输入主动推进、必要时使用 AskUserQuestion 向用户收集信息、读取文件或调用工具补全上下文，直到达成结束条件。',
           '## 任务描述',
           agent_prompt,
           '## 完成任务',
-        )
-        match(mode)
-          .with('auto_complete', () =>
-            lines.push(
-              '如果「任务描述」规定的结束条件已经达成、且与用户对齐之后，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-              '直接调用 AgentComplete，无需向用户额外确认。',
-            ),
-          )
-          .with('require_confirm', () =>
-            lines.push(
-              '如果「任务描述」规定的结束条件已经达成时，调用 AgentControllerMcp 的 AgentComplete 工具提交结果，并选择一个输出分支（如有）。',
-              '**重要**：调用 AgentComplete 前必须先用 AskUserQuestion 让用户确认结果与输出分支；用户未确认前**禁止**调用 AgentComplete。',
-            ),
-          )
-          .exhaustive()
-
-        lines.push(
+          '一旦达成「任务描述」的结束条件，**立即**调用 AgentControllerMcp 的 AgentComplete 工具提交结果并选择输出分支，否则系统会持续以「继续」让你循环。',
           '## 输出分支',
-          match(outputs.length)
-            .with(0, () => '此任务没有输出分支。')
-            .otherwise(() =>
-              outputs
+          outputs.length === 0
+            ? '此任务没有输出分支。'
+            : outputs
                 .map((o) => `  - "${o.output_name}"${o.output_desc ? `: ${o.output_desc}` : ''}`)
                 .join('\n'),
-            ),
         )
       })
       .exhaustive()
+  }
+
+  if (agent.work_mode === 'silent_task') {
+    lines.push(
+      '# **停止会话**',
+      '**确定无法完成任务时**，调用 AgentControllerMcp 的 `terminateTask` 工具中止任务。例如缺失任务目标、缺失关键信息且无工具可获取、环境异常等极端情况。',
+    )
   }
   return lines.join('\n')
 }

@@ -4,6 +4,7 @@ import type {
   ExtensionFlowCommandMessage,
   ExtensionFlowSignalMessage,
   ExtensionToWebviewMessage,
+  UserMessageType,
 } from './event'
 import type { AskUserQuestionInput, AskUserQuestionOutput, Agent, Flow } from './index'
 
@@ -334,6 +335,13 @@ export function updateFlowRunState(
   const pushEffect = (opts: Omit<MessageEffect, 'flowName' | 'agentName'>) => {
     const flow = findFlow(opts.flowId)
     const agent = findAgent(flow, opts.agentId)
+    // 静默模式的agent减少通知
+    if (
+      agent?.work_mode === 'silent_task' &&
+      opts.reason !== 'agent-error' &&
+      opts.reason !== 'flow-completed'
+    )
+      return
     effects.push({
       ...opts,
       flowName: flow?.name ?? '',
@@ -456,12 +464,30 @@ export function updateFlowRunState(
           : undefined
         const nextAgent = output ? flow?.agents?.find((a) => a.id === output.next_agent) : undefined
         if (nextAgent && data.output?.newRunId) {
-          // 追加新 AgentRun(由 extension 端生成的 newRunId)
+          // 追加新 AgentRun(由 extension 端生成的 newRunId)。
+          // 把 AgentComplete 的 content 作为下一个 Agent 的首条用户消息回显 ——
+          // FlowRunner.doOnAgentComplete 已经把同一份 content 喂给了 SDK prompt,
+          // 这里只是让 UI 与运行时输入对齐(no_input 的 next agent 用 '开始',与
+          // FlowRunner 的 nextInitMessage 同源)。
+          const nextInitMessage: UserMessageType = {
+            type: 'user',
+            message: { role: 'user', content: nextAgent.no_input ? '开始' : data.content },
+            parent_tool_use_id: null,
+          }
           draft.runs.push({
             runId: data.output.newRunId,
             agentId: nextAgent.id,
             sessionId: undefined,
-            messages: [],
+            messages: [
+              {
+                type: 'flow.signal.aiMessage',
+                data: {
+                  flowId,
+                  runId: data.output.newRunId,
+                  message: nextInitMessage,
+                },
+              },
+            ],
             completed: false,
           })
         } else {
@@ -513,6 +539,13 @@ export function updateFlowRunState(
             r.forceStopped = true
           }
         }
+      })
+      .with({ type: 'flow.signal.answerQuestion' }, ({ data }) => {
+        // silent_task 自动应答路径：与 command.answerQuestion 同语义
+        draft.answeredQuestions[data.toolUseId] = data.output
+        draft.pendingQuestions = draft.pendingQuestions.filter(
+          (q) => q.toolUseId !== data.toolUseId,
+        )
       })
       .with({ type: 'flow.signal.agentError' }, () => {
         clearPendingsForRun(run.runId)

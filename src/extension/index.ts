@@ -14,7 +14,7 @@ import type {
 import { FlowRunStateManager } from './FlowRunStateManager'
 import { FlowRunnerManager } from './FlowRunnerManager'
 import { PersistedDataController } from './PersistedDataController'
-import { initLogger, log, logError } from './logger'
+import { initLogger, log, logError, summarizeLogPayload } from './logger'
 
 /** 扩展名 → VSCode languageId（仅覆盖常见语言，未命中时保持 plaintext） */
 const LANG_BY_EXT: Record<string, string> = {
@@ -91,7 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (msg.type.startsWith('flow.signal.')) {
       flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
     }
-    log('[Extension → Webview]', msg.type, msg.data)
+    log('[Extension → Webview]', msg.type, summarizeLogPayload(msg.type, msg.data))
     currentPanel?.webview.postMessage(msg)
   }
 
@@ -109,7 +109,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (msg.type.startsWith('flow.signal.')) {
         flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
       }
-      log('[Extension → Webview]', msg.type, msg.data)
+      log('[Extension → Webview]', msg.type, summarizeLogPayload(msg.type, msg.data))
       currentPanel.webview.postMessage(msg)
       return
     }
@@ -125,7 +125,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (m.type.startsWith('flow.signal.')) {
         flowRunStateManager.applySignal(m as ExtensionFlowSignalMessage)
       }
-      log('[Extension → Webview]', m.type, m.data)
+      log('[Extension → Webview]', m.type, summarizeLogPayload(m.type, m.data))
       currentPanel?.webview.postMessage(m)
     }
   }
@@ -355,7 +355,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 初始化 panel 可见性
 
     panel.webview.onDidReceiveMessage(async (e: ExtensionFromWebviewMessage) => {
-      log('[Webview → Extension]', e.type, e.data)
+      log('[Webview → Extension]', e.type, summarizeLogPayload(e.type, e.data))
       match(e)
         .with({ type: 'load' }, async () => {
           currentFlows = await flowStore.load()

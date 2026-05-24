@@ -37,6 +37,7 @@ function buildOutput(
   return { questions, answers }
 }
 
+/** 发送按钮可点：多选允许零选项（用户主动放弃），单选必须有值，选了 Other 必须填字 */
 function isQuestionAnswered(
   q: AskUserQuestionItem,
   idx: number,
@@ -45,6 +46,21 @@ function isQuestionAnswered(
 ): boolean {
   const sel = sels[idx] ?? []
   if (q.multiSelect && sel.length === 0) return true
+  if (sel.length === 0) return false
+  if (sel.includes(OTHER_LABEL)) {
+    const o = others[idx]
+    if (!o || !o.text.trim()) return false
+  }
+  return true
+}
+
+/** 自动导航判定：必须显式交互过——多选空数组也视为未答，避免自动跳过用户没看过的题 */
+function isQuestionExplicitlyAnswered(
+  idx: number,
+  sels: Selections,
+  others: Record<number, OtherState>,
+): boolean {
+  const sel = sels[idx] ?? []
   if (sel.length === 0) return false
   if (sel.includes(OTHER_LABEL)) {
     const o = others[idx]
@@ -88,37 +104,25 @@ export const AskUserQuestionCard: FC<Props> = ({
     return questions.every((q, i) => isQuestionAnswered(q, i, selections, otherStates))
   }, [questions, selections, otherStates])
 
-  /** 导航逻辑：有下一题→滚到下一题；无下一题→滚到首个未答题；全部已答→提交 */
+  /** 导航逻辑：找首个未显式回答的题（含当前题之前的）→ 滚过去；全部已答 → 提交。
+   *  多选空数组视为未答，因此自动导航不会跳过没交互的多选题；用户须显式点"发送"。 */
   const navigate = useMemoizedFn(
-    (currentIdx: number, sels?: Selections, others?: Record<number, OtherState>) => {
+    (_currentIdx: number, sels?: Selections, others?: Record<number, OtherState>) => {
       const curSels = sels ?? selections
       const curOthers = others ?? otherStates
-      const nextIdx = currentIdx + 1
-      if (nextIdx < questions.length) {
-        const nextEl = questionRefs.current.get(nextIdx)
-        if (nextEl) {
-          // 延迟一帧确保 DOM 已更新后再滚动
-          requestAnimationFrame(() => {
-            nextEl.scrollIntoView({ block: 'start', behavior: 'smooth' })
-          })
-        }
-        return
-      }
-      // 无下一题，找首个未答题
       const firstUnanswered = questions.findIndex(
-        (q, i) => !isQuestionAnswered(q, i, curSels, curOthers),
+        (_q, i) => !isQuestionExplicitlyAnswered(i, curSels, curOthers),
       )
-      if (firstUnanswered !== -1) {
-        const el = questionRefs.current.get(firstUnanswered)
-        if (el) {
-          requestAnimationFrame(() => {
-            el.scrollIntoView({ block: 'start', behavior: 'smooth' })
-          })
-        }
+      if (firstUnanswered === -1) {
+        stableOnSubmit(buildOutput(questions, curSels, curOthers))
         return
       }
-      // 全部已答 → 提交
-      stableOnSubmit(buildOutput(questions, curSels, curOthers))
+      const el = questionRefs.current.get(firstUnanswered)
+      if (el) {
+        requestAnimationFrame(() => {
+          el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        })
+      }
     },
   )
 

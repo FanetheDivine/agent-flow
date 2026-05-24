@@ -2,6 +2,7 @@ import { match } from 'ts-pattern'
 import {
   type Agent,
   type AIMessageType,
+  type AskUserQuestionOutput,
   type FlowRunnerCommandEvents,
   type Flow,
   type FlowRunnerSignalEvents,
@@ -356,15 +357,14 @@ export class FlowRunner {
   /**
    * 构造一个供 ClaudeExecutor 使用的"假 Agent"代表 host —— ClaudeExecutor 内部依赖
    * agent.model / agent.effort / agent.work_mode / agent.auto_allowed_tools 等字段。
-   * host 视为 never_complete + auto_allowed_tools=true(host AI 调度子 Agent 时
-   * runAgent / 其它工具均自动放行)。
+   * host 走 'chat' work_mode(不挂 AgentComplete,host AI 调度子 Agent 时各种工具自动放行)。
    */
   private makeHostFakeAgent(): Agent {
     return {
       id: HOST_AGENT_ID,
       model: this.flow.host_model || 'sonnet',
       effort: this.flow.host_effort,
-      work_mode: 'never_complete',
+      work_mode: 'chat',
       agent_name: 'AI 托管',
       auto_allowed_tools: true,
     }
@@ -574,6 +574,9 @@ export class FlowRunner {
           toolName,
           input,
         })
+      },
+      onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => {
+        this.fire('flow.signal.answerQuestion', { runId, toolUseId, output })
       },
       onError: (err: Error) => {
         logError(`[FlowRunner] agent ${agentId} error:`, err)

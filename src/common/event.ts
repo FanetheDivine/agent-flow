@@ -140,6 +140,17 @@ type FlowSignalPayload = {
     subAgentId: string
     parentToolUseId: string
   }
+  /**
+   * silent_task 模式下 AskUserQuestion 由 ClaudeExecutor 自动应答时上抛的信号。
+   * 载荷与 `flow.command.answerQuestion` 一致；reducer 处理逻辑也一致
+   * （写入 answeredQuestions、移出 pendingQuestions），只是入口换成 signal —— 让
+   * webview 在无人值守模式下也能看到自动答案，与人工回答展示路径统一。
+   */
+  answerQuestion: {
+    runId: string
+    toolUseId: string
+    output: AskUserQuestionOutput
+  }
   /** Agent被中断了 */
   agentInterrupted: { runId: string }
   /** agent错误 */
