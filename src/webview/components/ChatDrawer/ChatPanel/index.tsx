@@ -345,6 +345,10 @@ export const ChatPanel: FC<Props> = ({
     [allRuns, flowId],
   )
 
+  // host 子 run 禁用 fork:fork 走 handleFork 时按 viewRun.agentId 起 spawnForFork,
+  // 子 run 的 fork 只会 spawn 子 run executor,新 Flow 的 host run 没 executor —— 用户在
+  // 新 Flow 子 run 视图继续对话 → AgentComplete 也无 host run 接收,死循环。
+  const isSubRun = !!runs[0]?.parentToolUseId
   const ctx = useMemo<BubbleCtx>(
     () => ({
       pendingToolUseId,
@@ -355,7 +359,7 @@ export const ChatPanel: FC<Props> = ({
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
-      onFork: onForkRequest,
+      onFork: isSubRun ? undefined : onForkRequest,
       toolUseIdToSubRunId,
       onSubRunClick,
     }),
@@ -369,6 +373,7 @@ export const ChatPanel: FC<Props> = ({
       onToolPermissionAllow,
       onToolPermissionDeny,
       onForkRequest,
+      isSubRun,
       toolUseIdToSubRunId,
       onSubRunClick,
     ],
