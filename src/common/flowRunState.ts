@@ -455,7 +455,7 @@ export function updateFlowRunState(
               ?.outputs?.find((o) => o.output_name === data.output!.name)
           : undefined
         const nextAgent = output ? flow?.agents?.find((a) => a.id === output.next_agent) : undefined
-        if (nextAgent && data.output) {
+        if (nextAgent && data.output?.newRunId) {
           // 追加新 AgentRun(由 extension 端生成的 newRunId)
           draft.runs.push({
             runId: data.output.newRunId,

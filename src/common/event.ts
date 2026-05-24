@@ -109,12 +109,13 @@ type FlowSignalPayload = {
   /**
    * Agent 执行完成,选择了输出分支。
    * - runId: 当前完成的 Agent run 的 runId
-   * - output.newRunId: 切到下一个 agent 时,extension 端生成的新 runId(后续交互的主键)
+   * - output.newRunId: 切到下一个 agent 时,extension 端生成的新 runId(后续交互的主键)。
+   *   manual 模式 Flow 末端(无 next_agent)与 host 模式子 run 完成 都不需要追加新 run,此字段缺省。
    */
   agentComplete: {
     runId: string
     content: string
-    output?: { name: string; newRunId: string }
+    output?: { name: string; newRunId?: string }
     /** Agent 通过 AgentComplete 写入的增量 values，由 reducer 合并到 FlowRunState.shareValues */
     values?: Record<string, string>
     /**

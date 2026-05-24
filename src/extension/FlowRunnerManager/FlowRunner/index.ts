@@ -622,8 +622,8 @@ export class FlowRunner {
       content: result.content,
       values: result.values,
       result: result.resultMessage,
-      // host 模式下子 run 不携带 output(reducer 不再 push 新 run);保留 outputName 用于 UI 展示
-      ...(result.outputName ? { output: { name: result.outputName, newRunId: '' } } : {}),
+      // host 模式下子 run 不携带 newRunId(reducer 不再 push 新 run);保留 outputName 用于 UI 展示
+      ...(result.outputName ? { output: { name: result.outputName } } : {}),
     })
   }
 
