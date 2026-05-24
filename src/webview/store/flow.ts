@@ -16,6 +16,7 @@ import {
   type UserMessageType,
   type AskUserQuestionOutput,
   type ExtensionToWebviewMessage,
+  HOST_AGENT_ID,
   updateFlowRunState,
   agentChatInputState,
   flowCanBeKilled,
@@ -39,6 +40,11 @@ type StoreState = {
   editingAgent?: { flowId: string; agentId: string }
   /** 当前正在编辑的 flow（用于打开 FlowEditor Drawer） */
   editingFlowId?: string
+  /**
+   * 打开 FlowEditor 时附带的 UI 引导:focus 让目标字段滚动并高亮(如缺 host_model),
+   * message 由调用方负责弹 antd notification(store 不直接持有 notification)。
+   */
+  flowEditorFocus?: { flowId: string; focus?: 'host_model' }
 }
 
 export type ChatDrawerState = {
@@ -60,8 +66,13 @@ type FlowStoreType = StoreState & {
   init: (app: AppApi) => () => void
   setActiveFlowId: (id: string) => void
   setFlowListCollapsed: (collapsed: boolean) => void
-  /** 启动 Flow 运行。 */
-  runFlow: (flowId: string, agentId: string, initMessage: UserMessageType) => void
+  /** 启动 Flow 运行;mode 默认 'manual',host 模式下 agentId 必须为 HOST_AGENT_ID */
+  runFlow: (
+    flowId: string,
+    agentId: string,
+    initMessage: UserMessageType,
+    mode?: 'manual' | 'host',
+  ) => void
   save: (updateFn: (val: Flow[]) => void) => void
   /**
    * 同会话追问 —— 调用方必须在 chatDrawer 上下文里挑出目标 run 的 runId 后传入,
@@ -99,6 +110,11 @@ type FlowStoreType = StoreState & {
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
   setEditingFlowId: (id?: string) => void
+  /**
+   * 打开 FlowEditor。focus 提示前端聚焦 host_model 字段;message 由调用方
+   * 通过 antd notification 直接弹(store 不持有 notification 实例)。
+   */
+  openFlowEditor: (flowId: string, opts?: { focus?: 'host_model' }) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
 }
 
@@ -277,7 +293,9 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           // fork 出的 run 永远是 newRunState.runs 末位 —— 用 runId 校验防御
           const lastRun = newRunState.runs.at(-1)
           const agentId = lastRun?.runId === runId ? lastRun.agentId : undefined
-          const nextAgent = agentId ? newFlow.agents?.find((a) => a.id === agentId) : undefined
+          const isHostAgent = agentId === HOST_AGENT_ID
+          const nextAgent =
+            agentId && !isHostAgent ? newFlow.agents?.find((a) => a.id === agentId) : undefined
           immerSet((draft) => {
             draft.flows.push(newFlow)
             draft.flowRunStates[newFlowId] = newRunState
@@ -286,7 +304,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
               draft.chatDrawer = {
                 flowId: newFlowId,
                 agentId,
-                agentName: nextAgent?.agent_name ?? '',
+                agentName: isHostAgent ? 'AI 托管' : (nextAgent?.agent_name ?? ''),
+                runId,
               }
             }
             draft.editingAgent = undefined
@@ -315,7 +334,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
           // agentComplete 时:如果 ChatPanel 正打开的是已完成的 agent(agentId 视图),切到下一个 agent。
           // runId 视图(chatDrawer.runId 存在)是用户主动锁定的某条 run,不做跟随。
-          if (msg.type === 'flow.signal.agentComplete') {
+          // host 模式下子 run agentComplete 不应让 ChatPanel 切走 host run / 用户当前看的子 run。
+          if (msg.type === 'flow.signal.agentComplete' && state.mode !== 'host') {
             const newLastRun = state.runs[state.runs.length - 1]
             if (
               chatDrawer?.flowId === flowId &&
@@ -342,18 +362,19 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       postMessageToExtension({ type: 'load', data: undefined })
       return cleanup
     },
-    runFlow: (flowId, agentId, initMessage) => {
+    runFlow: (flowId, agentId, initMessage, mode = 'manual') => {
       const { flows, flowRunStates } = get()
       const flow = flows.find((f) => f.id === flowId)
       if (!flow) return
       const agent = flow.agents?.find((a) => a.id === agentId)
-      const effectiveInitMessage: UserMessageType = agent?.no_input
-        ? {
-            type: 'user',
-            message: { role: 'user', content: '开始' },
-            parent_tool_use_id: null,
-          }
-        : initMessage
+      const effectiveInitMessage: UserMessageType =
+        mode === 'manual' && agent?.no_input
+          ? {
+              type: 'user',
+              message: { role: 'user', content: '开始' },
+              parent_tool_use_id: null,
+            }
+          : initMessage
       const existingState = flowRunStates[flowId]
       if (existingState?.runs?.length) {
         clearBuildCacheForRuns(existingState.runs.map((r) => r.runId))
@@ -367,6 +388,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           runId,
           agentId,
           initMessage: effectiveInitMessage,
+          mode,
         },
       })
     },
@@ -399,6 +421,15 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     setEditingFlowId: (id) => {
       immerSet((draft) => {
         draft.editingFlowId = id
+        if (!id) {
+          draft.flowEditorFocus = undefined
+        }
+      })
+    },
+    openFlowEditor: (flowId, opts) => {
+      immerSet((draft) => {
+        draft.editingFlowId = flowId
+        draft.flowEditorFocus = { flowId, focus: opts?.focus }
       })
     },
     save: (updateFn) => {

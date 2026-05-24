@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from 'react'
+import { useEffect, useRef, useState, type FC } from 'react'
 import {
   Drawer,
   Form,
@@ -117,6 +117,7 @@ const SortableShareValueKeyRow: FC<SortableRowProps> = ({
 
 export const FlowEditor: FC = () => {
   const editingFlowId = useFlowStore((s) => s.editingFlowId)
+  const flowEditorFocus = useFlowStore((s) => s.flowEditorFocus)
   const flows = useFlowStore((s) => s.flows)
   const save = useFlowStore((s) => s.save)
   const setEditingFlowId = useFlowStore((s) => s.setEditingFlowId)
@@ -133,6 +134,7 @@ export const FlowEditor: FC = () => {
   const [shareValuePreviewMode, setShareValuePreviewMode] = useState<'edit' | 'preview'>('edit')
   const [hostPromptPreviewMode, setHostPromptPreviewMode] = useState<'edit' | 'preview'>('preview')
   const [newKeyInput, setNewKeyInput] = useState('')
+  const hostModelRef = useRef<HTMLDivElement>(null)
 
   const watchedShareValues = (Form.useWatch('shareValues', form) ?? {}) as Record<string, string>
   const watchedKeys = (Form.useWatch('shareValuesKeys', form) ?? []) as ShareValueKey[]
@@ -161,6 +163,21 @@ export const FlowEditor: FC = () => {
       setNewKeyInput('')
     }
   }, [open, flow, runShareValues, form])
+
+  // openFlowEditor 携带 focus='host_model' 时,滚动定位到该字段并尝试聚焦输入。
+  // 等 Drawer transition 完成 + 表单首帧渲染后再操作,延迟一帧。
+  useEffect(() => {
+    if (!open || !flowEditorFocus || flowEditorFocus.flowId !== editingFlowId) return
+    if (flowEditorFocus.focus !== 'host_model') return
+    const t = setTimeout(() => {
+      hostModelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const input = hostModelRef.current?.querySelector(
+        'input.ant-select-selection-search-input, input',
+      ) as HTMLInputElement | null
+      input?.focus({ preventScroll: true })
+    }, 100)
+    return () => clearTimeout(t)
+  }, [open, flowEditorFocus, editingFlowId])
 
   if (!flow) return null
 
@@ -260,18 +277,22 @@ export const FlowEditor: FC = () => {
               </Form.Item>
 
               <Flex gap={16}>
-                <Form.Item name='host_model' label='托管模型' className='mb-4 flex-1'>
-                  <AutoComplete
-                    placeholder='选择或输入模型名称'
-                    allowClear
-                    options={MODEL_OPTIONS}
-                    filterOption={(inputValue, option) =>
-                      (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ??
-                      option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
-                      false
-                    }
-                  />
-                </Form.Item>
+                <div ref={hostModelRef} className='flex-1'>
+                  <Form.Item name='host_model' label='托管模型' className='mb-4'>
+                    <AutoComplete
+                      placeholder='选择或输入模型名称'
+                      allowClear
+                      options={MODEL_OPTIONS}
+                      filterOption={(inputValue, option) =>
+                        (option?.label as string)
+                          ?.toLowerCase()
+                          .includes(inputValue.toLowerCase()) ??
+                        option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
+                        false
+                      }
+                    />
+                  </Form.Item>
+                </div>
 
                 <Form.Item name='host_effort' label='托管 effort' className='mb-4 w-56'>
                   <Select placeholder='请输入托管模型' allowClear options={EFFORT_OPTIONS} />

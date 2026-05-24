@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 export * from './event'
 export * from './flowRunState'
+import { HOST_AGENT_ID } from './flowRunState'
 
 // ── Flow Schemas & Types ────────────────────────────────────────────────────────────────
 
@@ -202,9 +203,6 @@ export function validateFlow(flow: Flow): FlowValidationResult {
 
 /** 通配符：匹配所有 `mcp__*` 工具。用于 auto_allowed_tools / must_confirm_tools 的字符串项 */
 export const MCP_WILDCARD = 'MCP'
-
-/** Hosted Flow 的托管 Agent 固定 ID。普通 Agent **禁止**使用此 ID。 */
-export const HOST_AGENT_ID = '__HOST_AGENT_ID' as const
 
 /** AgentEditor / FlowEditor 共用的模型候选项（AutoComplete 选项） */
 export const MODEL_OPTIONS = [

@@ -33,9 +33,13 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   // completed 且已流转到下一个 agent 时,reducer 已立刻把新 run 追加到末位,
   // 该 agent 自然不在末位,无需单独排除;completed 但是 flow 末端(没有 next_agent)
   // 时仍在末位,用户要看最终结果,保持高亮。
-  const isAgentActive = useFlowStore(
-    (s) => s.flowRunStates[flowId]?.runs.at(-1)?.agentId === agentId,
-  )
+  // host 模式下 AgentFlow 画布不再高亮 —— host AI 调度子 Agent 与 outputs.next_agent
+  // 的可视化语义不同,统一不高亮以避免误导。
+  const isAgentActive = useFlowStore((s) => {
+    const fs = s.flowRunStates[flowId]
+    if (!fs || fs.mode === 'host') return false
+    return fs.runs.at(-1)?.agentId === agentId
+  })
   const outputs = agent?.outputs ?? []
 
   return (

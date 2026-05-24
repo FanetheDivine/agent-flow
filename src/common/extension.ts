@@ -16,6 +16,25 @@ export type AgentMcpServerOptions = {
   }) => void
 }
 
+/** host run 调度子 Agent 的入参 */
+export type RunAgentInput = {
+  id: string
+  message?: string
+  values?: Record<string, string>
+}
+
+/** 子 Agent 完成时返回给 host AI 的结构 */
+export type RunAgentOutput = {
+  content: string
+  output_name?: string
+  values?: Record<string, string>
+}
+
+export type HostMcpServerOptions = {
+  /** 当 host AI 调用 runAgent 时回调,FlowRunner 在 handler 内创建子 run 并等待完成 */
+  onRunAgent: (input: RunAgentInput) => Promise<RunAgentOutput>
+}
+
 type ToolContent = { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
 
 /**
@@ -256,5 +275,61 @@ export function buildAgentMcpServer({ agent, onComplete }: AgentMcpServerOptions
     name: 'AgentControllerMcp',
     version: '1.0.0',
     tools,
+  })
+}
+
+/**
+ * 构建 Hosted Flow 托管模型的 MCP Server。
+ *
+ * 仅暴露 `runAgent` 一个工具:host AI 通过此工具调度子 Agent。
+ * 不暴露 `AgentComplete`(host AI 是 never_complete 风格,Flow 终止靠用户主动 killFlow)。
+ * 不暴露 `validateFlow` / `getFlowJSONSchema`(host 不负责工作流编排)。
+ */
+export function buildHostMcpServer({ onRunAgent }: HostMcpServerOptions) {
+  const runAgentTool = tool(
+    'runAgent',
+    [
+      '调度指定 Agent 执行任务,等待该 Agent 完成后返回其产物。',
+      '## 入参',
+      '- `id`: 目标 Agent 的 id(必须严格匹配「可调度的 Agents」中的 id)',
+      '- `message?`: 提供给 Agent 的初始消息(若 Agent.no_input=true 则忽略此值)',
+      '- `values?`: 提供给 Agent 的共享数据值;仅 Agent 在「可读共享数据」中声明的 key 会被使用,其余被忽略',
+      '## 出参',
+      '- `content`: Agent 完成时提交的产物文本',
+      '- `output_name?`: Agent 选择的输出分支名(若有)',
+      '- `values?`: Agent 写入的共享数据增量(仅其「可写共享数据」中声明的 key)',
+      '## 注意',
+      '- 调用此工具会**阻塞当前回合**,直到 Agent 完成',
+      '- Agent 执行失败、用户中止该 Agent 等情况下抛出错误',
+      '- 如果 Agent 在交互中被用户中断(interrupted)且用户继续与之对话,会等待最终完成才返回',
+    ].join('\n'),
+    {
+      id: z.string().describe('目标 Agent id'),
+      message: z.string().optional().describe('提供给 Agent 的初始消息(可选)'),
+      values: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('提供给 Agent 的共享数据值(按 key 注入,未在 Agent 可读列表中的 key 会被忽略)'),
+    },
+    withErrorBoundary('runAgent', async ({ id, message, values }) => {
+      const result = await onRunAgent({ id, message, values })
+      const lines: string[] = [`Agent ${id} 已完成。`]
+      if (result.output_name) lines.push(`输出分支:${result.output_name}`)
+      lines.push('## 产物')
+      lines.push(result.content || '(空)')
+      if (result.values && Object.keys(result.values).length > 0) {
+        lines.push('## 共享数据写入')
+        lines.push(JSON.stringify(result.values, null, 2))
+      }
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+      }
+    }),
+  )
+
+  return createSdkMcpServer({
+    name: 'AgentControllerMcp',
+    version: '1.0.0',
+    tools: [runAgentTool],
   })
 }

@@ -37,6 +37,16 @@ export type ExecutorResult = {
  */
 export type ExecutorMode = 'eager' | 'lazy'
 
+/** ClaudeExecutor 的可选覆盖项,FlowRunner 在 host run 启动时使用 */
+export type ExecutorOverrides = {
+  /** 自定义 systemPrompt(替代 buildAgentSystemPrompt 默认计算) */
+  systemPromptOverride?: string
+  /** 自定义 MCP server 构造器(替代 buildAgentMcpServer);返回值与 buildAgentMcpServer 同形 */
+  mcpServerFactory?: (
+    onComplete: (result: { content: string; outputName?: string; values?: Record<string, string> }) => void,
+  ) => ReturnType<typeof buildAgentMcpServer>
+}
+
 export type ExecutorEvents = {
   /** 首条 SDK 消息抵达时触发(eager 模式),用于上层在透传前发 flow.signal.flowStart */
   onStarted: () => void
@@ -65,6 +75,9 @@ export class ClaudeExecutor {
   private readonly agent: Agent
   private readonly prompt: string
   private mcpServer: ReturnType<typeof buildAgentMcpServer> | null = null
+  private readonly mcpServerFactory?: (
+    onComplete: (result: { content: string; outputName?: string; values?: Record<string, string> }) => void,
+  ) => ReturnType<typeof buildAgentMcpServer>
   private readonly userInputStream: ReturnType<typeof createMessageChannel<SDKUserMessage>>
 
   private queryInstance: Query | null = null
@@ -114,6 +127,8 @@ export class ClaudeExecutor {
    * @param mode - fork 路径专用模式:
    *   - 'eager'(默认):构造时立即 createQuery 并 push initMessage(原非 fork 路径)
    *   - 'lazy':构造时不 createQuery、不 push initMessage,等用户首次操作触发(普通 fork)
+   * @param overrides - 可选覆盖:host run 用 systemPromptOverride / mcpServerFactory
+   *   替换默认 buildAgentSystemPrompt + buildAgentMcpServer
    */
   constructor(
     initMessage: UserMessageType,
@@ -122,12 +137,14 @@ export class ClaudeExecutor {
     events: ExecutorEvents,
     resumeSessionId?: string,
     mode: ExecutorMode = 'eager',
+    overrides?: ExecutorOverrides,
   ) {
     this.agent = agent
     this.events = events
     this.userInputStream = createMessageChannel<SDKUserMessage>()
+    this.mcpServerFactory = overrides?.mcpServerFactory
     // values 是写在系统提示词里的 不能即时读写 可以直接构造
-    this.prompt = buildAgentSystemPrompt(agent, currentValues)
+    this.prompt = overrides?.systemPromptOverride ?? buildAgentSystemPrompt(agent, currentValues)
     if (resumeSessionId) {
       // resume 模式：sessionId 已知;fork 路径(lazy)不透传 initMessage
       // —— run.messages 切片已有真实历史,initMessage 只是接口占位/dummy。
@@ -307,23 +324,30 @@ export class ClaudeExecutor {
         logError('[ClaudeExecutor] previous mcp server close failed:', err)
       }
     }
-    this.mcpServer = buildAgentMcpServer({
-      agent: this.agent,
-      onComplete: (result) => {
-        // AgentComplete 触发后不立即通知上层。等 SDK 的 result 消息到达后再 fire，
-        // 否则上层会立刻 killCurrentExecutor，把后续的 result（含 modelUsage /
-        // total_cost_usd）切掉，token 统计就丢了。
-        if (this.completed || this.disposed) return
-        if (this.pendingCompleteResult) return
-        this.pendingCompleteResult = result
-        // 立即 interrupt SDK,避免模型在 AgentComplete 之后继续生成多余文字。
-        // interruptAndAwaitResult 会阻塞到 result 消息抵达后才 close,
-        // 与用户主动 interrupt 共用同一条等待+关闭路径,token 统计不丢。
-        this.interruptAndAwaitResult().catch((err) => {
-          logError('[ClaudeExecutor] interrupt after AgentComplete failed:', err)
+    const onAgentCompleteHandler = (result: {
+      content: string
+      outputName?: string
+      values?: Record<string, string>
+    }) => {
+      // AgentComplete 触发后不立即通知上层。等 SDK 的 result 消息到达后再 fire，
+      // 否则上层会立刻 killCurrentExecutor，把后续的 result（含 modelUsage /
+      // total_cost_usd）切掉，token 统计就丢了。
+      if (this.completed || this.disposed) return
+      if (this.pendingCompleteResult) return
+      this.pendingCompleteResult = result
+      // 立即 interrupt SDK,避免模型在 AgentComplete 之后继续生成多余文字。
+      // interruptAndAwaitResult 会阻塞到 result 消息抵达后才 close,
+      // 与用户主动 interrupt 共用同一条等待+关闭路径,token 统计不丢。
+      this.interruptAndAwaitResult().catch((err) => {
+        logError('[ClaudeExecutor] interrupt after AgentComplete failed:', err)
+      })
+    }
+    this.mcpServer = this.mcpServerFactory
+      ? this.mcpServerFactory(onAgentCompleteHandler)
+      : buildAgentMcpServer({
+          agent: this.agent,
+          onComplete: onAgentCompleteHandler,
         })
-      },
-    })
     const options: Options = {
       maxTurns: 1000,
       model: this.agent.model,

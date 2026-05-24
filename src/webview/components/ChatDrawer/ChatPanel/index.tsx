@@ -24,6 +24,7 @@ import {
   getPendingQuestionsFor,
   getPendingToolPermissionsFor,
   getRunPhase,
+  HOST_AGENT_ID,
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
@@ -84,10 +85,12 @@ export const ChatPanel: FC<Props> = ({
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
-  const agentName = useFlowStore(
-    (s) =>
-      s.flows.find((f) => f.id === flowId)?.agents?.find((a) => a.id === agentId)?.agent_name ?? '',
-  )
+  const agentName = useFlowStore((s) => {
+    if (agentId === HOST_AGENT_ID) return 'AI 托管'
+    return (
+      s.flows.find((f) => f.id === flowId)?.agents?.find((a) => a.id === agentId)?.agent_name ?? ''
+    )
+  })
 
   // runId 视图:phase 用 getRunPhase 限定到单 run;agentId 视图:跨该 agent 全部 run 聚合
   const phase = useFlowStore((s): AgentPhase => {
@@ -317,6 +320,31 @@ export const ChatPanel: FC<Props> = ({
     () => (mergedInput.toolUseIds.length > 0 ? new Set(mergedInput.toolUseIds) : undefined),
     [mergedInput.toolUseIds],
   )
+  // host 模式下子 run 的 parentToolUseId → subRunId,用于在 host run 中点击 runAgent
+  // tool_use 节点切到对应子 run 视图。
+  const toolUseIdToSubRunId = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!allRuns) return m
+    for (const r of allRuns) {
+      if (r.parentToolUseId) m.set(r.parentToolUseId, r.runId)
+    }
+    return m
+  }, [allRuns])
+  const onSubRunClick = useCallback(
+    (subRunId: string) => {
+      const subRun = allRuns?.find((r) => r.runId === subRunId)
+      const flow = useFlowStore.getState().flows.find((f) => f.id === flowId)
+      const subAgent = subRun ? flow?.agents?.find((a) => a.id === subRun.agentId) : undefined
+      useFlowStore.getState().openChatDrawer({
+        flowId,
+        runId: subRunId,
+        agentId: subRun?.agentId,
+        agentName: subAgent?.agent_name ?? '',
+      })
+    },
+    [allRuns, flowId],
+  )
+
   const ctx = useMemo<BubbleCtx>(
     () => ({
       pendingToolUseId,
@@ -328,6 +356,8 @@ export const ChatPanel: FC<Props> = ({
       onToolPermissionAllow,
       onToolPermissionDeny,
       onFork: onForkRequest,
+      toolUseIdToSubRunId,
+      onSubRunClick,
     }),
     [
       pendingToolUseId,
@@ -339,6 +369,8 @@ export const ChatPanel: FC<Props> = ({
       onToolPermissionAllow,
       onToolPermissionDeny,
       onForkRequest,
+      toolUseIdToSubRunId,
+      onSubRunClick,
     ],
   )
 

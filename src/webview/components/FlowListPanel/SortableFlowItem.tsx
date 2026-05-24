@@ -1,9 +1,15 @@
 import { useState, type FC } from 'react'
-import { Typography } from 'antd'
-import { HolderOutlined, DeleteOutlined, BlockOutlined, DatabaseOutlined } from '@ant-design/icons'
+import { App, Typography } from 'antd'
+import {
+  HolderOutlined,
+  DeleteOutlined,
+  BlockOutlined,
+  DatabaseOutlined,
+  RobotOutlined,
+} from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Flow, FlowPhase } from '@/common'
+import { getFlowPhase, HOST_AGENT_ID, type Flow, type FlowPhase } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 
@@ -33,7 +39,9 @@ export type SortableFlowItemProps = {
 
 export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const { flow, isActive, phase, onClick, onDelete, onRename } = props
-  const { save, setActiveFlowId, setFlowListCollapsed, setEditingFlowId } = useFlowStore()
+  const { save, setActiveFlowId, setFlowListCollapsed, openFlowEditor } = useFlowStore()
+  const runState = useFlowStore((s) => s.flowRunStates[flow.id])
+  const { notification } = App.useApp()
   const { id, name } = flow
   const [editing, setEditing] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -46,6 +54,41 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   }
 
   const statusConfig = phase && phase !== 'idle' ? PHASE_CONFIG[phase] : undefined
+  // host 模式且非 idle 时,AI icon 闪烁(host AI 正在工作)。
+  // 入口分流:无 host_model → 打开 FlowEditor 提示;有 host_model → 切到 ChatDrawer 的 host run 视图。
+  // 如果当前 flow 是 manual 模式且非 idle,点 AI icon 弹通知(模式互斥)。
+  const hostFlowPhase = getFlowPhase(runState)
+  const hostRunningNonIdle =
+    runState?.mode === 'host' && hostFlowPhase !== 'idle' && hostFlowPhase !== 'completed'
+  const onClickHostIcon = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setActiveFlowId(id)
+    setFlowListCollapsed(false)
+    // 互斥提示:flow 在 manual 模式运行中,不允许启动 host
+    if (runState?.mode === 'manual' && hostFlowPhase !== 'idle' && hostFlowPhase !== 'completed') {
+      notification.warning({
+        message: '工作流正在以普通模式运行,无法启动 AI 托管模式',
+        description: '请等待当前运行结束或先停止当前运行',
+      })
+      return
+    }
+    if (!flow.host_model) {
+      openFlowEditor(id, { focus: 'host_model' })
+      notification.info({
+        message: '请先选择托管模型',
+        description: 'AI 托管模式需要先在工作流编辑器里配置「托管模型」',
+      })
+      return
+    }
+    // 已配置 host_model:呼出 ChatDrawer 显示 host run 视图(可能是空的,等首次输入消息再 flowStart)
+    const hostRun = runState?.runs.find((r) => r.agentId === HOST_AGENT_ID)
+    useFlowStore.getState().openChatDrawer({
+      flowId: id,
+      agentId: HOST_AGENT_ID,
+      agentName: 'AI 托管',
+      runId: hostRun?.runId,
+    })
+  }
 
   return (
     <div
@@ -97,13 +140,24 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
         </div>
 
         <span
-          className='flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100'
+          className={cn(
+            'flex shrink-0 items-center gap-1 transition-opacity',
+            hostRunningNonIdle ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}
           onClick={(e) => e.stopPropagation()}
         >
+          <RobotOutlined
+            title='AI 托管'
+            onClick={onClickHostIcon}
+            className={cn(
+              'text-[#a6adc8]! transition-opacity hover:text-[#cba6f7]!',
+              hostRunningNonIdle && 'animate-pulse text-[#cba6f7]! opacity-100',
+            )}
+          />
           <DatabaseOutlined
             title='编辑工作流'
-            onClick={(e) => {
-              setEditingFlowId(id)
+            onClick={() => {
+              useFlowStore.getState().setEditingFlowId(id)
             }}
             className={cn(
               'text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100',

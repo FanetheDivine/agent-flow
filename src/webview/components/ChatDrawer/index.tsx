@@ -1,9 +1,10 @@
-import { useCallback, useRef, type FC, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, type FC, type ReactNode } from 'react'
 import { Drawer } from 'antd'
 import {
   agentChatInputState,
-  getAgentPhase,
   getRunPhase,
+  HOST_AGENT_ID,
+  type AgentChatInputState,
   type AgentPhase,
   type UserMessageType,
 } from '@/common'
@@ -20,9 +21,10 @@ type Props = {
    */
   flowId?: string
   /**
-   * 优先级 runId > agentId。
-   * 给 runId 时按 runId 反查 agentId(精确指向用户当前看的 run);否则用 agentId 直接。
-   * 至少要有一个能解析出 agentId,否则 ChatPanel 不渲染。
+   * runId 优先级最高:给定时锁定到该 run 视图(host 模式下从 host run 切到子 run 都走这条)。
+   * 不给时按 agentId 反查:
+   * - agentId === HOST_AGENT_ID → 找 mode='host' 下的 host run
+   * - agentId 是普通 agent → 找 runs 末位且命中 agentId 的 run
    */
   runId?: string
   agentId?: string
@@ -35,8 +37,8 @@ type Props = {
 
 export const ChatDrawer: FC<Props> = ({
   flowId,
-  runId,
-  agentId,
+  runId: propRunId,
+  agentId: propAgentId,
   open,
   defaultSize = 700,
   title,
@@ -47,61 +49,89 @@ export const ChatDrawer: FC<Props> = ({
   const startFlow = useStartFlow()
   const chatPanelRef = useRef<ChatPanelRef>(null)
 
-  // runId 反查 agentId,fallback 到 props.agentId
-  const effectiveAgentId = useFlowStore((s): string | undefined => {
-    if (!flowId) return undefined
-    if (runId) {
-      return s.flowRunStates[flowId]?.runs.find((r) => r.runId === runId)?.agentId ?? agentId
-    }
-    return agentId
-  })
+  // 当前 flow 的运行态(可能为 undefined,表示 flow 未启动)
+  const runState = useFlowStore((s) => (flowId ? s.flowRunStates[flowId] : undefined))
 
-  const agentPhase = useFlowStore((s): AgentPhase => {
-    if (!flowId || !effectiveAgentId) return 'idle'
-    return getAgentPhase(s.flowRunStates[flowId], effectiveAgentId)
-  })
+  // 反查当前视图所属的 AgentRun:
+  // - propRunId 给定 → 直接按 runId 查(host 子 run / fork 后的 run)
+  // - propAgentId === HOST_AGENT_ID → host run
+  // - propAgentId 普通 agent → 末位且命中 agentId 的 run(沿用原行为)
+  const viewRun = useMemo(() => {
+    if (!runState) return undefined
+    if (propRunId) return runState.runs.find((r) => r.runId === propRunId)
+    if (propAgentId === HOST_AGENT_ID) return runState.runs.find((r) => r.agentId === HOST_AGENT_ID)
+    if (propAgentId) {
+      const last = runState.runs.at(-1)
+      return last?.agentId === propAgentId ? last : undefined
+    }
+    return undefined
+  }, [runState, propRunId, propAgentId])
+
+  const viewRunId = viewRun?.runId
+  const viewAgentId = viewRun?.agentId ?? propAgentId
+  const isSubRun = !!viewRun?.parentToolUseId
+  const isHostFlow = runState?.mode === 'host' || propAgentId === HOST_AGENT_ID
+  // host 模式下 idle、首次入口(尚未创建 host run)
+  const isHostIdle = isHostFlow && !viewRun
+
+  const runPhase: AgentPhase = useMemo(() => {
+    if (!viewRun || !runState) return 'idle'
+    return getRunPhase(viewRun, runState)
+  }, [viewRun, runState])
 
   /**
-   * 末位活跃 run 的 runId,用于 sendUserMessage / interruptAgent 的派发。
-   * 末位 run 必须命中 effectiveAgentId 且 phase 非终态/非 idle。
+   * ChatInput 状态:
+   * - 无 flowId / viewAgentId → disabled
+   * - host idle (host run 尚未创建) → ready,首发即 flowStart(mode='host')
+   * - 子 run completed → disabled (场景 9)
+   * - 其余 → agentChatInputState(runPhase) 投影
    */
-  const activeRunId = useFlowStore((s): string | undefined => {
-    if (!flowId || !effectiveAgentId) return undefined
-    const fs = s.flowRunStates[flowId]
-    const last = fs?.runs.at(-1)
-    if (!fs || !last || last.agentId !== effectiveAgentId) return undefined
-    const phase = getRunPhase(last, fs)
-    if (phase === 'idle' || phase === 'completed' || phase === 'stopped') return undefined
-    return last.runId
-  })
+  const inputState: AgentChatInputState = (() => {
+    if (!flowId || !viewAgentId) return 'disabled'
+    if (!viewRun) return 'ready'
+    if (isSubRun && runPhase === 'completed') return 'disabled'
+    return agentChatInputState(runPhase)
+  })()
 
-  // flowId / agentId 缺失时 ChatInput 不可用,但仍然挂载保留草稿
-  const inputState = !flowId || !effectiveAgentId ? 'disabled' : agentChatInputState(agentPhase)
   const onSend = useCallback(
     async (content: UserMessageType['message']['content']): Promise<boolean> => {
-      if (!flowId || !effectiveAgentId) return false
-
-      // disabled / loading 状态不允许发送
+      if (!flowId || !viewAgentId) return false
       if (inputState === 'disabled' || inputState === 'loading') return false
 
-      // 同会话追问条件:有 active run + phase=result/interrupted
-      if (activeRunId && (agentPhase === 'result' || agentPhase === 'interrupted')) {
-        sendUserMessage(flowId, activeRunId, content)
+      // 同会话追问:viewRun 已存在且处于 result/interrupted
+      if (viewRunId && (runPhase === 'result' || runPhase === 'interrupted')) {
+        sendUserMessage(flowId, viewRunId, content)
         chatPanelRef.current?.forceScrollToBottom()
         return true
       }
 
-      // ready (idle / 非活跃 agent 的 result) 或 confirm-required → 启动 flow
-      // useStartFlow 内部会根据 FlowPhase !== idle 弹窗确认
-      const started = await startFlow(flowId, effectiveAgentId, {
-        type: 'user',
-        message: { role: 'user', content },
-        parent_tool_use_id: null,
-      })
+      // 否则启动 flow:host 入口走 host 分支(agentId 强制 HOST_AGENT_ID),否则按 propAgentId
+      const mode: 'manual' | 'host' = isHostFlow || isHostIdle ? 'host' : 'manual'
+      const targetAgentId = mode === 'host' ? HOST_AGENT_ID : viewAgentId
+      const started = await startFlow(
+        flowId,
+        targetAgentId,
+        {
+          type: 'user',
+          message: { role: 'user', content },
+          parent_tool_use_id: null,
+        },
+        mode,
+      )
       if (started) chatPanelRef.current?.forceScrollToBottom()
       return started
     },
-    [flowId, effectiveAgentId, inputState, agentPhase, activeRunId, startFlow, sendUserMessage],
+    [
+      flowId,
+      viewAgentId,
+      viewRunId,
+      inputState,
+      runPhase,
+      isHostFlow,
+      isHostIdle,
+      sendUserMessage,
+      startFlow,
+    ],
   )
 
   return (
@@ -120,19 +150,17 @@ export const ChatDrawer: FC<Props> = ({
       onClose={onClose}
     >
       <div className='flex flex-1 flex-col overflow-hidden bg-[#1e1e2e]'>
-        {flowId && effectiveAgentId ? (
+        {flowId && viewAgentId ? (
           // key 强制 ChatPanel 在 (flowId, agentId, runId) 切换时重新挂载,避免跨 Flow / 跨 run
           // 共用 React 内部状态(特别是 AskUserQuestionCard 的 selections / otherStates,以及
           // motion.div 的 ask-card key 在 toolUseId 相同时被复用)。
-          // fork 出的新 Flow 与源 Flow 的 toolUseId 实际相同(SDK forkSession 不 remap
-          // tool_use.id,本侧也不再替换),靠 ChatPanel 的 key 强制 unmount 完成内部 state 隔离;
-          // 切到新 Flow / 切到指定 run 视图时整棵 ChatPanel 重建,卡片状态不会复用。
+          // host 模式下 host run / 子 run 切换时 viewRunId 变化触发 ChatPanel 重建,卡片状态隔离。
           <ChatPanel
-            key={`${flowId}-${effectiveAgentId}-${runId ?? ''}`}
+            key={`${flowId}-${viewAgentId}-${viewRunId ?? ''}`}
             ref={chatPanelRef}
             flowId={flowId}
-            agentId={effectiveAgentId}
-            runId={runId}
+            agentId={viewAgentId}
+            runId={viewRunId}
             onClose={onClose}
           />
         ) : null}
@@ -141,8 +169,8 @@ export const ChatDrawer: FC<Props> = ({
           onSend={onSend}
           status={inputState}
           onCancel={() => {
-            if (flowId && activeRunId) {
-              interruptAgent(flowId, activeRunId)
+            if (flowId && viewRunId) {
+              interruptAgent(flowId, viewRunId)
             }
           }}
         />

@@ -125,6 +125,20 @@ type FlowSignalPayload = {
      */
     result?: AIMessageType
   }
+  /**
+   * host 模式:host AI 通过 runAgent 工具调度了一个子 Agent。
+   * - runId: host run 的 runId(父 run)
+   * - subRunId: 新创建的子 run 的 runId(extension 端生成)
+   * - subAgentId: 子 run 对应的 Agent.id
+   * - parentToolUseId: host run 中触发本次调度的 runAgent tool_use 在 host transcript 中的 toolUseId
+   * reducer 据此把新的 AgentRun 追加到 state.runs(parentToolUseId 写入子 AgentRun)。
+   */
+  subAgentStarted: {
+    runId: string
+    subRunId: string
+    subAgentId: string
+    parentToolUseId: string
+  }
   /** Agent被中断了 */
   agentInterrupted: { runId: string }
   /** agent错误 */
@@ -146,6 +160,7 @@ type FlowSignalPayload = {
    *   webview 收到后写入 newRunState 对应 AgentRun;后续 sendUserMessage / answerQuestion /
    *   interrupt 都基于此 runId 派发到 runner。**所属 agent 由 newRunState.runs.at(-1).agentId 反推**,
    *   不再单独携带 agentId。
+   * - mode：源 Flow 当前的 mode(manual / host),fork 出的新 Flow 继承同一 mode。
    *
    * 不携带 newFlow 定义；webview 端自行根据 sourceFlowId 深拷贝 Flow 后将 id 改为
    * newFlowId 加入 flows，并通过既有 save 通道持久化。
@@ -154,6 +169,7 @@ type FlowSignalPayload = {
     newFlowId: string
     newRunState: FlowRunState
     runId: string
+    mode: 'manual' | 'host'
   }
 }
 
@@ -174,11 +190,17 @@ type FlowCommandPayload = {
   /**
    * webview 发起启动:webview 生成 runId 随 command 下发,作为本次 run 的唯一主键。
    * reducer 收到后覆盖式重置 runs/answered/pendings,并以 runId 创建首个 AgentRun。
+   *
+   * `mode`:
+   * - `manual`(默认):用户从 AgentNode / ChatPanel 启动,按 outputs.next_agent 串联
+   * - `host`:用户点 AI 托管 icon 启动,agentId 必须为 HOST_AGENT_ID,
+   *   ClaudeExecutor 走 buildHostSystemPrompt + 仅 runAgent MCP server
    */
   flowStart: {
     runId: string
     agentId: string
     initMessage: UserMessageType
+    mode: 'manual' | 'host'
   }
   /** 向指定 run 发送用户消息 */
   userMessage: { runId: string; message: UserMessageType }

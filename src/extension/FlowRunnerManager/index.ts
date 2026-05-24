@@ -26,7 +26,7 @@ export class FlowRunnerManager {
   handleCommand(type: keyof ExtensionFlowCommandEvents, data: any): void {
     match(type)
       .with('flow.command.flowStart', () => {
-        const { flowId, runId, agentId, flow, initMessage } =
+        const { flowId, runId, agentId, flow, initMessage, mode } =
           data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow, {
@@ -39,7 +39,7 @@ export class FlowRunnerManager {
           } as ExtensionToWebviewMessage)
         })
         this.runners.set(flowId, runner)
-        runner.emit('flow.command.flowStart', { runId, agentId, initMessage })
+        runner.emit('flow.command.flowStart', { runId, agentId, initMessage, mode })
       })
       .with('flow.command.userMessage', () => {
         const { flowId, ...rest } = data as ExtensionFlowCommandEvents['flow.command.userMessage']
@@ -94,6 +94,8 @@ export class FlowRunnerManager {
    * - 调用方需提前生成 runId,以便 webview 收到 signal.fork 后用 runId 派发
    *   sendUserMessage / answerQuestion / interrupt
    * - 不发 flow.signal.flowStart;runId 由 extension 端通过 signal.fork 同步
+   * - mode:'manual' 时 agentId 必须是 flow.agents 中真实 agent;'host' 时可以是
+   *   HOST_AGENT_ID(对应 host run)或子 agent id(对应子 run)
    */
   spawnForFork(params: {
     flowId: string
@@ -101,8 +103,9 @@ export class FlowRunnerManager {
     agentId: string
     resumeSessionId: string
     runId: string
+    mode: 'manual' | 'host'
   }): void {
-    const { flowId, flow, agentId, resumeSessionId, runId } = params
+    const { flowId, flow, agentId, resumeSessionId, runId, mode } = params
     this.disposeRunner(flowId)
     const runner = new FlowRunner(flow, {
       getLatestShareValues: () => this.getLatestShareValues(flowId),
@@ -114,6 +117,6 @@ export class FlowRunnerManager {
       } as ExtensionToWebviewMessage)
     })
     this.runners.set(flowId, runner)
-    runner.spawnForFork({ runId, agentId, resumeSessionId })
+    runner.spawnForFork({ runId, agentId, resumeSessionId, mode })
   }
 }

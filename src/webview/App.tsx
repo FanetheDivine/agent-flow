@@ -2,7 +2,7 @@ import { useEffect, type FC } from 'react'
 import { App as AntdApp, Spin } from 'antd'
 import { useEventListener } from 'ahooks'
 import { z } from 'zod'
-import { FlowSchema } from '@/common'
+import { FlowSchema, HOST_AGENT_ID } from '@/common'
 import { AgentEditor } from './components/AgentEditor'
 import { AgentFlow } from './components/AgentFlow'
 import { ChatDrawer } from './components/ChatDrawer'
@@ -20,10 +20,9 @@ export const App: FC = () => {
 
   useEffect(() => init({ notification }), [init, notification])
 
-  // activeFlowId 切换时,按 runs 末位 agent 决定打开/关闭 ChatDrawer。
-  // runs 末位 agent = 用户当前要看的对象;runs 为空(idle)或无 active flow 则关闭。
-  // completed 且已流转的中间 agent 不会出现在末位(reducer 切换时立刻追加新 run);
-  // completed 且无 next_agent 的 flow 末端仍在末位,自动打开让用户看结果。
+  // activeFlowId 切换时,按运行模式决定 ChatDrawer:
+  // - host 模式:默认指向 host run(无 host run 则不打开)
+  // - manual 模式:沿用 runs 末位 agent 逻辑
   // 依赖只放 activeFlowId,flow 定义/runs 现取,避免编辑 Agent 等无关变更触发自动开关。
   useEffect(() => {
     const { openChatDrawer, closeChatDrawer } = useFlowStore.getState()
@@ -31,7 +30,22 @@ export const App: FC = () => {
       closeChatDrawer()
       return
     }
-    const targetAgentId = useFlowStore.getState().flowRunStates[activeFlowId]?.runs.at(-1)?.agentId
+    const fs = useFlowStore.getState().flowRunStates[activeFlowId]
+    if (fs?.mode === 'host') {
+      const hostRun = fs.runs.find((r) => r.agentId === HOST_AGENT_ID)
+      if (hostRun) {
+        openChatDrawer({
+          flowId: activeFlowId,
+          agentId: HOST_AGENT_ID,
+          agentName: 'AI 托管',
+          runId: hostRun.runId,
+        })
+      } else {
+        closeChatDrawer()
+      }
+      return
+    }
+    const targetAgentId = fs?.runs.at(-1)?.agentId
     if (targetAgentId) {
       const latestFlow = useFlowStore.getState().flows.find((f) => f.id === activeFlowId)
       const agent = latestFlow?.agents?.find((a) => a.id === targetAgentId)

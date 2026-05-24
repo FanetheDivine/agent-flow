@@ -49,6 +49,13 @@ export type BubbleCtx = {
     target: { kind: 'message'; runId: string; messageUuid: string },
     sessionCompleted: boolean,
   ) => void
+  /**
+   * host 模式专用:host run 中 mcp__AgentControllerMcp__runAgent 的 tool_use.id →
+   * 该 tool_use 触发的子 run 的 runId。MessageBubble 据此把 runAgent tool_use
+   * 节点渲染为可点击,点击调 onSubRunClick(subRunId) 切到子 run 视图。
+   */
+  toolUseIdToSubRunId?: Map<string, string>
+  onSubRunClick?: (subRunId: string) => void
 }
 
 type RenderedBubble = {
@@ -401,6 +408,33 @@ function renderItemToBubble(
       }
     }
     case 'tool_use': {
+      // runAgent (mcp__AgentControllerMcp__runAgent) 是 host 模式调度子 Agent 的入口工具,
+      // 节点带子 run 跳转能力:点击切到对应子 run 的 MessageList。
+      const isRunAgentTool =
+        item.toolName === 'AgentControllerMcp::runAgent' ||
+        item.toolName === 'mcp__AgentControllerMcp__runAgent'
+      if (isRunAgentTool && ctx?.toolUseIdToSubRunId && ctx?.onSubRunClick) {
+        const subRunId = ctx.toolUseIdToSubRunId.get(item.toolUseId)
+        if (subRunId) {
+          return {
+            key: item.key,
+            role: 'ai',
+            content: (
+              <button
+                type='button'
+                onClick={(e) => {
+                  e.stopPropagation()
+                  ctx.onSubRunClick!(subRunId)
+                }}
+                className='w-full cursor-pointer rounded border border-[#cba6f7]/40 bg-[#cba6f7]/5 p-2 text-left transition-colors hover:bg-[#cba6f7]/10'
+              >
+                <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
+                <div className='mt-1 text-[10px] text-[#cba6f7]'>点击查看子 Agent 对话 →</div>
+              </button>
+            ),
+          }
+        }
+      }
       if (ctx) {
         const isPendingPerm = ctx.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
         const answeredPerm = ctx.answeredToolPermissions?.[item.toolUseId]

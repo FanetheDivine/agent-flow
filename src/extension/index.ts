@@ -288,6 +288,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
 
     const newRunState: FlowRunState = {
+      mode: sourceState.mode,
       killed: false,
       runs: newRuns,
       answeredQuestions: { ...sourceState.answeredQuestions },
@@ -316,11 +317,18 @@ export function activate(context: vscode.ExtensionContext) {
       agentId,
       resumeSessionId: newSessionId,
       runId: newRunId,
+      mode: sourceState.mode,
     })
 
     postMessageToWebview({
       type: 'flow.signal.fork',
-      data: { flowId: sourceFlowId, newFlowId, newRunState, runId: newRunId },
+      data: {
+        flowId: sourceFlowId,
+        newFlowId,
+        newRunState,
+        runId: newRunId,
+        mode: sourceState.mode,
+      },
     })
   }
 

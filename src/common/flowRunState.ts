@@ -7,6 +7,9 @@ import type {
 } from './event'
 import type { AskUserQuestionInput, AskUserQuestionOutput, Agent, Flow } from './index'
 
+/** Hosted Flow 的托管 Agent 固定 ID。普通 Agent **禁止**使用此 ID。 */
+export const HOST_AGENT_ID = '__HOST_AGENT_ID' as const
+
 // ── TokenUsage ────────────────────────────────────────────────────────────
 
 export type TokenUsage = {
@@ -177,6 +180,17 @@ export type AgentRun = {
   messages: ExtensionToWebviewMessage[]
   completed: boolean
   outputName?: string
+  /**
+   * host 模式下,如果该 run 是由 host AI 通过 runAgent 工具调度产生的子 run,
+   * 此字段记录触发它的 runAgent tool_use 在 host run 中的 toolUseId。
+   * host run 自身、manual 模式的 run 此字段缺省。
+   */
+  parentToolUseId?: string
+  /**
+   * host 模式下,host run 被中断/终止时由 reducer 级联标记的子 run。
+   * 等价于"被外部强制停止":[getRunPhase] 据此返回 'stopped'。
+   */
+  forceStopped?: boolean
 }
 
 export type PendingQuestion = {
@@ -197,14 +211,20 @@ export type PendingToolPermission = {
 /**
  * 单个 Flow 的运行态状态 —— extension 与 webview 同步的核心数据。
  *
- * 目前只允许单个活跃的run
  * Flow / Agent / Run 三层 phase 都不存字段,统一由 [getFlowPhase] / [getAgentPhase] /
  * [getRunPhase] 按需从 `runs` + `messages` + `pendings` + `killed` 推断。
  */
 export type FlowRunState = {
+  /**
+   * 本次 Flow 运行采用的模式 ——
+   * - `manual`:用户从 AgentNode / ChatPanel 启动,按 outputs.next_agent 串联(默认)
+   * - `host`:用户点 AI 托管 icon 启动,host AI 通过 runAgent 调度多个子 Agent
+   * 两种模式互斥,`flowStart` 设置后 `killFlow` 不重置(下次 `flowStart` 才会覆盖)。
+   */
+  mode: 'manual' | 'host'
   /** killFlow 后置 true;[getRunPhase] 据此把所有非终态 run 投影为 stopped */
   killed: boolean
-  /** 按追加顺序排列的 AgentRun;首项是 flowStart 创建,后续由 next_agent */
+  /** 按追加顺序排列的 AgentRun;首项是 flowStart 创建,后续由 next_agent 或 host runAgent 创建 */
   runs: AgentRun[]
   /** 已回答的 AskUserQuestion：toolUseId -> 用户提交的答案，用于 UI 回显历史态 */
   answeredQuestions: Record<string, AskUserQuestionOutput>
@@ -272,6 +292,7 @@ export function updateFlowRunState(
       completed: false,
     }
     const fresh: FlowRunState = {
+      mode: msg.data.mode,
       killed: false,
       runs: [firstRun],
       answeredQuestions: {},
@@ -288,6 +309,7 @@ export function updateFlowRunState(
 
   if (msg.type === 'flow.command.setShareValues') {
     const base: FlowRunState = {
+      mode: 'manual',
       killed: false,
       runs: [],
       answeredQuestions: {},
@@ -321,15 +343,21 @@ export function updateFlowRunState(
 
   const next = produce(state, (draft) => {
     const flowId = msg.data.flowId
-    const clearPendings = () => {
+    /** 清空所有 pending(killFlow / 整体重置) */
+    const clearAllPendings = () => {
       draft.pendingQuestions = []
       draft.pendingToolPermissions = []
+    }
+    /** 仅清空属于指定 run 的 pending(单 run 完成 / 中断 / 出错时使用) */
+    const clearPendingsForRun = (runId: string) => {
+      draft.pendingQuestions = draft.pendingQuestions.filter((q) => q.runId !== runId)
+      draft.pendingToolPermissions = draft.pendingToolPermissions.filter((p) => p.runId !== runId)
     }
 
     // ── command.killFlow:任何状态下强制终止(包括终态,幂等) ──────────
     if (msg.type === 'flow.command.killFlow') {
       draft.killed = true
-      clearPendings()
+      clearAllPendings()
       return
     }
 
@@ -413,7 +441,13 @@ export function updateFlowRunState(
         }
         run.completed = true
         run.outputName = data.output?.name
-        clearPendings()
+        clearPendingsForRun(run.runId)
+        // host 模式下子 run 完成不再追加新 run(host AI 通过 runAgent 调度,
+        // 不走 outputs.next_agent),也不触发 flow-completed 通知。host run 自身
+        // 是 never_complete 模式,不应触发 agentComplete;若触发也不视作 Flow 完成。
+        if (draft.mode === 'host') {
+          return
+        }
         const flow = findFlow(flowId)
         const output = data.output
           ? flow?.agents
@@ -436,6 +470,19 @@ export function updateFlowRunState(
           pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'flow-completed' })
         }
       })
+      .with({ type: 'flow.signal.subAgentStarted' }, ({ data }) => {
+        // host AI 通过 runAgent 工具调度子 Agent 时,extension 端创建子 run,
+        // reducer 据此在 state.runs 中追加新 AgentRun。
+        if (draft.runs.some((r) => r.runId === data.subRunId)) return
+        draft.runs.push({
+          runId: data.subRunId,
+          agentId: data.subAgentId,
+          sessionId: undefined,
+          messages: [],
+          completed: false,
+          parentToolUseId: data.parentToolUseId,
+        })
+      })
       .with({ type: 'flow.signal.toolPermissionRequest' }, ({ data }) => {
         // 队列追加(toolUseId 去重),理论上单 executor 不会出现重复请求
         if (!draft.pendingToolPermissions.some((p) => p.toolUseId === data.toolUseId)) {
@@ -454,14 +501,25 @@ export function updateFlowRunState(
         })
       })
       .with({ type: 'flow.signal.agentInterrupted' }, () => {
-        clearPendings()
+        clearPendingsForRun(run.runId)
+        // host run interrupt:级联把所有有 parentToolUseId 的非终态子 run 标记 stopped。
+        // executor 端会同时 kill 子 executor + fire 子 run agentInterrupted,reducer 据此
+        // 把子 run 也清干净;forceStopped 让 getRunPhase 优先返回 'stopped'(而非 'interrupted')。
+        if (draft.mode === 'host' && run.agentId === HOST_AGENT_ID) {
+          for (const r of draft.runs) {
+            if (r.runId === run.runId) continue
+            if (!r.parentToolUseId) continue
+            if (r.completed) continue
+            r.forceStopped = true
+          }
+        }
       })
       .with({ type: 'flow.signal.agentError' }, () => {
-        clearPendings()
+        clearPendingsForRun(run.runId)
         pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'agent-error' })
       })
       .with({ type: 'flow.signal.error' }, () => {
-        clearPendings()
+        clearPendingsForRun(run.runId)
       })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
@@ -513,7 +571,7 @@ const isTerminalPhase = (p: AgentPhase): boolean =>
  * 单个 run 的优先级:
  * - error                       消息流中出现过 agentError / error signal
  * - completed                   run.completed === true
- * - stopped                     state.killed (未已终态时投影为 stopped)
+ * - stopped                     state.killed (未已终态时投影为 stopped) 或 run.forceStopped
  * - awaiting-tool-permission    state.pendingToolPermissions 中有属于本 run 的项
  * - awaiting-question           state.pendingQuestions 中有属于本 run 的项
  * - interrupted                 末条 aiMessage 之后出现过 agentInterrupted
@@ -527,7 +585,7 @@ export function getRunPhase(run: AgentRun, state: FlowRunState): AgentPhase {
     return 'error'
   }
   if (run.completed) return 'completed'
-  if (state.killed) return 'stopped'
+  if (state.killed || run.forceStopped) return 'stopped'
   if (state.pendingToolPermissions.some((p) => p.runId === run.runId))
     return 'awaiting-tool-permission'
   if (state.pendingQuestions.some((q) => q.runId === run.runId)) return 'awaiting-question'
