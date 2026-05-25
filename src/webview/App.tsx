@@ -14,20 +14,24 @@ export const App: FC = () => {
   const { notification } = AntdApp.useApp()
   const { loading, flows, init } = useFlowStore()
   const globalError = useFlowStore((s) => s.globalError)
-  const chatDrawer = useFlowStore((s) => s.chatDrawer)
-  const closeChatDrawer = useFlowStore((s) => s.closeChatDrawer)
+  const hostDrawer = useFlowStore((s) => s.hostDrawer)
+  const subAgentDrawer = useFlowStore((s) => s.subAgentDrawer)
+  const closeHostDrawer = useFlowStore((s) => s.closeHostDrawer)
+  const closeSubAgentDrawer = useFlowStore((s) => s.closeSubAgentDrawer)
   const activeFlowId = useFlowStore((s) => s.activeFlowId)
 
   useEffect(() => init({ notification }), [init, notification])
 
-  // activeFlowId 切换时,按运行模式决定 ChatDrawer:
+  // activeFlowId 切换时,按运行模式决定 hostDrawer:
   // - host 模式:默认指向 host run(无 host run 则不打开)
   // - manual 模式:沿用 runs 末位 agent 逻辑
+  // 切换 Flow 时同时关闭 subAgentDrawer(子 Drawer 状态不跨 Flow 保留)
   // 依赖只放 activeFlowId,flow 定义/runs 现取,避免编辑 Agent 等无关变更触发自动开关。
   useEffect(() => {
-    const { openChatDrawer, closeChatDrawer } = useFlowStore.getState()
+    const { openChatDrawer, closeHostDrawer, closeSubAgentDrawer } = useFlowStore.getState()
+    closeSubAgentDrawer()
     if (!activeFlowId) {
-      closeChatDrawer()
+      closeHostDrawer()
       return
     }
     const fs = useFlowStore.getState().flowRunStates[activeFlowId]
@@ -41,7 +45,7 @@ export const App: FC = () => {
           runId: hostRun.runId,
         })
       } else {
-        closeChatDrawer()
+        closeHostDrawer()
       }
       return
     }
@@ -55,7 +59,7 @@ export const App: FC = () => {
         agentName: agent?.agent_name ?? '',
       })
     } else {
-      closeChatDrawer()
+      closeHostDrawer()
     }
   }, [activeFlowId])
 
@@ -86,12 +90,25 @@ export const App: FC = () => {
         ))}
         <FlowListPanel />
       </div>
+      {/* host run Drawer:默认 700,host 模式下持续保留 */}
       <ChatDrawer
-        flowId={chatDrawer?.flowId}
-        agentId={chatDrawer?.agentId}
-        runId={chatDrawer?.runId}
-        open={!!chatDrawer}
-        onClose={closeChatDrawer}
+        flowId={hostDrawer?.flowId}
+        agentId={hostDrawer?.agentId}
+        runId={hostDrawer?.runId}
+        open={!!hostDrawer}
+        defaultSize={700}
+        kind='host'
+        onClose={closeHostDrawer}
+      />
+      {/* sub agent Drawer:默认 540,后渲染 → 层级在 host Drawer 之上 */}
+      <ChatDrawer
+        flowId={subAgentDrawer?.flowId}
+        agentId={subAgentDrawer?.agentId}
+        runId={subAgentDrawer?.runId}
+        open={!!subAgentDrawer}
+        defaultSize={540}
+        kind='sub'
+        onClose={closeSubAgentDrawer}
       />
       <AgentEditor />
       <FlowEditor />

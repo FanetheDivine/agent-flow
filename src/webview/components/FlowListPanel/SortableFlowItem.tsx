@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { getFlowPhase, HOST_AGENT_ID, type Flow, type FlowPhase } from '@/common'
+import { getFlowPhase, getRunPhase, HOST_AGENT_ID, type Flow, type FlowPhase } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 
@@ -90,9 +90,32 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
       })
       return
     }
-    // 已配置 host_model:呼出 ChatDrawer 显示 host run 视图(可能是空的,等首次输入消息再 flowStart)
+    // 已配置 host_model:优先看是否有「等待用户处理」的子 run(awaiting-* / result / error),
+    // 直接切到该子 run 的 sub agent Drawer,destroy 对应通知。否则呼出 host Drawer。
+    const store = useFlowStore.getState()
+    const awaitingSubRun = runState?.runs.find((r) => {
+      if (!r.parentToolUseId) return false
+      const phase = getRunPhase(r, runState)
+      return (
+        phase === 'awaiting-tool-permission' ||
+        phase === 'awaiting-question' ||
+        phase === 'result' ||
+        phase === 'error'
+      )
+    })
+    if (awaitingSubRun) {
+      const subAgent = flow.agents?.find((a) => a.id === awaitingSubRun.agentId)
+      store.openSubAgentDrawer({
+        flowId: id,
+        runId: awaitingSubRun.runId,
+        agentId: awaitingSubRun.agentId,
+        agentName: subAgent?.agent_name ?? '',
+      })
+      store.destroyRunNotifications(id, awaitingSubRun.runId)
+      return
+    }
     const hostRun = runState?.runs.find((r) => r.agentId === HOST_AGENT_ID)
-    useFlowStore.getState().openChatDrawer({
+    store.openChatDrawer({
       flowId: id,
       agentId: HOST_AGENT_ID,
       agentName: 'AI 托管',

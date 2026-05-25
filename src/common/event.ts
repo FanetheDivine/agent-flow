@@ -132,13 +132,18 @@ type FlowSignalPayload = {
    * - subRunId: 新创建的子 run 的 runId(extension 端生成)
    * - subAgentId: 子 run 对应的 Agent.id
    * - parentToolUseId: host run 中触发本次调度的 runAgent tool_use 在 host transcript 中的 toolUseId
-   * reducer 据此把新的 AgentRun 追加到 state.runs(parentToolUseId 写入子 AgentRun)。
+   * - initMessage: host AI 通过 runAgent.message 注入的子 Agent 首条 user 消息(已折算 no_input)
+   * - values: host AI 通过 runAgent.values 注入的共享数据(原始值,未做 allowed_read 过滤)
+   * reducer 据此把新的 AgentRun 追加到 state.runs(parentToolUseId 写入子 AgentRun),
+   * 并把 initMessage / values 作为子 run.messages 首条 user 消息回显,让用户看到 host 注入的输入。
    */
   subAgentStarted: {
     runId: string
     subRunId: string
     subAgentId: string
     parentToolUseId: string
+    initMessage: UserMessageType
+    values?: Record<string, string>
   }
   /**
    * silent_task 模式下 AskUserQuestion 由 ClaudeExecutor 自动应答时上抛的信号。

@@ -194,7 +194,8 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       const subRun = allRuns?.find((r) => r.runId === subRunId)
       const flow = useFlowStore.getState().flows.find((f) => f.id === flowId)
       const subAgent = subRun ? flow?.agents?.find((a) => a.id === subRun.agentId) : undefined
-      useFlowStore.getState().openChatDrawer({
+      // host 模式下子 run 视图独占 sub agent Drawer,host Drawer 不动 —— 关闭 sub Drawer 后用户能回到 host 进度
+      useFlowStore.getState().openSubAgentDrawer({
         flowId,
         runId: subRunId,
         agentId: subRun?.agentId,

@@ -94,9 +94,9 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                 'cursor-pointer hover:text-[#6366f1]',
               )}
               onClick={() => {
-                const { chatDrawer, openChatDrawer, closeChatDrawer } = useFlowStore.getState()
-                if (chatDrawer?.flowId === flowId && chatDrawer?.agentId === agentId) {
-                  closeChatDrawer()
+                const { hostDrawer, openChatDrawer, closeHostDrawer } = useFlowStore.getState()
+                if (hostDrawer?.flowId === flowId && hostDrawer?.agentId === agentId) {
+                  closeHostDrawer()
                 } else {
                   openChatDrawer({ flowId, agentId })
                 }

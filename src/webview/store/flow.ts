@@ -34,7 +34,16 @@ type StoreState = {
   /** flow 运行态: flowId -> FlowRunState */
   flowRunStates: Record<string, FlowRunState>
   globalError?: string
-  chatDrawer?: ChatDrawerState
+  /**
+   * host run 视图的 ChatDrawer(默认宽度更宽,host 模式下始终保留,子 Drawer 关闭后仍可见)。
+   * manual 模式也复用此 state(双 Drawer 仅 host 模式下使用,manual 模式只用 hostDrawer)。
+   */
+  hostDrawer?: ChatDrawerState
+  /**
+   * 子 Agent 运行视图的 ChatDrawer(默认宽度更窄,覆盖在 host Drawer 之上)。
+   * 切换不同子 run 时复用同一 Drawer 实例,通过 ChatPanel key=runId 强制重挂载。
+   */
+  subAgentDrawer?: ChatDrawerState
   flowListCollapsed: boolean
   /** 当前正在编辑的 agent */
   editingAgent?: { flowId: string; agentId: string }
@@ -106,8 +115,19 @@ type FlowStoreType = StoreState & {
     sourceFlowId: string,
     target: { kind: 'message'; runId: string; messageUuid: string },
   ) => void
+  /**
+   * 打开/切换 ChatDrawer —— 按 agentId 自动分流:
+   * - HOST_AGENT_ID → hostDrawer
+   * - 其余 agentId(包括 host 子 run 的真实 agentId)→ subAgentDrawer
+   * 调用方不需要关心是哪个 Drawer。
+   */
   openChatDrawer: (state: ChatDrawerState) => void
-  closeChatDrawer: () => void
+  /** 关闭 host Drawer */
+  closeHostDrawer: () => void
+  /** 打开/切换 sub agent Drawer(host 模式下子 run 视图,覆盖在 host Drawer 之上) */
+  openSubAgentDrawer: (state: ChatDrawerState) => void
+  /** 关闭 sub agent Drawer(host Drawer 不变) */
+  closeSubAgentDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void
   setEditingFlowId: (id?: string) => void
   /**
@@ -116,6 +136,8 @@ type FlowStoreType = StoreState & {
    */
   openFlowEditor: (flowId: string, opts?: { focus?: 'host_model' }) => void
   copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
+  /** destroy 指定 flow + run 的所有通知 key(供 host icon 进入子 run 时清掉对应通知) */
+  destroyRunNotifications: (flowId: string, runId: string) => void
 }
 
 // Re-export 类型和工具函数，保持现有引用兼容
@@ -149,33 +171,61 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       }
     }
   }
+  /** destroy 指定 flow + run 的所有通知 —— host icon 命中 awaiting 子 run 直接进入时调用 */
+  const destroyRunNotificationsByKey = (flowId: string, runId: string) => {
+    const prefix = `flow-notify-${flowId}-${runId}-`
+    for (const key of [...activeNotificationKeys]) {
+      if (key.startsWith(prefix)) {
+        notificationApi?.destroy(key)
+        activeNotificationKeys.delete(key)
+      }
+    }
+  }
 
   /** 判断是否应该弹出 webview 通知 */
   const shouldNotify = (effect: MessageEffect): boolean => {
     // a. 页面不可见时始终通知
     if (document.hidden) return true
-    const { activeFlowId, chatDrawer, flowRunStates } = get()
+    const { activeFlowId, hostDrawer, subAgentDrawer, flowRunStates } = get()
     // b. activeFlowId 与消息来源不一致时通知
     if (activeFlowId !== effect.flowId) return true
-    // c. ChatPanel 已打开且 agentId 不一致时通知
-    if (chatDrawer) {
-      const drawerAgentId =
-        chatDrawer.agentId ??
-        (chatDrawer.runId
-          ? flowRunStates[chatDrawer.flowId]?.runs.find((r) => r.runId === chatDrawer.runId)
-              ?.agentId
-          : undefined)
-      if (drawerAgentId !== effect.agentId) return true
+    // c. 当前已打开的某个 Drawer 命中 effect 对应 run 时不通知;
+    //    否则通知(用户可能没看见)。
+    const drawerHitRun = (drawer?: ChatDrawerState): boolean => {
+      if (!drawer || drawer.flowId !== effect.flowId) return false
+      // 优先按 runId 匹配(子 Drawer 一定带 runId)
+      if (drawer.runId) return drawer.runId === effect.runId
+      // host Drawer 在尚未创建 host run 时可能只有 agentId
+      if (drawer.agentId) {
+        const drawerAgentId =
+          drawer.agentId ??
+          flowRunStates[drawer.flowId]?.runs.find((r) => r.runId === drawer.runId)?.agentId
+        return drawerAgentId === effect.agentId
+      }
+      return false
     }
-    return false
+    if (drawerHitRun(subAgentDrawer)) return false
+    if (drawerHitRun(hostDrawer)) return false
+    return true
   }
 
-  /** 自动打开 ChatPanel：当 activeFlowId 匹配且 ChatPanel 未打开时 */
+  /** 自动打开 ChatPanel:按 effect.agentId 路由到对应 Drawer */
   const autoOpenChatDrawer = (effect: MessageEffect) => {
-    const { activeFlowId, chatDrawer } = get()
-    if (activeFlowId === effect.flowId && !chatDrawer) {
+    const { activeFlowId, hostDrawer, subAgentDrawer } = get()
+    if (activeFlowId !== effect.flowId) return
+    const isHost = effect.agentId === HOST_AGENT_ID
+    if (isHost) {
+      if (!hostDrawer) {
+        immerSet((d) => {
+          d.hostDrawer = { ...effect }
+        })
+      }
+      return
+    }
+    // 非 host:子 Drawer 不存在或与目标 run 不同时切过去
+    if (!subAgentDrawer || subAgentDrawer.runId !== effect.runId) {
       immerSet((d) => {
-        d.chatDrawer = { ...effect }
+        d.subAgentDrawer = { ...effect }
       })
     }
   }
@@ -214,7 +264,18 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           activeNotificationKeys.delete(key)
           immerSet((d) => {
             d.activeFlowId = n.flowId
-            d.chatDrawer = { flowId: n.flowId, agentId: n.agentId, agentName: n.agentName }
+            // 路由到对应 Drawer:host run → hostDrawer;子 run → subAgentDrawer
+            const next: ChatDrawerState = {
+              flowId: n.flowId,
+              agentId: n.agentId,
+              agentName: n.agentName,
+              runId: n.runId,
+            }
+            if (n.agentId === HOST_AGENT_ID) {
+              d.hostDrawer = next
+            } else {
+              d.subAgentDrawer = next
+            }
             d.editingAgent = undefined
           })
         },
@@ -246,7 +307,8 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
     loading: true,
     flows: [],
     activeFlowId: undefined,
-    chatDrawer: undefined,
+    hostDrawer: undefined,
+    subAgentDrawer: undefined,
     flowRunStates: {},
     flowListCollapsed: false,
     editingFlowId: undefined,
@@ -301,12 +363,15 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
             draft.flowRunStates[newFlowId] = newRunState
             draft.activeFlowId = newFlowId
             if (agentId) {
-              draft.chatDrawer = {
+              const drawer: ChatDrawerState = {
                 flowId: newFlowId,
                 agentId,
                 agentName: isHostAgent ? 'AI 托管' : (nextAgent?.agent_name ?? ''),
                 runId,
               }
+              // host run fork → hostDrawer;子 run 不允许 fork(MessageList 已禁用),
+              // 此处保险起见兜底:非 host agentId 也写入 hostDrawer(普通 manual 模式)。
+              draft.hostDrawer = drawer
             }
             draft.editingAgent = undefined
           })
@@ -315,7 +380,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           return
         }
         // 其余皆为 flow.signal.*：交给 updateFlowRunState 这一信号驱动的 reducer
-        const { flows, flowRunStates, chatDrawer } = get()
+        const { flows, flowRunStates, hostDrawer, subAgentDrawer } = get()
         const flowId = msg.data.flowId
         const existing = flowRunStates[flowId]
         if (!existing) return
@@ -332,28 +397,30 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           if (!state) return
           draft.flowRunStates[flowId] = state
 
-          // agentComplete 时:如果 ChatPanel 正打开的是已完成的 agent(agentId 视图),切到下一个 agent。
-          // runId 视图(chatDrawer.runId 存在)是用户主动锁定的某条 run,不做跟随。
+          // agentComplete 时:如果 hostDrawer 视图(manual 模式下唯一 Drawer)正打开的是已完成的 agent,
+          // 切到下一个 agent。runId 视图(drawer.runId 存在且与 prevLastRun.runId 不同)是用户主动锁定的某条 run,不做跟随。
           // host 模式下子 run agentComplete 不应让 ChatPanel 切走 host run / 用户当前看的子 run。
           if (msg.type === 'flow.signal.agentComplete' && state.mode !== 'host') {
             const newLastRun = state.runs[state.runs.length - 1]
             if (
-              chatDrawer?.flowId === flowId &&
-              !chatDrawer.runId &&
-              chatDrawer.agentId === prevLastAgentId &&
+              hostDrawer?.flowId === flowId &&
+              !hostDrawer.runId &&
+              hostDrawer.agentId === prevLastAgentId &&
               newLastRun &&
               newLastRun.agentId !== prevLastAgentId
             ) {
               const nextAgent = flows
                 .find((f) => f.id === flowId)
                 ?.agents?.find((a) => a.id === newLastRun.agentId)
-              draft.chatDrawer = {
+              draft.hostDrawer = {
                 flowId,
                 agentId: newLastRun.agentId,
-                agentName: nextAgent?.agent_name ?? chatDrawer.agentName,
+                agentName: nextAgent?.agent_name ?? hostDrawer.agentName,
               }
             }
           }
+          // subAgentDrawer 视图保留(子 run 完成后用户仍能查看历史)
+          void subAgentDrawer
         })
         fireNotifications(effects)
       }
@@ -404,14 +471,33 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     openChatDrawer: (state) => {
+      // 自动按 agentId 路由到对应 Drawer
+      const isHost = state.agentId === HOST_AGENT_ID
       immerSet((draft) => {
-        draft.chatDrawer = state
+        if (isHost) {
+          draft.hostDrawer = state
+        } else {
+          draft.subAgentDrawer = state
+        }
       })
     },
-    closeChatDrawer: () => {
+    closeHostDrawer: () => {
       immerSet((draft) => {
-        draft.chatDrawer = undefined
+        draft.hostDrawer = undefined
       })
+    },
+    openSubAgentDrawer: (state) => {
+      immerSet((draft) => {
+        draft.subAgentDrawer = state
+      })
+    },
+    closeSubAgentDrawer: () => {
+      immerSet((draft) => {
+        draft.subAgentDrawer = undefined
+      })
+    },
+    destroyRunNotifications: (flowId, runId) => {
+      destroyRunNotificationsByKey(flowId, runId)
     },
     setEditingAgent: (agent) => {
       immerSet((draft) => {

@@ -383,29 +383,16 @@ export class FlowRunner {
   private makeRunAgentHandler(hostRunId: string) {
     return async (input: { id: string; message?: string; values?: Record<string, string> }): Promise<RunAgentOutput> => {
       const targetAgentId = input.id
+      // 必须先 consume toolUseId —— 即使后续 findAgentById 校验失败抛错,
+      // 队列也已出队,不会污染下一次正常 runAgent 调用的 FIFO 顺序。
+      const toolUseId = await this.consumePendingRunAgentToolUseId(hostRunId)
       const subAgent = this.findAgentById(targetAgentId)
       if (!subAgent) {
         throw new Error(
           `runAgent: Agent id "${targetAgentId}" not found in flow. Use the exact id from the agents list.`,
         )
       }
-      // 等待对应 mcp_tool_use 抵达 onMessage 流,从队列取出 toolUseId
-      const toolUseId = await this.consumePendingRunAgentToolUseId(hostRunId)
       const subRunId = globalThis.crypto.randomUUID()
-      // 通知 reducer 创建子 AgentRun(parentToolUseId 用于 webview 端反查跳转)
-      this.fire('flow.signal.subAgentStarted', {
-        runId: hostRunId,
-        subRunId,
-        subAgentId: targetAgentId,
-        parentToolUseId: toolUseId,
-      })
-      // 注册 promise:子 run agentComplete 时 resolve;agentError / killFlow 时 reject
-      const promise = new Promise<RunAgentOutput>((resolve, reject) => {
-        this.pendingRunAgentHandlers.set(subRunId, { resolve, reject })
-      })
-      this.subRunToHost.set(subRunId, hostRunId)
-      // values 合并:host AI 提供的 values + 当前 shareValues 快照(host AI 提供的优先)
-      const baseValues = { ...this.getLatestShareValues(), ...(input.values ?? {}) }
       // 子 run initMessage:no_input 的 Agent 强制 '开始',否则用 host 提供的 message(空也允许)
       const subInitMessage: UserMessageType = {
         type: 'user',
@@ -415,6 +402,23 @@ export class FlowRunner {
         },
         parent_tool_use_id: null,
       }
+      // 通知 reducer 创建子 AgentRun(parentToolUseId 用于 webview 端反查跳转;
+      // initMessage / values 用于子 run.messages 首屏回显 host 注入的输入)。
+      this.fire('flow.signal.subAgentStarted', {
+        runId: hostRunId,
+        subRunId,
+        subAgentId: targetAgentId,
+        parentToolUseId: toolUseId,
+        initMessage: subInitMessage,
+        values: input.values,
+      })
+      // 注册 promise:子 run agentComplete 时 resolve;agentError / killFlow 时 reject
+      const promise = new Promise<RunAgentOutput>((resolve, reject) => {
+        this.pendingRunAgentHandlers.set(subRunId, { resolve, reject })
+      })
+      this.subRunToHost.set(subRunId, hostRunId)
+      // values 合并:host AI 提供的 values + 当前 shareValues 快照(host AI 提供的优先)
+      const baseValues = { ...this.getLatestShareValues(), ...(input.values ?? {}) }
       this.runAgent(subRunId, subInitMessage, subAgent, baseValues, false)
       this.runMode.set(subRunId, 'host-sub')
       return promise

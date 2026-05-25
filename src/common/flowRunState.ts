@@ -342,10 +342,12 @@ export function updateFlowRunState(
       opts.reason !== 'flow-completed'
     )
       return
+    // host run 的 agentId 是 HOST_AGENT_ID,不在 flow.agents 中,直接固定显示 'AI 托管'
+    const agentName = opts.agentId === HOST_AGENT_ID ? 'AI 托管' : (agent?.agent_name ?? '')
     effects.push({
       ...opts,
       flowName: flow?.name ?? '',
-      agentName: agent?.agent_name ?? '',
+      agentName,
     })
   }
 
@@ -498,13 +500,43 @@ export function updateFlowRunState(
       })
       .with({ type: 'flow.signal.subAgentStarted' }, ({ data }) => {
         // host AI 通过 runAgent 工具调度子 Agent 时,extension 端创建子 run,
-        // reducer 据此在 state.runs 中追加新 AgentRun。
+        // reducer 据此在 state.runs 中追加新 AgentRun;并把 host 注入的 initMessage / values
+        // 作为子 run.messages 首条 user 消息回显(与 manual 模式 agentComplete → next agent
+        // nextInitMessage 回显逻辑同源),让用户在子 run 面板能看到 host 喂给子 Agent 的输入。
         if (draft.runs.some((r) => r.runId === data.subRunId)) return
+        const firstMessages: ExtensionToWebviewMessage[] = [
+          {
+            type: 'flow.signal.aiMessage',
+            data: {
+              flowId,
+              runId: data.subRunId,
+              message: data.initMessage,
+            },
+          },
+        ]
+        if (data.values && Object.keys(data.values).length > 0) {
+          // 把 host 注入的 values 序列化成额外的 user aiMessage,便于 UI 单独渲染。
+          // SDK 要求 user.message.content 为 string | ContentBlockParam[];这里用纯文本。
+          const valuesText = ['# 注入的共享数据', '```json', JSON.stringify(data.values, null, 2), '```'].join('\n')
+          const valuesMessage: UserMessageType = {
+            type: 'user',
+            message: { role: 'user', content: valuesText },
+            parent_tool_use_id: null,
+          }
+          firstMessages.push({
+            type: 'flow.signal.aiMessage',
+            data: {
+              flowId,
+              runId: data.subRunId,
+              message: valuesMessage,
+            },
+          })
+        }
         draft.runs.push({
           runId: data.subRunId,
           agentId: data.subAgentId,
           sessionId: undefined,
-          messages: [],
+          messages: firstMessages,
           completed: false,
           parentToolUseId: data.parentToolUseId,
         })
