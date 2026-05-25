@@ -597,6 +597,12 @@ export function updateFlowRunState(
             message: data.message,
           },
         })
+        // 用户向已 forceStopped 的子 run 发消息 = 显式恢复对话,清掉 forceStopped 让
+        // getRunPhase 从 'stopped' 跳出。extension 端 FlowRunner.handleUserMessage 会
+        // 同步 lazy resume 该子 executor。
+        if (run.forceStopped) {
+          run.forceStopped = false
+        }
       })
       .with({ type: 'flow.command.interrupt' }, () => {
         // 等待 flow.signal.agentInterrupted 实际处理

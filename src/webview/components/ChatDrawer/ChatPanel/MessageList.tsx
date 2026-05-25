@@ -13,11 +13,17 @@ import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useMemoizedFn } from 'ahooks'
 import { match } from 'ts-pattern'
-import type { AskUserQuestionOutput, PendingQuestion, PendingToolPermission } from '@/common'
+import type {
+  AgentPhase,
+  AskUserQuestionOutput,
+  PendingQuestion,
+  PendingToolPermission,
+} from '@/common'
 import {
   getAnsweredToolPermissions,
   getPendingQuestionsFor,
   getPendingToolPermissionsFor,
+  getRunPhase,
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
@@ -189,6 +195,15 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     }
     return m
   }, [allRuns])
+  // 同步计算每个 runAgent toolUseId → 子 run 当前 phase,MessageBubble 据此切文案。
+  const subRunPhaseByToolUseId = useMemo(() => {
+    const m = new Map<string, AgentPhase>()
+    if (!allRuns || !fs) return m
+    for (const r of allRuns) {
+      if (r.parentToolUseId) m.set(r.parentToolUseId, getRunPhase(r, fs))
+    }
+    return m
+  }, [allRuns, fs])
   const onSubRunClick = useCallback(
     (subRunId: string) => {
       const subRun = allRuns?.find((r) => r.runId === subRunId)
@@ -220,6 +235,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       // 新 Flow 子 run 视图继续对话 → AgentComplete 也无 host run 接收,死循环。
       onFork: isSubRun ? undefined : onForkRequest,
       toolUseIdToSubRunId,
+      subRunPhaseByToolUseId,
       onSubRunClick,
     }),
     [
@@ -232,6 +248,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       onForkRequest,
       isSubRun,
       toolUseIdToSubRunId,
+      subRunPhaseByToolUseId,
       onSubRunClick,
     ],
   )

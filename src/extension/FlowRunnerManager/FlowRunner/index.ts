@@ -30,6 +30,15 @@ export type FlowRunnerOptions = {
    * 时调用此回调，由外部（reducer 镜像 FlowRunStateManager）作为唯一真相源。
    */
   getLatestShareValues: () => Record<string, string>
+  /**
+   * 取指定 runId 的 RunState 信息(sessionId / agentId / parentToolUseId)。
+   * 用于 host run interrupt 后子 run executor 已被 cascadeKill 删除时,
+   * 用户继续在 sub Drawer 发消息时 lazy resume 子 executor。
+   * 不存在时返回 undefined,handleUserMessage 直接放弃。
+   */
+  getRunInfo?: (
+    runId: string,
+  ) => { sessionId?: string; agentId: string; parentToolUseId?: string } | undefined
 }
 
 /**
@@ -62,6 +71,7 @@ export class FlowRunner {
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
+  private readonly getRunInfo?: FlowRunnerOptions['getRunInfo']
   /** runId → 该 run 当前 mode('manual' / 'host' parent / 'host' sub-run) */
   private runMode = new Map<string, 'manual' | 'host-parent' | 'host-sub'>()
   /** 子 run 完成 / 失败时 resolve / reject 对应 host AI 的 runAgent promise */
@@ -72,6 +82,7 @@ export class FlowRunner {
   constructor(flow: Flow, options: FlowRunnerOptions) {
     this.flow = flow
     this.getLatestShareValues = options.getLatestShareValues
+    this.getRunInfo = options.getRunInfo
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -292,7 +303,43 @@ export class FlowRunner {
     message,
   }: FlowRunnerCommandEvents['flow.command.userMessage']): void {
     const executor = this.executors.get(runId)
-    if (!executor) return
+    if (executor) {
+      executor.sendUserMessage(message)
+      return
+    }
+    // executor 不在 Map 中:host run interrupt 时 cascadeKillSubExecutors 把子 executor
+    // 删除并 fire agentInterrupted。用户在 sub Drawer 继续向已 stopped 的子 run 发消息,
+    // 这里按 RunState 信息 lazy resume 子 executor(host promise 已 reject,子 run 完成
+    // 后 onHostSubAgentComplete 找不到 handler 会跳过 resolve,只 fire signal,UI 仍可见)。
+    this.tryResumeSubRun(runId, message)
+  }
+
+  /**
+   * 子 run executor 已被删除时按 RunState 信息 lazy resume —— 仅处理子 run
+   * (parentToolUseId 存在);host-parent / manual run 走原静默丢弃路径。
+   * 重建后立即 push 用户消息,createQuery 在 lazy executor.sendUserMessage 内部触发。
+   */
+  private tryResumeSubRun(runId: string, message: UserMessageType): void {
+    const info = this.getRunInfo?.(runId)
+    if (!info || !info.parentToolUseId) return
+    const subAgent = this.findAgentById(info.agentId)
+    if (!subAgent) return
+    const events = this.buildExecutorEvents(runId, subAgent, () => executor)
+    const dummyInit: UserMessageType = {
+      type: 'user',
+      message: { role: 'user', content: '' },
+      parent_tool_use_id: null,
+    }
+    const executor: ClaudeExecutor = new ClaudeExecutor(
+      dummyInit,
+      subAgent,
+      this.getLatestShareValues(),
+      events,
+      info.sessionId,
+      'lazy',
+    )
+    this.executors.set(runId, executor)
+    this.runMode.set(runId, 'host-sub')
     executor.sendUserMessage(message)
   }
 

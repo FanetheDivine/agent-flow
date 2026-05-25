@@ -2,7 +2,13 @@ import { memo, type FC, type ReactNode } from 'react'
 import { Tag, Tooltip } from 'antd'
 import { BranchesOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
-import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
+import { match } from 'ts-pattern'
+import type {
+  AgentPhase,
+  AskUserQuestionOutput,
+  ExtensionToWebviewMessage,
+  ModelTokenUsage,
+} from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
@@ -55,6 +61,11 @@ export type BubbleCtx = {
    * 节点渲染为可点击,点击调 onSubRunClick(subRunId) 切到子 run 视图。
    */
   toolUseIdToSubRunId?: Map<string, string>
+  /**
+   * 与 toolUseIdToSubRunId 对齐的子 run phase 映射,用于 runAgent 节点显示
+   * 「子 Agent 运行中…」/「等待回答」/「等待授权」等差异化文案。
+   */
+  subRunPhaseByToolUseId?: Map<string, AgentPhase>
   onSubRunClick?: (subRunId: string) => void
 }
 
@@ -289,6 +300,26 @@ function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   )
 }
 
+/**
+ * runAgent 节点按子 run phase 显示状态文案。phase 缺失(子 run 数据未到)兜底
+ * 显示通用提示,保持节点可点击。
+ */
+function subRunStatusLabel(phase?: AgentPhase): string {
+  if (!phase) return '点击查看子 Agent 对话 →'
+  return match(phase)
+    .with('idle', () => '子 Agent 待启动')
+    .with('starting', () => '子 Agent 启动中…')
+    .with('running', () => '子 Agent 运行中…')
+    .with('result', () => '等待继续')
+    .with('interrupted', () => '已停止')
+    .with('awaiting-question', () => '等待回答')
+    .with('awaiting-tool-permission', () => '等待授权')
+    .with('completed', () => '已完成')
+    .with('stopped', () => '已停止')
+    .with('error', () => '子 Agent 出错')
+    .exhaustive()
+}
+
 function renderItemToBubble(
   item: RenderItem,
   ctx?: BubbleCtx,
@@ -416,6 +447,7 @@ function renderItemToBubble(
       if (isRunAgentTool && ctx?.toolUseIdToSubRunId && ctx?.onSubRunClick) {
         const subRunId = ctx.toolUseIdToSubRunId.get(item.toolUseId)
         if (subRunId) {
+          const subPhase = ctx.subRunPhaseByToolUseId?.get(item.toolUseId)
           return {
             key: item.key,
             role: 'ai',
@@ -429,7 +461,7 @@ function renderItemToBubble(
                 className='w-full cursor-pointer rounded border border-[#cba6f7]/40 bg-[#cba6f7]/5 p-2 text-left transition-colors hover:bg-[#cba6f7]/10'
               >
                 <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
-                <div className='mt-1 text-[10px] text-[#cba6f7]'>点击查看子 Agent 对话 →</div>
+                <div className='mt-1 text-[10px] text-[#cba6f7]'>{subRunStatusLabel(subPhase)} →</div>
               </button>
             ),
           }

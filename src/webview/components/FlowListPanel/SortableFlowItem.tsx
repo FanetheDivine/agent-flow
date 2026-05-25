@@ -54,16 +54,13 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   }
 
   const statusConfig = phase && phase !== 'idle' ? PHASE_CONFIG[phase] : undefined
-  // host 模式且非 idle 时,AI icon 闪烁(host AI 正在工作)。
+  // host 模式且非 idle 时,AI icon 闪烁(host AI 正在工作 / 已完成 / 已停止 / 出错都会闪)。
   // 入口分流:无 host_model → 打开 FlowEditor 提示;有 host_model → 切到 ChatDrawer 的 host run 视图。
   // 如果当前 flow 是 manual 模式且非 idle,点 AI icon 弹通知(模式互斥)。
+  // 注意:闪烁条件与按钮组可见性解耦 —— 复制 / 删除等其他按钮始终走 hover 显示语义,
+  // 仅 host icon 在 hostShouldBlink 时持续显示并闪烁。
   const hostFlowPhase = getFlowPhase(runState)
-  const hostRunningNonIdle =
-    runState?.mode === 'host' &&
-    hostFlowPhase !== 'idle' &&
-    hostFlowPhase !== 'completed' &&
-    hostFlowPhase !== 'stopped' &&
-    hostFlowPhase !== 'error'
+  const hostShouldBlink = runState?.mode === 'host' && hostFlowPhase !== 'idle'
   const onClickHostIcon = (e: React.MouseEvent) => {
     e.stopPropagation()
     setActiveFlowId(id)
@@ -173,10 +170,7 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
         </div>
 
         <span
-          className={cn(
-            'flex shrink-0 items-center gap-1 transition-opacity',
-            hostRunningNonIdle ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-          )}
+          className='flex shrink-0 items-center gap-1'
           onClick={(e) => e.stopPropagation()}
         >
           <RobotOutlined
@@ -184,7 +178,9 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             onClick={onClickHostIcon}
             className={cn(
               'text-[#a6adc8]! transition-opacity hover:text-[#cba6f7]!',
-              hostRunningNonIdle && 'animate-pulse text-[#cba6f7]! opacity-100',
+              hostShouldBlink
+                ? 'animate-pulse text-[#cba6f7]! opacity-100'
+                : 'opacity-0 group-hover:opacity-100',
             )}
           />
           <DatabaseOutlined
@@ -211,10 +207,15 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             }}
             className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:text-[#89b4fa]!'
           />
-          <Typography.Text
-            copyable={{ tooltips: false, text: () => JSON.stringify(flow, null, 2) }}
+          <span className='opacity-0 transition-opacity group-hover:opacity-100'>
+            <Typography.Text
+              copyable={{ tooltips: false, text: () => JSON.stringify(flow, null, 2) }}
+            />
+          </span>
+          <DeleteOutlined
+            className='text-[#a6adc8]! opacity-0 transition-opacity group-hover:opacity-100 hover:text-[#f38ba8]!'
+            onClick={onDelete}
           />
-          <DeleteOutlined className='text-[#a6adc8]! hover:text-[#f38ba8]!' onClick={onDelete} />
         </span>
       </div>
 

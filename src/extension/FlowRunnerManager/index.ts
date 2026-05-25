@@ -4,15 +4,29 @@ import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
 type GetLatestShareValues = (flowId: string) => Record<string, string>
+/**
+ * 取指定 flowId + runId 的 RunState 信息(sessionId / agentId / parentToolUseId)。
+ * FlowRunner 在 sub run executor 已 dispose 但用户继续发消息时调用,用于 lazy resume。
+ */
+type GetRunInfo = (
+  flowId: string,
+  runId: string,
+) => { sessionId?: string; agentId: string; parentToolUseId?: string } | undefined
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
   private postMessage: PostMessage
   private getLatestShareValues: GetLatestShareValues
+  private getRunInfo: GetRunInfo
 
-  constructor(postMessage: PostMessage, getLatestShareValues: GetLatestShareValues) {
+  constructor(
+    postMessage: PostMessage,
+    getLatestShareValues: GetLatestShareValues,
+    getRunInfo: GetRunInfo,
+  ) {
     this.postMessage = postMessage
     this.getLatestShareValues = getLatestShareValues
+    this.getRunInfo = getRunInfo
   }
 
   /**
@@ -31,6 +45,7 @@ export class FlowRunnerManager {
         this.disposeRunner(flowId)
         const runner = new FlowRunner(flow, {
           getLatestShareValues: () => this.getLatestShareValues(flowId),
+          getRunInfo: (rid) => this.getRunInfo(flowId, rid),
         })
         runner.listenAllSignals((eventType, signalData) => {
           this.postMessage({
@@ -109,6 +124,7 @@ export class FlowRunnerManager {
     this.disposeRunner(flowId)
     const runner = new FlowRunner(flow, {
       getLatestShareValues: () => this.getLatestShareValues(flowId),
+      getRunInfo: (rid) => this.getRunInfo(flowId, rid),
     })
     runner.listenAllSignals((eventType, signalData) => {
       this.postMessage({

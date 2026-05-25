@@ -85,12 +85,14 @@ export const ChatDrawer: FC<Props> = ({
    * - 无 flowId / viewAgentId → disabled
    * - host idle (host run 尚未创建) → ready,首发即 flowStart(mode='host')
    * - 子 run completed → disabled (场景 9)
+   * - 子 run stopped / interrupted → ready,允许向 lazy resume 的子 executor 继续发消息
    * - 其余 → agentChatInputState(runPhase) 投影
    */
   const inputState: AgentChatInputState = (() => {
     if (!flowId || !viewAgentId) return 'disabled'
     if (!viewRun) return 'ready'
     if (isSubRun && runPhase === 'completed') return 'disabled'
+    if (isSubRun && (runPhase === 'stopped' || runPhase === 'interrupted')) return 'ready'
     return agentChatInputState(runPhase)
   })()
 
@@ -110,8 +112,16 @@ export const ChatDrawer: FC<Props> = ({
       if (!flowId || !viewAgentId) return false
       if (inputState === 'disabled' || inputState === 'loading') return false
 
-      // 同会话追问:viewRun 已存在且处于 result/interrupted
-      if (viewRunId && (runPhase === 'result' || runPhase === 'interrupted')) {
+      // 同会话追问:viewRun 已存在且处于 result/interrupted。
+      // 子 run 在 host run interrupt 后被级联标记为 stopped(forceStopped),
+      // 此时也不允许走 startFlow(会清空整个 host flow);改为 sendUserMessage,
+      // FlowRunner 端会 lazy resume 该子 executor。
+      if (
+        viewRunId &&
+        (runPhase === 'result' ||
+          runPhase === 'interrupted' ||
+          (isSubRun && runPhase === 'stopped'))
+      ) {
         sendUserMessage(flowId, viewRunId, content)
         chatPanelRef.current?.forceScrollToBottom()
         return true
@@ -139,6 +149,7 @@ export const ChatDrawer: FC<Props> = ({
       viewRunId,
       inputState,
       runPhase,
+      isSubRun,
       isHostFlow,
       isHostIdle,
       sendUserMessage,

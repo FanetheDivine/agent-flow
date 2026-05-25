@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FC } from 'react'
+import { useLayoutEffect, useEffect, useRef, useState, type FC } from 'react'
 import {
   Drawer,
   Form,
@@ -145,10 +145,12 @@ export const FlowEditor: FC = () => {
     useSensor(KeyboardSensor),
   )
 
-  useEffect(() => {
+  // 切换 flow 时把表单字段同步到新 flow —— 用 layoutEffect 确保在 paint 前完成,
+  // 否则用户会看到旧 flow 字段闪一帧再切新值(尤其 host icon 跨 flow 连点时)。
+  // shareValues 是 nested 字段，setFieldsValue 对未在新值中出现的子 key 不会清除，
+  // 跨 flow 切换时会读到上一次 form 内部 store 的残留值,所以先 reset 再赋值。
+  useLayoutEffect(() => {
     if (open && flow) {
-      // shareValues 是 nested 字段，setFieldsValue 对未在新值中出现的子 key 不会清除，
-      // 跨 flow 切换时会读到上一次 form 内部 store 的残留值，所以先 reset 再赋值。
       form.resetFields()
       form.setFieldsValue({
         name: flow.name,
@@ -233,7 +235,6 @@ export const FlowEditor: FC = () => {
 
   return (
     <Drawer
-      key={flow.id}
       title={null}
       placement='left'
       open={open}

@@ -157,6 +157,16 @@ export function activate(context: vscode.ExtensionContext) {
   const runnerManager = new FlowRunnerManager(
     postMessageToWebview,
     (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.shareValues ?? {},
+    (flowId, runId) => {
+      const state = flowRunStateManager.getFlowRunStates()[flowId]
+      const run = state?.runs.find((r) => r.runId === runId)
+      if (!run) return undefined
+      return {
+        sessionId: run.sessionId,
+        agentId: run.agentId,
+        parentToolUseId: run.parentToolUseId,
+      }
+    },
   )
 
   /**
