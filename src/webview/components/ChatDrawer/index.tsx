@@ -16,8 +16,8 @@ import type { ChatPanelRef } from './ChatPanel'
 
 type Props = {
   /**
-   * 当前 chatDrawer state 中的 flowId / agentId / runId(可选)。
-   * 全为 undefined 时 ChatPanel 不渲染,但 ChatInput 仍然挂载(全局唯一实例,保留 Slate 草稿)。
+   * 当前 drawerState 中的 flowId / agentId / runId(可选)。
+   * 全为 undefined 时 ChatPanel 不渲染,但 ChatInput 仍然挂载(单实例 + forceRender,保留 Slate 草稿)。
    */
   flowId?: string
   /**
@@ -32,12 +32,6 @@ type Props = {
   open: boolean
   defaultSize?: number
   title?: ReactNode
-  /**
-   * 'host'(默认):host 模式下的 host run Drawer 或 manual 模式 Drawer,关 X 关掉自身。
-   * 'sub':host 模式下子 run Drawer,覆盖在 host Drawer 之上(z-index 更高);
-   * onClose 仅关闭子 Drawer,host Drawer 保持不变。
-   */
-  kind?: 'host' | 'sub'
   onClose?: () => void
 }
 
@@ -48,7 +42,6 @@ export const ChatDrawer: FC<Props> = ({
   open,
   defaultSize = 700,
   title,
-  kind = 'host',
   onClose,
 }) => {
   const sendUserMessage = useFlowStore((s) => s.sendUserMessage)
@@ -163,9 +156,6 @@ export const ChatDrawer: FC<Props> = ({
       defaultSize={defaultSize}
       resizable
       forceRender
-      // sub agent Drawer 需覆盖在 host Drawer 之上 —— antd 默认 zIndex=1000,
-      // 主动给 sub Drawer 提一档。挂载顺序也保证后挂载的在前(App.tsx 中 sub 在后)。
-      zIndex={kind === 'sub' ? 1010 : 1000}
       styles={{
         body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
       }}

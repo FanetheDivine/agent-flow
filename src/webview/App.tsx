@@ -82,6 +82,12 @@ export const App: FC = () => {
     )
   }
 
+  // 单 ChatDrawer 实例:按 subAgentDrawer ?? hostDrawer 选取当前展示的 state。
+  // 子 Drawer 优先;关闭时优先关掉子 Drawer,视觉自然回到 host Drawer。
+  // ChatInput 在该 Drawer 底部,单实例 + forceRender → 在 host run / 子 run 切换中草稿不丢。
+  const drawerState = subAgentDrawer ?? hostDrawer
+  const onCloseDrawer = subAgentDrawer ? closeSubAgentDrawer : closeHostDrawer
+
   return (
     <div className='flex h-full w-full'>
       <div className='relative flex-1'>
@@ -90,25 +96,12 @@ export const App: FC = () => {
         ))}
         <FlowListPanel />
       </div>
-      {/* host run Drawer:默认 700,host 模式下持续保留 */}
       <ChatDrawer
-        flowId={hostDrawer?.flowId}
-        agentId={hostDrawer?.agentId}
-        runId={hostDrawer?.runId}
-        open={!!hostDrawer}
-        defaultSize={700}
-        kind='host'
-        onClose={closeHostDrawer}
-      />
-      {/* sub agent Drawer:默认 540,后渲染 → 层级在 host Drawer 之上 */}
-      <ChatDrawer
-        flowId={subAgentDrawer?.flowId}
-        agentId={subAgentDrawer?.agentId}
-        runId={subAgentDrawer?.runId}
-        open={!!subAgentDrawer}
-        defaultSize={540}
-        kind='sub'
-        onClose={closeSubAgentDrawer}
+        flowId={drawerState?.flowId}
+        agentId={drawerState?.agentId}
+        runId={drawerState?.runId}
+        open={!!drawerState}
+        onClose={onCloseDrawer}
       />
       <AgentEditor />
       <FlowEditor />
