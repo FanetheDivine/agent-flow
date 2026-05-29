@@ -200,14 +200,16 @@ export const AgentEditor: FC = () => {
                     allowClear
                     options={[
                       { value: 'opus', label: 'opus' },
-                      { value: 'gpt-5.5', label: 'gpt-5.5' },
+                      { value: 'qwen3.7-max', label: 'qwen3.7-max' },
                       { value: 'glm-5.1', label: 'glm-5.1' },
                       { value: 'DeepSeek-V4-Pro', label: 'DeepSeek-V4-Pro' },
-                      { value: 'claude-opus-4-7', label: 'opus4.7' },
-                      { value: 'claude-opus-4-6-v1', label: 'opus4.6' },
+                      { value: 'claude-opus-4-8', label: 'claude-opus-4-8' },
+                      { value: 'claude-opus-4-7', label: 'claude-opus-4-7' },
+                      { value: 'claude-opus-4-6-v1', label: 'claude-opus-4-6-v1' },
                       { value: 'sonnet', label: 'sonnet' },
-                      { value: 'haiku', label: 'haiku' },
+                      { value: 'gpt-5.5', label: 'gpt-5.5' },
                       { value: 'gpt-5.4', label: 'gpt-5.4' },
+                      { value: 'haiku', label: 'haiku' },
                       { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
                       { value: 'DeepSeek-V4-flash', label: 'DeepSeek-V4-flash' },
                     ]}
