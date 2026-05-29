@@ -1,5 +1,14 @@
 # Change Log
 
+## [0.0.24] - 2026-05-29
+
+### 优化
+
+- **silent_task 对齐普通模式的用户中断与发送能力**：silent_task 仅在 AI 侧做兜底（AskUserQuestion 自动应答、每轮 result 自动续「继续」、未授权工具直接 deny），用户侧 `sendUserMessage` / `interruptAgent` 与 task 一致——`ClaudeExecutor.sendUserMessage` 移除 silent_task 短路 return，允许运行中插话与 interrupted 后续接；`ChatDrawer` 删除 `isSilentAgent` selector 与中断按钮的提示分支，silent_task 与 task 走同一 `interruptAgent` 路径；`AgentEditor` 警告文案收窄为「AskUserQuestion 与 result 续轮自动应答」语义，保留模型 / effort / 提示词完整性提示。CLAUDE.md silent_task 节同步。
+- **调整模型选项**：AgentEditor 模型下拉新增 `qwen3.7-max` / `claude-opus-4-8`，移除展示别名 `opus4.7` / `opus4.6`（统一回正式 ID `claude-opus-4-7` / `claude-opus-4-6-v1`），并重新排序选项分组。
+- **更新 Claude Agent SDK**：`@anthropic-ai/claude-agent-sdk` 从 `^0.2.128` 升级到 `^0.3.156`。
+- 日志中增加模型用量内容
+
 ## [0.0.23] - 2026-05-24
 
 ### 优化
