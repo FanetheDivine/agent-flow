@@ -406,7 +406,8 @@ export function matchTool(
     const subCmds = splitBashCommand(command)
     if (subCmds.length === 0) continue
 
-    const allMatch = subCmds.every((sub) => matchSubCommand(sub, parsed.commandPattern))
+    const commandPattern = parsed.commandPattern
+    const allMatch = subCmds.every((sub) => matchSubCommand(sub, commandPattern))
     if (allMatch) return true
   }
   return false
@@ -440,7 +441,8 @@ export function matchToolAnySubCommand(
     const parsed = parseToolPattern(p)
     if (parsed.toolName !== 'Bash' || !parsed.commandPattern) continue
 
-    if (subCmds.some((sub) => matchSubCommand(sub, parsed.commandPattern))) {
+    const commandPattern = parsed.commandPattern
+    if (subCmds.some((sub) => matchSubCommand(sub, commandPattern))) {
       return true
     }
   }
