@@ -1,5 +1,5 @@
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type FC } from 'react'
-import { Button, Skeleton, Tag, Tooltip } from 'antd'
+import { Button, Input, Skeleton, Tag, Tooltip } from 'antd'
 import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { AnimatePresence, motion } from 'motion/react'
@@ -10,16 +10,18 @@ import {
   formatTokenCost,
   getAgentPhase,
   getFlowPhase,
+  getPendingCompleteConfirmsFor,
   getPendingQuestionsFor,
   getRunPhase,
 } from '@/common'
-import type { AgentRun } from '@/webview/store/flow'
+import type { AgentRun, PendingCompleteConfirm } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { MessageList, type MessageListRef } from './MessageList'
 
 // 模块级常量 —— useMemo 在「无 pending」时返回稳定空数组,避免新引用触发上层 effect。
 const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
+const EMPTY_PENDING_COMPLETE_CONFIRMS: PendingCompleteConfirm[] = []
 
 export type ChatPanelRef = {
   forceScrollToBottom: () => void
@@ -52,6 +54,7 @@ export const ChatPanel: FC<Props> = ({
 }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
   const answerQuestion = useFlowStore((s) => s.answerQuestion)
+  const answerCompleteConfirm = useFlowStore((s) => s.answerCompleteConfirm)
 
   const agentName = useFlowStore(
     (s) =>
@@ -83,6 +86,17 @@ export const ChatPanel: FC<Props> = ({
       return filtered
     }
     return getPendingQuestionsFor(fs, agentId)
+  }, [fs, runId, agentId])
+  const pendingCompleteConfirms = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_COMPLETE_CONFIRMS
+    if (runId) {
+      const list = fs.pendingCompleteConfirms
+      const filtered = list.filter((c) => c.runId === runId)
+      if (filtered.length === list.length) return list
+      if (filtered.length === 0) return EMPTY_PENDING_COMPLETE_CONFIRMS
+      return filtered
+    }
+    return getPendingCompleteConfirmsFor(fs, agentId)
   }, [fs, runId, agentId])
   const allRuns = useFlowStore((s) => s.flowRunStates[flowId]?.runs)
   // runs:仅本组件 token 统计 + Welcome / Skeleton 长度判断用;消息渲染由 MessageList 自己派生
@@ -155,6 +169,10 @@ export const ChatPanel: FC<Props> = ({
   // AskUserQuestionCard 容器高度,用户可上下拖动调整
   const [cardHeight, setCardHeight] = useState(240)
   const [dragging, setDragging] = useState(false)
+
+  // 完成前确认卡片的拒绝原因输入
+  const [denyReason, setDenyReason] = useState('')
+  const [showDenyInput, setShowDenyInput] = useState(false)
 
   // 合并所有 pending questions 的 questions 数组到一张卡片
   const mergedInput = useMemo(() => {
@@ -229,6 +247,7 @@ export const ChatPanel: FC<Props> = ({
     .with('interrupted', () => ({ text: '已中断', color: 'warning' }))
     .with('awaiting-question', () => ({ text: '需要回答', color: 'warning' }))
     .with('awaiting-tool-permission', () => ({ text: '请求授权', color: 'warning' }))
+    .with('awaiting-complete-confirm', () => ({ text: '等待完成确认', color: 'warning' }))
     .with('completed', () => ({ text: '已完成', color: 'success' }))
     .with('stopped', () => ({ text: '已停止', color: 'default' }))
     .with('error', () => ({ text: '出错', color: 'error' }))
@@ -312,9 +331,100 @@ export const ChatPanel: FC<Props> = ({
             flowId={flowId}
             agentId={agentId}
             runId={runId}
-            loading={phase === 'running' || phase === 'starting'}
+            loading={
+              phase === 'running' ||
+              phase === 'starting' ||
+              phase === 'awaiting-complete-confirm'
+            }
           />
         ))}
+
+      {/* Pending AgentComplete 完成前确认 —— 固定在消息列表下方，不随消息滚动 */}
+      <AnimatePresence>
+        {pendingCompleteConfirms.length > 0 && (() => {
+          const confirm = pendingCompleteConfirms[0]
+          const outputName = confirm.input.output_name as string | undefined
+          const content = confirm.input.content as string | undefined
+          return (
+            <motion.div
+              key={`confirm-card-${confirm.toolUseId}`}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 240 }}
+              className='shrink-0 overflow-hidden border-t border-[#45475a]'
+            >
+              <div className='px-3 py-2'>
+                <div className='mb-1 text-[11px] font-semibold text-[#f9e2af]'>
+                  完成前确认
+                  {outputName && (
+                    <span className='ml-1 text-[#a6adc8]'>→ {outputName}</span>
+                  )}
+                </div>
+                {content && (
+                  <div className='mb-2 max-h-24 overflow-auto break-all whitespace-pre-wrap text-[11px] text-[#cdd6f4]'>
+                    {content}
+                  </div>
+                )}
+                {showDenyInput ? (
+                  <div className='flex flex-col gap-1'>
+                    <Input.TextArea
+                      size='small'
+                      placeholder='请填写拒绝原因'
+                      value={denyReason}
+                      onChange={(e) => setDenyReason(e.target.value)}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                      className='text-[11px]'
+                    />
+                    <div className='flex gap-1'>
+                      <Button
+                        size='small'
+                        danger
+                        type='primary'
+                        onClick={() => {
+                          answerCompleteConfirm(flowId, confirm.runId, confirm.toolUseId, false, denyReason)
+                          setShowDenyInput(false)
+                          setDenyReason('')
+                        }}
+                      >
+                        确认拒绝
+                      </Button>
+                      <Button
+                        size='small'
+                        onClick={() => {
+                          setShowDenyInput(false)
+                          setDenyReason('')
+                        }}
+                      >
+                        取消
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className='flex gap-2'>
+                    <Button
+                      size='small'
+                      type='primary'
+                      onClick={() => {
+                        answerCompleteConfirm(flowId, confirm.runId, confirm.toolUseId, true)
+                      }}
+                    >
+                      同意
+                    </Button>
+                    <Button
+                      size='small'
+                      danger
+                      onClick={() => setShowDenyInput(true)}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )
+        })()}
+      </AnimatePresence>
 
       {/* Pending AskUserQuestion — 固定在输入框上方,不随消息滚动;顶部 handle 可上下拖动调整高度 */}
       <AnimatePresence>
