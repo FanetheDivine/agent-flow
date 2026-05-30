@@ -1,6 +1,6 @@
-import { memo, type FC, type ReactNode } from 'react'
-import { Tag, Tooltip } from 'antd'
-import { BranchesOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { memo, useState, type FC, type ReactNode } from 'react'
+import { Button, Input, Radio, Tag, Tooltip } from 'antd'
+import { BranchesOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
@@ -38,6 +38,10 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
+  /** 当前挂起的 AgentComplete 完成前确认 toolUseId 集合 */
+  pendingCompleteConfirmToolUseIds?: Set<string>
+  onCompleteConfirmAccept?: (toolUseId: string) => void
+  onCompleteConfirmDeny?: (toolUseId: string, reason: string) => void
   /**
    * 触发会话 fork。target.kind:
    * - `message`：以 SDK 消息 UUID 为切片终点
@@ -282,6 +286,72 @@ function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   )
 }
 
+/** 完成前确认卡片 —— 嵌入 tool_use 气泡后方，风格与 AskUserQuestionCard 对齐 */
+const AgentCompleteConfirmCard: FC<{
+  onAccept: () => void
+  onDeny: (reason: string) => void
+}> = ({ onAccept, onDeny }) => {
+  const [choice, setChoice] = useState<'accept' | 'deny' | null>(null)
+  const [reason, setReason] = useState('')
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault()
+      if (reason.trim()) onDeny(reason.trim())
+    }
+  }
+
+  return (
+    <div className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
+      <div className='flex items-center gap-2'>
+        <ExclamationCircleOutlined className='text-[#f9e2af]' />
+        <span className='text-xs font-semibold text-[#cdd6f4]'>完成前确认</span>
+      </div>
+      <Radio.Group
+        value={choice}
+        onChange={(e) => {
+          const val = e.target.value as 'accept' | 'deny'
+          setChoice(val)
+          if (val === 'accept') onAccept()
+        }}
+        className='flex flex-col gap-1'
+      >
+        <label className='flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-[#313244]'>
+          <Radio value='accept' />
+          <span className='text-sm text-[#cdd6f4]'>同意</span>
+        </label>
+        <label className='flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-[#313244]'>
+          <Radio value='deny' />
+          <span className='text-sm text-[#cdd6f4]'>拒绝</span>
+        </label>
+      </Radio.Group>
+      {choice === 'deny' && (
+        <div className='flex flex-col gap-1 pl-6'>
+          <Input.TextArea
+            autoSize={{ minRows: 1, maxRows: 3 }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder='请输入拒绝原因...'
+            className='text-sm'
+          />
+          <div className='flex justify-end'>
+            <Button
+              type='primary'
+              danger
+              size='small'
+              disabled={!reason.trim()}
+              onClick={() => onDeny(reason.trim())}
+            >
+              发送
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function renderItemToBubble(
   item: RenderItem,
   ctx?: BubbleCtx,
@@ -401,6 +471,8 @@ function renderItemToBubble(
       // 先计算权限状态，以便在 defaultOpen 中判断是否展开参数
       const isPendingPerm = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       const answeredPerm = ctx?.answeredToolPermissions?.[item.toolUseId]
+      const isPendingCompleteConfirm =
+        ctx?.pendingCompleteConfirmToolUseIds?.has(item.toolUseId) ?? false
       const permItem = {
         key: item.key + '-perm',
         role: 'system' as const,
@@ -427,14 +499,27 @@ function renderItemToBubble(
           />
         ),
       }
+      const confirmItem: RenderedBubble | null =
+        isPendingCompleteConfirm && ctx
+          ? {
+              key: item.key + '-confirm',
+              role: 'system',
+              content: (
+                <AgentCompleteConfirmCard
+                  onAccept={() => ctx.onCompleteConfirmAccept?.(item.toolUseId)}
+                  onDeny={(reason) => ctx.onCompleteConfirmDeny?.(item.toolUseId, reason)}
+                />
+              ),
+            }
+          : null
       if (isPendingPerm) {
-        return permItem
+        return confirmItem ? [permItem, confirmItem] : permItem
       }
 
       if (answeredPerm) {
-        return [permItem, toolUseItem]
+        return confirmItem ? [permItem, toolUseItem, confirmItem] : [permItem, toolUseItem]
       }
-      return toolUseItem
+      return confirmItem ? [toolUseItem, confirmItem] : toolUseItem
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
