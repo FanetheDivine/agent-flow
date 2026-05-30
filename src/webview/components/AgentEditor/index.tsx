@@ -47,7 +47,6 @@ const AutoAllowedToolsField: FC<{
           value={list}
           onChange={(v) => onChange?.(v as string[])}
           options={TOOL_OPTIONS}
-          tokenSeparators={[',', ' ']}
         />
       )}
     </div>
@@ -277,7 +276,6 @@ export const AgentEditor: FC = () => {
                   mode='tags'
                   placeholder='选择或输入工具名（回车添加自定义）'
                   options={TOOL_OPTIONS}
-                  tokenSeparators={[',', ' ']}
                 />
               </FormItem>
 
