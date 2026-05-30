@@ -243,7 +243,7 @@ export const AgentEditor: FC = () => {
               <FormItem
                 name='auto_allowed_tools'
                 label='自动允许的工具'
-                tooltip={`不需要用户确认、自动执行的工具。开启「允许全部」或留空表示全部放行；特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
+                tooltip={`不需要用户确认、自动执行的工具。开启「允许全部」或留空表示全部放行；特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具。Bash 支持命令级控制：Bash(git status:*) 前缀匹配、Bash(git status) 精确匹配；组合命令需所有子命令都命中才自动放行`}
               >
                 <AutoAllowedToolsField />
               </FormItem>
@@ -251,7 +251,7 @@ export const AgentEditor: FC = () => {
               <FormItem
                 name='must_confirm_tools'
                 label='必须确认的工具'
-                tooltip={`每次调用都必须用户确认的工具，优先级高于「自动允许」。特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`}
+                tooltip={`每次调用都必须用户确认的工具，优先级高于「自动允许」。特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具。Bash 支持命令级控制：Bash(git push:*) 前缀匹配、Bash(git push) 精确匹配；组合命令中任一子命令命中即要求确认`}
               >
                 <Select
                   mode='tags'
