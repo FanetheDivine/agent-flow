@@ -35,7 +35,7 @@ export const AgentSchema = z.object({
     .describe(
       '自动允许执行的工具：true 表示全部放行；字符串数组为白名单。' +
         '特殊值 "MCP" 匹配所有 mcp__* 工具。' +
-        'Bash 支持命令级控制："Bash(cmd:*)" 前缀匹配、"Bash(cmd)" 精确匹配；' +
+        'Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。' +
         '组合命令（&&/||/|/;/&）需所有子命令都命中才自动放行。裸 "Bash" 匹配整个工具',
     ),
   must_confirm_tools: z
@@ -44,8 +44,8 @@ export const AgentSchema = z.object({
     .describe(
       '必须用户确认的工具名；优先级高于 auto_allowed_tools。' +
         '特殊值 "MCP" 匹配所有 mcp__* 工具。' +
-        'Bash 支持命令级控制："Bash(cmd:*)" 前缀匹配、"Bash(cmd)" 精确匹配；' +
-        '组合命令中任一子命令命中即要求确认。裸 "Bash" 匹配整个工具',
+        'Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。' +
+        '组合命令中任一子命令命中即要求确认。',
     ),
   work_mode: z
     .enum(['task', 'chat', 'silent_task'])
@@ -197,7 +197,7 @@ export function validateFlow(flow: Flow): FlowValidationResult {
 export const MCP_WILDCARD = 'MCP'
 
 /** Claude Code 预设提供的常见工具名，用于 AgentEditModal 的候选项。
- * 其中 Bash 支持命令级权限控制：`Bash(cmd:*)` 前缀匹配、`Bash(cmd)` 精确匹配，
+ * 其中 Bash 支持命令级权限控制：`Bash(cmd)` 前缀匹配，
  * 裸 `Bash` 表示整个工具（向后兼容）。详见 {@link matchTool} */
 export const BUILTIN_TOOL_NAMES = [
   'Bash',
@@ -319,8 +319,7 @@ export function splitBashCommand(command: string): string[] {
  * 解析工具权限规则字符串，提取工具名和可选的命令模式。
  *
  * 支持格式：
- * - `Bash(git status:*)` → `{ toolName: 'Bash', commandPattern: 'git status:*' }`
- * - `Bash(git status)` → `{ toolName: 'Bash', commandPattern: 'git status' }`
+ * - `Bash(git status)` → `{ toolName: 'Bash', commandPattern: 'git status' }`（前缀匹配）
  * - `Bash` → `{ toolName: 'Bash' }`（裸名，匹配整个工具）
  * - `MCP` → `{ toolName: 'MCP' }`
  * - `Read` → `{ toolName: 'Read' }`
@@ -344,20 +343,14 @@ export function parseToolPattern(pattern: string): { toolName: string; commandPa
 }
 
 /**
- * 判断单个子命令是否匹配命令模式。
+ * 判断单个子命令是否匹配命令模式（前缀匹配）。
  *
- * - 模式以 `:*` 结尾：前缀匹配（去掉 `:*` 后，子命令以该前缀开头）
- * - 否则：精确匹配（trim 后全等）
+ * 子命令 trim 后以 commandPattern 开头即命中。
  *
  * @see {@link matchTool}
  */
 export function matchSubCommand(subCmd: string, commandPattern: string): boolean {
-  const trimmedCmd = subCmd.trim()
-  if (commandPattern.endsWith(':*')) {
-    const prefix = commandPattern.slice(0, -2)
-    return trimmedCmd.startsWith(prefix)
-  }
-  return trimmedCmd === commandPattern
+  return subCmd.trim().startsWith(commandPattern)
 }
 
 /**
