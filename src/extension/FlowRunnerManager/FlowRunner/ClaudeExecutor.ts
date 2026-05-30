@@ -123,8 +123,11 @@ export class ClaudeExecutor {
     { resolve: (result: PermissionResult) => void; input: Record<string, unknown> }
   >()
 
-  /** 挂起中的 AgentComplete 完成前确认：toolUseId -> resolver */
-  private pendingCompleteConfirms = new Map<string, (result: PermissionResult) => void>()
+  /** 挂起中的 AgentComplete 完成前确认：toolUseId -> { resolve, input } */
+  private pendingCompleteConfirms = new Map<
+    string,
+    { resolve: (result: PermissionResult) => void; input: Record<string, unknown> }
+  >()
 
   /**
    * @param agent - Agent 定义(model、outputs、prompt 等)
@@ -274,13 +277,13 @@ export class ClaudeExecutor {
    * - accept=false：SDK 收到 isError tool_result，Agent 在同会话继续多轮
    */
   answerCompleteConfirm(toolUseId: string, accept: boolean, reason?: string): void {
-    const resolve = this.pendingCompleteConfirms.get(toolUseId)
-    if (!resolve) return
+    const pending = this.pendingCompleteConfirms.get(toolUseId)
+    if (!pending) return
     this.pendingCompleteConfirms.delete(toolUseId)
     if (accept) {
-      resolve({ behavior: 'allow', updatedInput: {} })
+      pending.resolve({ behavior: 'allow', updatedInput: pending.input })
     } else {
-      resolve({ behavior: 'deny', message: reason ?? '用户拒绝' })
+      pending.resolve({ behavior: 'deny', message: reason ?? '用户拒绝' })
     }
   }
 
@@ -293,8 +296,8 @@ export class ClaudeExecutor {
       pending.resolve({ behavior: 'deny', message: reason })
     }
     this.pendingToolPermissions.clear()
-    for (const [, resolver] of this.pendingCompleteConfirms) {
-      resolver({ behavior: 'deny', message: reason })
+    for (const [, pending] of this.pendingCompleteConfirms) {
+      pending.resolve({ behavior: 'deny', message: reason })
     }
     this.pendingCompleteConfirms.clear()
   }
@@ -333,7 +336,7 @@ export class ClaudeExecutor {
       log('[ClaudeExecutor] canUseTool AgentComplete pending confirm', { toolUseID })
       this.events.onCompleteConfirmRequest({ toolUseId: toolUseID, input: input as Record<string, unknown> })
       return new Promise<PermissionResult>((resolve) => {
-        this.pendingCompleteConfirms.set(toolUseID, resolve)
+        this.pendingCompleteConfirms.set(toolUseID, { resolve, input: input as Record<string, unknown> })
       })
     }
     const { auto_allowed_tools, must_confirm_tools } = this.agent
