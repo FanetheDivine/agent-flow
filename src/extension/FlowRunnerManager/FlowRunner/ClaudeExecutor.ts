@@ -391,7 +391,7 @@ export class ClaudeExecutor {
         excludeDynamicSections: true,
       },
       mcpServers: { AgentControllerMcp: this.mcpServer },
-      permissionMode: 'default',
+      permissionMode: this.agent.plan_mode ? 'plan' : 'default',
       canUseTool: this.canUseTool,
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
       includePartialMessages: true,

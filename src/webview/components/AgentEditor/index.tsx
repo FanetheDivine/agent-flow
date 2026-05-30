@@ -195,7 +195,7 @@ export const AgentEditor: FC = () => {
                   name='model'
                   label='模型'
                   rules={[{ required: true, message: '请选择或输入模型' }]}
-                  className='mb-0 flex-1'
+                  className='flex-1'
                 >
                   <AutoComplete
                     placeholder='选择或输入模型名称'
@@ -224,7 +224,7 @@ export const AgentEditor: FC = () => {
                   />
                 </FormItem>
 
-                <FormItem name='effort' label='努力程度' className='mb-0 w-56'>
+                <FormItem name='effort' label='努力程度' className='w-56'>
                   <Select
                     placeholder='默认（不指定）'
                     allowClear
@@ -278,36 +278,50 @@ export const AgentEditor: FC = () => {
                   options={TOOL_OPTIONS}
                 />
               </FormItem>
-
               <Flex gap={16}>
                 <FormItem
                   name='work_mode'
                   label='工作模式'
-                  tooltip='静默模式下，用户无法与AI进行多轮对话，无法中断会话'
+                  tooltip={{
+                    classNames: {
+                      container: 'w-max whitespace-pre',
+                    },
+                    title: [
+                      `对话模式 · 永不终止的多轮对话`,
+                      `任务模式 · AI会执行任务并提交结果`,
+                      `静默模式 · 无交互执行任务，后台代替用户自动应答，可以中断`,
+                    ].join('\n'),
+                  }}
                 >
                   <Select
-                    className='w-70'
                     options={[
                       {
-                        value: 'task',
-                        label: '任务模式 · AI会执行任务并提交结果',
+                        value: 'chat',
+                        label: '对话模式',
                       },
                       {
-                        value: 'chat',
-                        label: '对话模式 · 永不终止的多轮对话',
+                        value: 'task',
+                        label: '任务模式',
                       },
                       {
                         value: 'silent_task',
-                        label: '静默模式 · 无交互执行任务',
+                        label: '静默模式',
                       },
                     ]}
                   />
                 </FormItem>
-
                 <FormItem
                   name='no_input'
                   label='无输入'
                   tooltip='开启后节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）'
+                  valuePropName='checked'
+                >
+                  <Switch />
+                </FormItem>
+                <FormItem
+                  name='plan_mode'
+                  label='Plan模式'
+                  tooltip='系统提示词倾向会改变，且无法执行写操作'
                   valuePropName='checked'
                 >
                   <Switch />

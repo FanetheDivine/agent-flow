@@ -58,6 +58,10 @@ export const AgentSchema = z.object({
     .describe(
       '无输入启动：true 时节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）',
     ),
+  plan_mode: z
+    .boolean()
+    .optional()
+    .describe('Plan 模式：true 时以只读/计划模式运行，不会实际执行文件修改等写操作'),
   allowed_read_values_keys: z
     .array(z.string())
     .optional()
