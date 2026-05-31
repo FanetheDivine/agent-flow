@@ -401,6 +401,7 @@ export class FlowRunner {
       this.killExecutor(runId)
       this.fire('flow.signal.agentComplete', {
         runId,
+        output: { name: result.outputName },
         content: result.content,
         values: result.values,
         result: result.resultMessage,

@@ -431,7 +431,7 @@ export function updateFlowRunState(
               ?.outputs?.find((o) => o.output_name === data.output!.name)
           : undefined
         const nextAgent = output ? flow?.agents?.find((a) => a.id === output.next_agent) : undefined
-        if (nextAgent && data.output) {
+        if (nextAgent && data.output.newRunId) {
           // 追加新 AgentRun(由 extension 端生成的 newRunId)。
           // 把 AgentComplete 的 content 作为下一个 Agent 的首条用户消息回显 ——
           // FlowRunner.doOnAgentComplete 已经把同一份 content 喂给了 SDK prompt,
