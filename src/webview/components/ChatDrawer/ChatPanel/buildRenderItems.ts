@@ -101,19 +101,6 @@ type CacheEntry = {
    * 让"session 总结"卡片能展示最后一个 turn 的窗口占用。
    */
   lastTurnContextUsage?: { used: number; total: number }
-  /**
-   * AgentComplete 的 mcp_tool_use 已出现。该 tool 一旦被调用就标志 agent 决定收尾,
-   * 后续 SDK 还可能因为中断时序生成多余消息(text / 重试 tool_use / 失败 tool_result),
-   * 这些都应被丢弃,只保留 flow.signal.agentComplete 的「完成卡片」。
-   * require_confirm 拒绝时由 tool_result 处理重置为 false。
-   */
-  agentCompleteSeen: boolean
-  /**
-   * 正在等待 tool_result 的 AgentComplete tool_use id。
-   * 非空时放行后续 user 消息（tool_result）以便判定是否拒绝。
-   * 拒绝（is_error=true）→ 清空并重置 agentCompleteSeen；接受 → 仅清空。
-   */
-  pendingAgentCompleteId?: string
 }
 
 // ── 缓存 ─────────────────────────────────────────────────────────────────
@@ -275,16 +262,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       cached.prevModelUsage = {}
       cached.lastTotalCost = 0
       cached.lastTurnContextUsage = undefined
-      cached.agentCompleteSeen = false
-      cached.pendingAgentCompleteId = undefined
       continue
-    }
-    // AgentComplete tool_use 一旦出现就视为本 session 收尾,后续 ai 消息（含
-    // 中断时序产生的多余 text / 重试 tool_use / MCP AbortError tool_result）一律丢弃。
-    // 例外：pendingAgentCompleteId 非空时放行 user 消息（等待 AgentComplete tool_result，
-    // 以便判断是拒绝还是接受），拒绝时在 tool_result 处理中重置 agentCompleteSeen。
-    if (cached.agentCompleteSeen && message.type !== 'result') {
-      if (!(cached.pendingAgentCompleteId && message.type === 'user')) continue
     }
 
     if (message.type === 'user') {
@@ -306,13 +284,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
                 isError: !!block.is_error,
                 text: extractToolResultText(block.content),
               },
-            }
-            // AgentComplete 的 tool_result：拒绝（is_error）→ 重置标志允许模型后续消息渲染；接受 → 仅清空 pending。
-            if (cached.pendingAgentCompleteId === block.tool_use_id) {
-              cached.pendingAgentCompleteId = undefined
-              if (block.is_error) {
-                cached.agentCompleteSeen = false
-              }
             }
           }
           delete pendingTooluse[block.tool_use_id]
@@ -372,8 +343,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         }
       }
       blocks.forEach((block, bIdx: number) => {
-        // 同一条 assistant 消息中,AgentComplete 之后的 block 一律忽略。
-        if (cached.agentCompleteSeen) return
         const key = `${mIdx}-${bIdx}`
         if (block.type === 'text' && typeof block.text === 'string') {
           items.push({
@@ -411,8 +380,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             // pendingAgentCompleteId 非空时 user 消息放行以便处理 tool_result（拒绝 vs 接受）。
             items.push({ kind: 'tool_use', key, toolUseId: block.id, toolName, input: block.input })
             pendingTooluse[block.id] = items.length - 1
-            cached.pendingAgentCompleteId = block.id
-            cached.agentCompleteSeen = true
             return
           }
           if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
@@ -479,13 +446,6 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
         contextWindow > 0 && resultUsed > 0 ? { used: resultUsed, total: contextWindow } : undefined
       if (turnContextUsage) cached.lastTurnContextUsage = turnContextUsage
 
-      // AgentComplete 已发生时,reducer 包装的这条 result 仅用于更新 cached(供 agent_complete
-      // 卡片读取 modelBreakdown / totalCost / contextUsage),不 push turn_end —— 避免在
-      // agent_complete 卡片之外多出一个回合结束卡片。
-      if (cached.agentCompleteSeen) {
-        continue
-      }
-
       const turnEndKey = `${mIdx}-result`
       items.push({
         kind: 'turn_end',
@@ -526,8 +486,6 @@ export function buildRenderItems(
         prevModelUsage: {},
         lastTotalCost: 0,
         contextUsageByItemKey: new Map(),
-        agentCompleteSeen: false,
-        pendingAgentCompleteId: undefined,
       })
       return cache.get(sessionId)!
     })

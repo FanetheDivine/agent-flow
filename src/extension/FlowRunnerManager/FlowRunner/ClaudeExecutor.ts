@@ -53,10 +53,7 @@ export type ExecutorEvents = {
    * require_confirm=true 时 AgentComplete 被调用，等待用户确认是否放行。
    * 上层据此 fire `flow.signal.agentCompleteConfirmRequest`。
    */
-  onCompleteConfirmRequest: (req: {
-    toolUseId: string
-    input: Record<string, unknown>
-  }) => void
+  onCompleteConfirmRequest: (req: { toolUseId: string; input: Record<string, unknown> }) => void
   /**
    * silent_task 模式下 AskUserQuestion 被自动应答时触发,
    * 上层据此 fire `flow.signal.answerQuestion`,reducer 写入 answeredQuestions
@@ -334,9 +331,15 @@ export class ClaudeExecutor {
       this.agent.work_mode !== 'chat'
     ) {
       log('[ClaudeExecutor] canUseTool AgentComplete pending confirm', { toolUseID })
-      this.events.onCompleteConfirmRequest({ toolUseId: toolUseID, input: input as Record<string, unknown> })
+      this.events.onCompleteConfirmRequest({
+        toolUseId: toolUseID,
+        input: input as Record<string, unknown>,
+      })
       return new Promise<PermissionResult>((resolve) => {
-        this.pendingCompleteConfirms.set(toolUseID, { resolve, input: input as Record<string, unknown> })
+        this.pendingCompleteConfirms.set(toolUseID, {
+          resolve,
+          input: input as Record<string, unknown>,
+        })
       })
     }
     const { auto_allowed_tools, must_confirm_tools } = this.agent
@@ -467,10 +470,8 @@ export class ClaudeExecutor {
           this.initEmitted = true
           this.events.onStarted()
         }
-        // AgentComplete 已暂存时,本回合的 result 消息不单独透传给上层(否则
-        // reducer 会把 phase 切到 'result' 触发"生成完毕"通知),改随下面的
-        // onComplete 通过 agentComplete signal 一并上抛。其他类型消息正常透传。
-        const skipForward = msg.type === 'result' && this.pendingCompleteResult !== null
+        // AgentComplete结果已暂存 视作会话结束 拦截所有消息
+        const skipForward = this.pendingCompleteResult !== null
         if (!skipForward) {
           this.events?.onMessage(msg)
         }
