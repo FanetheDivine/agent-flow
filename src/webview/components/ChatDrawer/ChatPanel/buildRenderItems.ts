@@ -193,6 +193,55 @@ function readContextWindow(modelUsage: unknown, mainModel: string | undefined): 
   return 0
 }
 
+/**
+ * 把一条 result 消息并入缓存的 session 累计快照,返回本回合用量增量与窗口占用。
+ *
+ * 两处调用:
+ * - result aiMessage(每 turn 结束):用返回的 modelUsages / turnContextUsage 生成 turn_end。
+ * - agentComplete.data.result:AgentComplete 暂存后这条 result 不再单独透传为 aiMessage
+ *   (见 src/common/event.ts 的 agentComplete.result),不走下面的 result 分支,只取副作用
+ *   刷新 cached,让随后的 agent_complete 卡片拿到截至 session 结束的累计 / 成本 / 窗口。
+ *
+ * 副作用(覆盖式赋值,幂等):
+ * - prevModelUsage ← 本条 result.modelUsage 累计(供下回合算增量 / agent_complete 取 session 累计)
+ * - lastTotalCost  ← 本条 result.total_cost_usd
+ * - lastTurnContextUsage ← 本回合主模型窗口占用(缺失则保留旧值)
+ */
+function applyResultToCache(
+  message: unknown,
+  cached: CacheEntry,
+): {
+  modelUsages: Array<{ model: string; usage: ModelTokenUsage }>
+  turnContextUsage?: { used: number; total: number }
+} {
+  // result.modelUsage 是 session 累计；本回合增量 = 当前累计 - 上次累计
+  const currModelUsage = readResultModelUsage(message)
+  const modelUsages: Array<{ model: string; usage: ModelTokenUsage }> = []
+  for (const [model, curr] of Object.entries(currModelUsage)) {
+    const prev = cached.prevModelUsage[model]
+    const delta = prev ? subtractModelTokenUsage(curr, prev) : curr
+    if (isModelTokenUsageNonZero(delta) || delta.costUSD > 0) {
+      modelUsages.push({ model, usage: delta })
+    }
+  }
+  // 用本条 result 的累计快照覆盖 prev，供下回合计算增量
+  cached.prevModelUsage = currModelUsage
+  const cost = (message as any).total_cost_usd
+  if (typeof cost === 'number') cached.lastTotalCost = cost
+
+  // 上下文窗口:每 turn 独立按本 result 数据计算,仅主模型 entry 的 contextWindow。
+  // 主模型来自 system/init 消息(见 scanIncremental 的 system 分支),不从 result.model 取 ——
+  // result.model 在多模型场景可能切到辅助模型,会让窗口数据抖动。
+  // used = result.usage 的 input_total。任何一项缺失则该 turn 不展示。
+  const contextWindow = readContextWindow((message as any).modelUsage, cached.mainModel)
+  const resultUsed = readUsageInputTotal((message as any).usage)
+  const turnContextUsage =
+    contextWindow > 0 && resultUsed > 0 ? { used: resultUsed, total: contextWindow } : undefined
+  if (turnContextUsage) cached.lastTurnContextUsage = turnContextUsage
+
+  return { modelUsages, turnContextUsage }
+}
+
 // ── 核心构建 ─────────────────────────────────────────────────────────────
 
 function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry): void {
@@ -229,6 +278,9 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
 
     if (msg.type === 'flow.signal.agentComplete') {
       const data = msg.data
+      // AgentComplete 暂存后这条 result 不再单独透传为 aiMessage(不走下面的 result 分支),
+      // 在此手动并入缓存,否则 modelBreakdown / totalCost / 窗口占用会停留在上一条 result。
+      if (data.result) applyResultToCache(data.result, cached)
       // session 结束时把缓存里累计到此刻的 modelUsage / total_cost 作为 breakdown
       // 写到 agent_complete 项上（"session 结束"后展示按模型分布）
       const modelBreakdown = Object.entries(cached.prevModelUsage)
@@ -421,30 +473,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
 
     if (message.type === 'result') {
       const isError = 'error' in message && !!message.error
-      // result.modelUsage 是 session 累计；本回合增量 = 当前累计 - 上次累计
-      const currModelUsage = readResultModelUsage(message)
-      const modelUsages: Array<{ model: string; usage: ModelTokenUsage }> = []
-      for (const [model, curr] of Object.entries(currModelUsage)) {
-        const prev = cached.prevModelUsage[model]
-        const delta = prev ? subtractModelTokenUsage(curr, prev) : curr
-        if (isModelTokenUsageNonZero(delta) || delta.costUSD > 0) {
-          modelUsages.push({ model, usage: delta })
-        }
-      }
-      // 用本条 result 的累计快照覆盖 prev，供下回合计算增量
-      cached.prevModelUsage = currModelUsage
-      const cost = (message as any).total_cost_usd
-      if (typeof cost === 'number') cached.lastTotalCost = cost
-
-      // 上下文窗口:每 turn 独立按本 result 数据计算,仅主模型 entry 的 contextWindow。
-      // 主模型来自 system/init 消息(见 message.type === 'system' 分支),不从 result.model 取 ——
-      // result.model 在多模型场景可能切到辅助模型,会让窗口数据抖动。
-      // used = result.usage 的 input_total。任何一项缺失则该 turn 不展示。
-      const contextWindow = readContextWindow((message as any).modelUsage, cached.mainModel)
-      const resultUsed = readUsageInputTotal((message as any).usage)
-      const turnContextUsage =
-        contextWindow > 0 && resultUsed > 0 ? { used: resultUsed, total: contextWindow } : undefined
-      if (turnContextUsage) cached.lastTurnContextUsage = turnContextUsage
+      const { modelUsages, turnContextUsage } = applyResultToCache(message, cached)
 
       const turnEndKey = `${mIdx}-result`
       items.push({

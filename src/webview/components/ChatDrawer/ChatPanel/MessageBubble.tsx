@@ -286,11 +286,52 @@ function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   )
 }
 
-/** 完成前确认卡片 —— 嵌入 tool_use 气泡后方，风格与 AskUserQuestionCard 对齐 */
+/** AgentComplete 结果主体：完成分支 Tag + content + 共享数据写入(values)。
+ *  被「完成卡片」(agent_complete) 与「完成前确认卡片」复用。 */
+const AgentCompleteBody: FC<{
+  outputName?: string
+  content?: string
+  values?: Record<string, string>
+}> = ({ outputName, content, values }) => {
+  const shareEntries = values ? Object.entries(values) : []
+  return (
+    <div className='min-w-45'>
+      <Tag color='green' className='m-0 text-[10px]'>
+        完成{outputName ? ` → ${outputName}` : ''}
+      </Tag>
+      {content && (
+        <div className='mt-2'>
+          <Md content={content} />
+        </div>
+      )}
+      {shareEntries.length > 0 && (
+        <div className='mt-2 border-t border-[#45475a] pt-2'>
+          <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
+          <div className='flex flex-col gap-1'>
+            {shareEntries.map(([k, v]) => (
+              <div key={k} className='flex flex-col text-[11px]'>
+                <Tag color='blue' className='m-0 mr-1 self-start text-[10px]'>
+                  {k}
+                </Tag>
+                <Md className='ml-4' content={v} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 完成前确认卡片 —— 作为 AI 气泡渲染（role:'ai'），样式与 agent_complete 完成气泡完全一致：
+ *  左侧 filled 气泡、无自绘边框，气泡外观由 Bubble filled 提供 */
 const AgentCompleteConfirmCard: FC<{
+  outputName?: string
+  content?: string
+  values?: Record<string, string>
   onAccept: () => void
   onDeny: (reason: string) => void
-}> = ({ onAccept, onDeny }) => {
+}> = ({ outputName, content, values, onAccept, onDeny }) => {
   const [choice, setChoice] = useState<'accept' | 'deny' | null>(null)
   const [reason, setReason] = useState('')
 
@@ -302,8 +343,9 @@ const AgentCompleteConfirmCard: FC<{
   }
 
   return (
-    <div className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
-      <div className='flex items-center gap-2'>
+    <div className='flex flex-col gap-2 overflow-x-hidden'>
+      <AgentCompleteBody outputName={outputName} content={content} values={values} />
+      <div className='flex items-center gap-2 border-t border-[#45475a] pt-2'>
         <ExclamationCircleOutlined className='text-[#f9e2af]' />
         <span className='text-xs font-semibold text-[#cdd6f4]'>完成前确认</span>
       </div>
@@ -499,13 +541,23 @@ function renderItemToBubble(
           />
         ),
       }
+      const completeInput = item.input as Record<string, any> | undefined
       const confirmItem: RenderedBubble | null =
         isPendingCompleteConfirm && ctx
           ? {
               key: item.key + '-confirm',
-              role: 'system',
+              role: 'ai',
               content: (
                 <AgentCompleteConfirmCard
+                  outputName={completeInput?.output_name ?? completeInput?.output?.name}
+                  content={
+                    typeof completeInput?.content === 'string' ? completeInput.content : undefined
+                  }
+                  values={
+                    completeInput?.values && typeof completeInput.values === 'object'
+                      ? completeInput.values
+                      : undefined
+                  }
                   onAccept={() => ctx.onCompleteConfirmAccept?.(item.toolUseId)}
                   onDeny={(reason) => ctx.onCompleteConfirmDeny?.(item.toolUseId, reason)}
                 />
@@ -561,36 +613,17 @@ function renderItemToBubble(
         .filter(Boolean)
         .join('\n')
       const breakdown = item.modelBreakdown ?? []
-      const shareEntries = item.values ? Object.entries(item.values) : []
       return {
         key: item.key,
         role: 'ai',
         content: (
           <Copyable text={completionText}>
             <div>
-              <Tag color='green' className='m-0 text-[10px]'>
-                完成{item.outputName ? ` → ${item.outputName}` : ''}
-              </Tag>
-              {item.displayContent && (
-                <div className='mt-2'>
-                  <Md content={item.displayContent} />
-                </div>
-              )}
-              {shareEntries.length > 0 && (
-                <div className='mt-2 border-t border-[#45475a] pt-2'>
-                  <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
-                  <div className='flex flex-col gap-1'>
-                    {shareEntries.map(([k, v]) => (
-                      <div key={k} className='text-[11px]'>
-                        <Tag color='blue' className='m-0 mr-1 text-[10px]'>
-                          {k}
-                        </Tag>
-                        <span className='break-all whitespace-pre-wrap text-[#cdd6f4]'>{v}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <AgentCompleteBody
+                outputName={item.outputName}
+                content={item.displayContent}
+                values={item.values}
+              />
               {(breakdown.length > 0 || item.totalCost !== undefined || itemContextUsage) && (
                 <div className='mt-2 border-t border-[#45475a] pt-2'>
                   <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
