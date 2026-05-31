@@ -1,5 +1,23 @@
 # Change Log
 
+## [0.0.31] - 2026-06-01
+
+### 新增
+
+- **base_url / api_key 分层配置**：`Flow` 与 `Agent` 均新增 `base_url` / `api_key` 字段（FlowEditor 抽屉与 AgentEditor 均补充输入项）。Agent 同名字段非空时覆盖 Flow 默认值，空字符串视为不覆盖回落到 Flow；任一非空时 `ClaudeExecutor.createQuery` 将其注入 SDK 子进程 `options.env`（`ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY`），并 spread `process.env` 避免子进程丢失 PATH / HOME；两端均不覆盖时不下发 env，SDK 默认继承 `process.env`。
+- **系统提示词自由度**：Agent 新增两个开关——`disable_claude_preset`（true 时 SDK `systemPrompt` 直接使用 `buildAgentSystemPrompt` 结果，不再附加 Claude Code 预设提示词，适合轻量 Agent）；`raw_prompt`（true 时 `buildAgentSystemPrompt` 直接返回 `agent_prompt`，不附加任何骨架——顶部规则、work_mode 分支、可读写数据、任务描述、输出分支、shareValues 快照均不输出）。AgentEditor 补充对应 Switch。
+
+### 优化
+
+- **完成时确认细化到 output 粒度**：`require_confirm` 从 Agent 级开关下沉为按 Output 独立配置，同一 Agent 的不同分支可分别设置是否在 `AgentComplete` 时要求用户确认；无 outputs / 未匹配 output 直接放行，`chat` 模式不适用。`ClaudeExecutor.canUseTool` 改为按命中的 `output_name` 对应 Output 的 `require_confirm` 判定，AgentEditor 表单同步调整。
+- **fork 交互延迟构造**：fork 出的会话不再以 fork 时刻的 Flow 快照构建系统提示词，改为延迟到用户首次发消息时按最新 Flow（最新 agents / shareValuesKeys / shareValues）构造，期间对源 Flow 的编辑可应用到本次启动。涉及 `ClaudeExecutor` lazy 模式、`FlowRunner` `getLatestFlow()` 读取链路等调整。
+- **无后续 Agent 的完成消息可携带输出分支名**：`agentComplete` signal 的 `output` 改为 `{ name?, newRunId? }`，允许 Agent 调用 `AgentComplete` 选择一个无 `next_agent` 的分支时仍带上分支名用于展示；reducer 仅在 `output.newRunId` 存在（即确有下一 Agent）时才追加新 `AgentRun`。
+- **优化默认 Flow 提示词**：内置「工作流生成器」预设中 `work_mode` 说明由「默认 `task`」改为「必须指定为 `task`」。
+
+### 移除
+
+- **移除 Flow 简介**：`FlowSchema.flow_desc` 字段及 FlowEditor 中对应的「简介」表单项一并移除。
+
 ## [0.0.30] - 2026-05-31
 
 ### 新增

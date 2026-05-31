@@ -93,7 +93,9 @@ export const AgentSchema = z.object({
   base_url: z
     .string()
     .optional()
-    .describe('Anthropic API base URL 覆盖；非空时优先于 Flow 同名字段，注入 SDK 的 ANTHROPIC_BASE_URL'),
+    .describe(
+      'Anthropic API base URL 覆盖；非空时优先于 Flow 同名字段，注入 SDK 的 ANTHROPIC_BASE_URL',
+    ),
   api_key: z
     .string()
     .optional()
@@ -121,7 +123,9 @@ export const FlowSchema = z.object({
   base_url: z
     .string()
     .optional()
-    .describe('Anthropic API base URL 默认值；Agent 同名字段非空时覆盖，注入 SDK 的 ANTHROPIC_BASE_URL'),
+    .describe(
+      'Anthropic API base URL 默认值；Agent 同名字段非空时覆盖，注入 SDK 的 ANTHROPIC_BASE_URL',
+    ),
   api_key: z
     .string()
     .optional()
