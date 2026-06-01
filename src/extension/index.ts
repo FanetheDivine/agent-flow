@@ -514,6 +514,18 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): s
     <script>
       window._monacoReady = new Promise((resolve) => {
         const vsBase = '${webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'monaco'))}'
+        // webview 跨源场景下 monaco 直接 new Worker(<vsBase>/.../workerMain.js) 会被
+        // 同源策略拦截 —— 必须用 data: URL 包一层 bootstrap，先在 worker 里 importScripts
+        // 真正的 workerMain，并设置 self.MonacoEnvironment.baseUrl 让后续 nls/语言资源
+        // 加载走相同的 webview URI 前缀。
+        window.MonacoEnvironment = {
+          getWorkerUrl: function () {
+            return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(
+              'self.MonacoEnvironment = { baseUrl: "' + vsBase + '/" };' +
+              'importScripts("' + vsBase + '/base/worker/workerMain.js");'
+            )
+          },
+        }
         const loader = document.createElement('script')
         loader.src = vsBase + '/loader.js'
         loader.onload = () => {
