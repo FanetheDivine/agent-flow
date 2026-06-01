@@ -26,7 +26,7 @@ export type CodeExecutorOptions = {
   agent: Agent
   currentValues: Record<string, string>
   shareValueKeys: readonly ShareValueKey[]
-  runCommand: (command: string) => Promise<string>
+  runCommand: (command: string, timeout?: number) => Promise<string>
   events: ExecutorEvents
 }
 
@@ -112,7 +112,7 @@ export class CodeExecutor {
   private agent!: Agent
   private events!: ExecutorEvents
   private currentValues!: Record<string, string>
-  private runCommand!: (command: string) => Promise<string>
+  private runCommand!: (command: string, timeout?: number) => Promise<string>
   private initMessage!: UserMessageType
   private readonly getOptions: () => CodeExecutorOptions
   private optionsApplied = false

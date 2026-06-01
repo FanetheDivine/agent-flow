@@ -1,7 +1,6 @@
 import { match } from 'ts-pattern'
 import * as vscode from 'vscode'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { execaCommand } from 'execa'
 import {
   type Agent,
   type AIMessageType,
@@ -15,7 +14,45 @@ import { logError } from '../../logger'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 import { CodeExecutor } from './CodeExecutor'
 
-const execAsync = promisify(exec)
+import * as path from 'path'
+import * as fs from 'fs'
+
+/**
+ * Windows 上 `bash` 命令可能被 WSL 拦截,需要显式定位 Git Bash 的 bash.exe。
+ * 策略:用 `where git` 找到 git.exe 路径,推导同目录下的 bash.exe(Git for Windows 布局:
+ * `Git/cmd/git.exe` → `Git/bin/bash.exe`);找不到则尝试常见安装路径。
+ * 结果缓存,只解析一次。
+ */
+let _gitBashPath: string | undefined
+let _gitBashResolved = false
+async function resolveGitBash(): Promise<string | undefined> {
+  if (_gitBashResolved) return _gitBashPath
+  _gitBashResolved = true
+  try {
+    const { stdout } = await execaCommand('where git')
+    const gitExe = stdout.trim().split('\n')[0].trim()
+    if (gitExe) {
+      // Git/cmd/git.exe → Git/bin/bash.exe
+      const candidate = path.resolve(path.dirname(gitExe), '..', 'bin', 'bash.exe')
+      if (fs.existsSync(candidate)) {
+        _gitBashPath = candidate
+        return _gitBashPath
+      }
+    }
+  } catch { /* where git 失败则继续尝试 */ }
+  // 常见安装路径兜底
+  const fallbacks = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ]
+  for (const p of fallbacks) {
+    if (fs.existsSync(p)) {
+      _gitBashPath = p
+      return _gitBashPath
+    }
+  }
+  return undefined
+}
 
 /**
  * 节点执行器联合 —— ClaudeExecutor 走 AI SDK,CodeExecutor 把 agent.code 当函数体执行。
@@ -321,8 +358,16 @@ export class FlowRunner {
           agent,
           currentValues,
           shareValueKeys: latestFlow.shareValuesKeys ?? [],
-          runCommand: async (command: string) => {
-            const { stdout, stderr } = await execAsync(command, { cwd })
+          runCommand: async (command: string, timeout?: number) => {
+            // Windows 上 `bash` 会被 WSL 拦截,需要显式定位 Git Bash
+            const shell = process.platform === 'win32'
+              ? (await resolveGitBash() ?? 'bash')
+              : true
+            const { stdout, stderr } = await execaCommand(command, {
+              cwd,
+              timeout: timeout ?? 600_000,
+              shell,
+            })
             return stdout + stderr
           },
           events: this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal),

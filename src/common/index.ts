@@ -38,7 +38,7 @@ export const AgentSchema = z.object({
    * 返回值映射到 ExecutorResult: `{ output_name?, content, values? }`。仅 node_type='code' 生效。
    * 入参语义:input = 上游 AgentComplete.content / no_input 时为 '开始';
    * values = 当前 shareValues 全量(全量读不受 allowed_read_values_keys 约束);
-   * runCommand = async (command: string) => Promise<string>,在 VSCode workspaceFolder 下执行 shell 命令并返回 stdout+stderr
+   * runCommand = async (command: string, timeout?: number) => Promise<string>,在 VSCode workspaceFolder 下执行 shell 命令并返回 stdout+stderr;timeout 单位毫秒,默认 600000(10 分钟)
    */
   code: z.string().optional().describe('代码节点的 JS 函数体'),
   model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）').optional(),
