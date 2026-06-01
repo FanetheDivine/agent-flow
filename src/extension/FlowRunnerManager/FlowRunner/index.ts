@@ -1,5 +1,7 @@
 import { match } from 'ts-pattern'
 import * as vscode from 'vscode'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import {
   type Agent,
   type AIMessageType,
@@ -12,6 +14,8 @@ import {
 import { logError } from '../../logger'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 import { CodeExecutor } from './CodeExecutor'
+
+const execAsync = promisify(exec)
 
 /**
  * 节点执行器联合 —— ClaudeExecutor 走 AI SDK,CodeExecutor 把 agent.code 当函数体执行。
@@ -311,12 +315,16 @@ export class FlowRunner {
     if (agent.node_type === 'code') {
       const executor: CodeExecutor = new CodeExecutor('eager', () => {
         const latestFlow = this.getLatestFlow()
+        const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath
         return {
           initMessage,
           agent,
           currentValues,
           shareValueKeys: latestFlow.shareValuesKeys ?? [],
-          cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+          runCommand: async (command: string) => {
+            const { stdout, stderr } = await execAsync(command, { cwd })
+            return stdout + stderr
+          },
           events: this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal),
         }
       })

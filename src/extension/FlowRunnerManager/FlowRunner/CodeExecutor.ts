@@ -18,15 +18,15 @@ import {
  * 延迟到首次 createQuery 时再取(尽管本期 lazy 路径不会走到 CodeExecutor —— fork
  * 不支持 code 节点)。
  *
- * cwd: 插件运行的工作目录(VSCode workspaceFolder),由上层 FlowRunner 注入,
- * 透传给 AsyncFunction 作为第三个入参,允许用户代码按工作目录寻址。
+ * runCommand: 在 VSCode workspaceFolder 下执行 shell 命令的函数,由上层 FlowRunner
+ * 注入,透传给 AsyncFunction 作为第三个入参,允许用户代码直接调用系统命令。
  */
 export type CodeExecutorOptions = {
   initMessage: UserMessageType
   agent: Agent
   currentValues: Record<string, string>
   shareValueKeys: readonly ShareValueKey[]
-  cwd: string | undefined
+  runCommand: (command: string) => Promise<string>
   events: ExecutorEvents
 }
 
@@ -90,7 +90,7 @@ function normalizeCodeResult(raw: unknown): {
 
 /**
  * 代码节点执行器 —— 与 ClaudeExecutor 同构 ExecutorEvents,但不调 AI、不挂 MCP、
- * 不走 SDK。把 agent.code 视为 `async function (input, values, cwd) { ... }` 函数体执行,
+ * 不走 SDK。把 agent.code 视为 `async function (input, values, runCommand) { ... }` 函数体执行,
  * 返回值映射为 ExecutorResult。
  *
  * 严格只产出 agentComplete 信号:
@@ -112,7 +112,7 @@ export class CodeExecutor {
   private agent!: Agent
   private events!: ExecutorEvents
   private currentValues!: Record<string, string>
-  private cwd: string | undefined
+  private runCommand!: (command: string) => Promise<string>
   private initMessage!: UserMessageType
   private readonly getOptions: () => CodeExecutorOptions
   private optionsApplied = false
@@ -137,7 +137,7 @@ export class CodeExecutor {
     this.agent = opts.agent
     this.events = opts.events
     this.currentValues = opts.currentValues
-    this.cwd = opts.cwd
+    this.runCommand = opts.runCommand
     this.initMessage = opts.initMessage
     this.optionsApplied = true
   }
@@ -192,8 +192,8 @@ export class CodeExecutor {
 
     let raw: unknown
     try {
-      const fn = new AsyncFunction('input', 'values', 'cwd', codeBody)
-      raw = await fn(inputContent, valuesArg, this.cwd)
+      const fn = new AsyncFunction('input', 'values', 'runCommand', codeBody)
+      raw = await fn(inputContent, valuesArg, this.runCommand)
     } catch (err) {
       // 严格只产出 agentComplete 信号:错误路径不发 assistant 错误气泡、不发 result onMessage,
       // 错误详情走日志,直接 onError 让 reducer 切 error 终态。
