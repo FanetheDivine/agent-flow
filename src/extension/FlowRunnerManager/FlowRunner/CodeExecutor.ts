@@ -238,10 +238,10 @@ export class CodeExecutor {
       this.events.onError(new Error(`代码节点输出校验失败: ${validationError}`))
       return
     }
-    // code 节点全量写 shareValues —— 不受 allowed_write_values_keys 约束(那只针对 node_type='agent')
+    // code 节点 values 与现有 shareValues 合并 —— 不受 allowed_write_values_keys 约束(那只针对 node_type='agent')
     const filteredValues =
       normalized.values && Object.keys(normalized.values).length > 0
-        ? normalized.values
+        ? { ...this.currentValues, ...normalized.values }
         : undefined
 
     if (this.completed || this.disposed) return
