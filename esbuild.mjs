@@ -143,10 +143,6 @@ const webviewCtx = await esbuild.context({
   },
   plugins: [tailwindPlugin({ cssModules: { enabled: true } }), esbuildProblemMatcherPlugin],
 })
-const monacoVsDir = path.dirname(path.dirname(nodeRequire.resolve('monaco-editor/min/vs/editor/editor.main.js')))
-fs.cpSync(monacoVsDir, path.resolve(__dirname, 'dist/webview/monaco'), { recursive: true })
-console.log('[esbuild] monaco-editor assets copied')
-
 if (watch) {
   await Promise.all([extensionCtx.watch(), webviewCtx.watch()])
 } else {
