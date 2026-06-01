@@ -20,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useEventListener } from 'ahooks'
 import z from 'zod'
-import { AgentSchema, getFlowPhase, type Agent } from '@/common'
+import { AgentSchema, getFlowPhase, type Agent, type Code } from '@/common'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import AgentNodeComponent from './AgentNode'
@@ -154,7 +154,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
   const handleAddAgent = useCallback(
     (kind: 'agent' | 'code' = 'agent') => {
       const { copyAgents } = useFlowStore.getState()
-      const defaultAgent: Agent =
+      const defaultAgent: Agent | Code =
         kind === 'code'
           ? {
               id: crypto.randomUUID(),

@@ -9,7 +9,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { getFlowPhase, type Agent } from '@/common'
+import { getFlowPhase, type Agent, type Code } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
 import { useFlowStore, flowIsDestructiveReadOnly } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
@@ -27,7 +27,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const { flowId, agentId, agentName } = data
 
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
-  const agent: Agent | undefined = flow?.agents?.find((a) => a.id === agentId)
+  const agent: Agent | Code | undefined = flow?.agents?.find((a) => a.id === agentId)
   const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
 
   const { message } = App.useApp()
@@ -155,6 +155,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
             </Tag>
           </div>
         ) : (
+          // isCodeNode 为 false 已将 agent 收窄为普通 agent,直接读 model
           agent?.model && (
             <div className='px-3 pt-1'>
               <Tag color='blue' style={{ fontSize: 10 }}>

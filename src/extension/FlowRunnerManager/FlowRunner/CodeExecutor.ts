@@ -1,8 +1,8 @@
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
-  Agent,
   AIMessageType,
   AskUserQuestionOutput,
+  Code,
   ShareValueKey,
   UserMessageType,
 } from '@/common'
@@ -23,7 +23,7 @@ import {
  */
 export type CodeExecutorOptions = {
   initMessage: UserMessageType
-  agent: Agent
+  agent: Code
   currentValues: Record<string, string>
   shareValueKeys: readonly ShareValueKey[]
   runCommand: (command: string, timeout?: number) => Promise<string>
@@ -109,7 +109,7 @@ function normalizeCodeResult(raw: unknown): {
  * - 一次性执行,完成后 onComplete;sendUserMessage / interrupt / answerQuestion 等是 noop
  */
 export class CodeExecutor {
-  private agent!: Agent
+  private agent!: Code
   private events!: ExecutorEvents
   private currentValues!: Record<string, string>
   private runCommand!: (command: string, timeout?: number) => Promise<string>

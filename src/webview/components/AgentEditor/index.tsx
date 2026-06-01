@@ -27,7 +27,16 @@ import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { Md } from '../text-components'
 
-const FormItem = Form.Item<Agent>
+/**
+ * 编辑器表单值 —— agent / code 两类节点共用一张表单(node_type / code 为隐藏字段)。
+ * 在 Agent 字段基础上放宽 node_type 以容纳 'code',并补 code 字段(来自 {@link Code})。
+ */
+type AgentFormValue = Omit<Agent, 'id' | 'node_type'> & {
+  node_type?: 'agent' | 'code'
+  code?: string
+}
+
+const FormItem = Form.Item<AgentFormValue>
 
 const TOOL_OPTIONS = [
   { label: `${MCP_WILDCARD} — 匹配所有 mcp__* 工具`, value: MCP_WILDCARD },
@@ -95,26 +104,27 @@ export const AgentEditor: FC = () => {
 
   useEffect(() => {
     if (open && agent) {
-      const newFormValue: Omit<Agent, 'id'> = {
-        agent_name: agent.agent_name,
-        agent_desc: agent.agent_desc,
-        node_type: agent.node_type ?? 'agent',
-        code: agent.code ?? '',
-        model: agent.model,
-        effort: agent.effort,
-        agent_prompt: agent.agent_prompt,
-        auto_allowed_tools: agent.auto_allowed_tools,
-        must_confirm_tools: agent.must_confirm_tools,
-        work_mode: agent.work_mode ?? 'task',
-        no_input: agent.no_input ?? false,
-        plan_mode: agent.plan_mode ?? false,
-        disable_claude_preset: agent.disable_claude_preset ?? false,
-        raw_prompt: agent.raw_prompt ?? false,
-        allowed_read_values_keys: agent.allowed_read_values_keys ?? [],
-        allowed_write_values_keys: agent.allowed_write_values_keys ?? [],
-        base_url: agent.base_url ?? '',
-        api_key: agent.api_key ?? '',
-        outputs: (agent.outputs ?? []).map((o) => ({
+      const src: AgentFormValue = agent
+      const newFormValue: AgentFormValue = {
+        agent_name: src.agent_name,
+        agent_desc: src.agent_desc,
+        node_type: src.node_type ?? 'agent',
+        code: src.code ?? '',
+        model: src.model,
+        effort: src.effort,
+        agent_prompt: src.agent_prompt,
+        auto_allowed_tools: src.auto_allowed_tools,
+        must_confirm_tools: src.must_confirm_tools,
+        work_mode: src.work_mode ?? 'task',
+        no_input: src.no_input ?? false,
+        plan_mode: src.plan_mode ?? false,
+        disable_claude_preset: src.disable_claude_preset ?? false,
+        raw_prompt: src.raw_prompt ?? false,
+        allowed_read_values_keys: src.allowed_read_values_keys ?? [],
+        allowed_write_values_keys: src.allowed_write_values_keys ?? [],
+        base_url: src.base_url ?? '',
+        api_key: src.api_key ?? '',
+        outputs: (src.outputs ?? []).map((o) => ({
           output_name: o.output_name,
           output_desc: o.output_desc,
           next_agent: o.next_agent,
@@ -122,7 +132,7 @@ export const AgentEditor: FC = () => {
         })),
       }
       form.setFieldsValue(newFormValue)
-      silentWarnedRef.current = (agent.work_mode ?? 'task') === 'silent_task'
+      silentWarnedRef.current = (src.work_mode ?? 'task') === 'silent_task'
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewMode('preview')
@@ -559,9 +569,7 @@ export const AgentEditor: FC = () => {
                 <FormItem name='code' noStyle>
                   <Input.TextArea
                     className='!h-full flex-1 resize-none rounded-none border-0 bg-transparent! p-3 font-mono text-[12px]! text-[#cdd6f4]! shadow-none focus:shadow-none'
-                    placeholder={
-                      "// 例如:\nreturn { output_name: '输出', content: 'hi ' + input }"
-                    }
+                    placeholder={"// 例如:\nreturn { output_name: '输出', content: 'hi ' + input }"}
                   />
                 </FormItem>
                 <div className='border-t border-[#313244] px-3 py-1 text-[#94e2d5] select-none'>

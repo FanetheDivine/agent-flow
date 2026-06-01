@@ -5,6 +5,7 @@ import {
   type Agent,
   type AIMessageType,
   type AskUserQuestionOutput,
+  type Code,
   type FlowRunnerCommandEvents,
   type Flow,
   type FlowRunnerSignalEvents,
@@ -222,7 +223,9 @@ export class FlowRunner {
       // 回调取最新引用——webview save 命令会整体替换 currentFlows,持有 fork 时刻快照
       // 会拿到过时的 agents 与 shareValuesKeys。
       const latestFlow = this.getLatestFlow()
-      const latestAgent = latestFlow.agents?.find((a) => a.id === agentId) ?? initialAgent
+      const found = latestFlow.agents?.find((a) => a.id === agentId)
+      // fork 仅支持 node_type='agent';若最新 flow 把该节点改成 code,回退到构造时校验过的 initialAgent
+      const latestAgent = found && found.node_type !== 'code' ? found : initialAgent
       return {
         initMessage: dummyInit,
         agent: latestAgent,
@@ -345,7 +348,7 @@ export class FlowRunner {
   private runAgent(
     runId: string,
     initMessage: UserMessageType,
-    agent: Agent,
+    agent: Agent | Code,
     currentValues: Record<string, string>,
     fireFlowStartSignal: boolean,
   ): void {
@@ -396,7 +399,7 @@ export class FlowRunner {
    * 不区分类型,所以 getExecutor 用 Executor 联合即可。 */
   private buildExecutorEvents(
     runId: string,
-    agent: Agent,
+    agent: Agent | Code,
     getExecutor: () => Executor,
     fireFlowStartSignal: boolean = false,
   ) {
@@ -454,7 +457,7 @@ export class FlowRunner {
     }
   }
 
-  private onAgentComplete(runId: string, agent: Agent, result: ExecutorResult): void {
+  private onAgentComplete(runId: string, agent: Agent | Code, result: ExecutorResult): void {
     try {
       this.doOnAgentComplete(runId, agent, result)
     } catch (err) {
@@ -466,7 +469,7 @@ export class FlowRunner {
     }
   }
 
-  private doOnAgentComplete(runId: string, agent: Agent, result: ExecutorResult): void {
+  private doOnAgentComplete(runId: string, agent: Agent | Code, result: ExecutorResult): void {
     const { outputName, content } = result
 
     // 查找下一个 agent
@@ -521,7 +524,7 @@ export class FlowRunner {
 
   // ── 工具方法 ────────────────────────────────────────────────────────────
 
-  private findAgentById(id: string): Agent | undefined {
+  private findAgentById(id: string): Agent | Code | undefined {
     return (this.getLatestFlow().agents ?? []).find((a) => a.id === id)
   }
 
