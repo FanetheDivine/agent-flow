@@ -1,6 +1,8 @@
+import { execaCommand } from 'execa'
+import * as fs from 'fs'
+import * as path from 'path'
 import { match } from 'ts-pattern'
 import * as vscode from 'vscode'
-import { execaCommand } from 'execa'
 import {
   type Agent,
   type AIMessageType,
@@ -14,9 +16,6 @@ import {
 import { logError } from '../../logger'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
 import { CodeExecutor } from './CodeExecutor'
-
-import * as path from 'path'
-import * as fs from 'fs'
 
 /**
  * Windows 上 `bash` 命令可能被 WSL 拦截,需要显式定位 Git Bash 的 bash.exe。
@@ -40,7 +39,9 @@ async function resolveGitBash(): Promise<string | undefined> {
         return _gitBashPath
       }
     }
-  } catch { /* where git 失败则继续尝试 */ }
+  } catch {
+    /* where git 失败则继续尝试 */
+  }
   // 常见安装路径兜底
   const fallbacks = [
     'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -363,9 +364,7 @@ export class FlowRunner {
           shareValueKeys: latestFlow.shareValuesKeys ?? [],
           runCommand: async (command: string, timeout?: number) => {
             // Windows 上 `bash` 会被 WSL 拦截,需要显式定位 Git Bash
-            const shell = process.platform === 'win32'
-              ? (await resolveGitBash() ?? 'bash')
-              : true
+            const shell = process.platform === 'win32' ? ((await resolveGitBash()) ?? 'bash') : true
             const { stdout, stderr } = await execaCommand(command, {
               cwd,
               timeout: timeout ?? 600_000,
@@ -452,7 +451,11 @@ export class FlowRunner {
       },
       onError: (err: Error) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)
-        this.fire('flow.signal.agentError', { runId, agentId: agent.id, err })
+        this.fire('flow.signal.agentError', {
+          runId,
+          agentId: agent.id,
+          err: err.message || String(err),
+        })
       },
     }
   }
