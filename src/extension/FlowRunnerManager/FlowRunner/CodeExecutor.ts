@@ -89,6 +89,31 @@ function normalizeCodeResult(raw: unknown): {
 }
 
 /**
+ * 校验 normalizeCodeResult 的输出是否与 agent 声明的 outputs 匹配:
+ * - agent 有 outputs 时,outputName 必须是其中之一;缺失则报错
+ * - agent 无 outputs 时,outputName 必须为空
+ * 返回 null 表示合法,否则返回错误描述。
+ */
+function validateCodeOutput(
+  agent: Code,
+  normalized: { outputName?: string; content: string; values?: Record<string, string> },
+): string | null {
+  const outputs = agent.outputs
+  if (outputs && outputs.length > 0) {
+    const validNames = outputs.map((o) => o.output_name)
+    if (!normalized.outputName) {
+      return `代码节点声明了输出分支 [${validNames.join(', ')}],但返回值缺少 output_name`
+    }
+    if (!validNames.includes(normalized.outputName)) {
+      return `output_name "${normalized.outputName}" 不在声明的输出分支 [${validNames.join(', ')}] 中`
+    }
+  } else if (normalized.outputName) {
+    return `代码节点未声明输出分支,但返回值包含 output_name "${normalized.outputName}"`
+  }
+  return null
+}
+
+/**
  * 代码节点执行器 —— 与 ClaudeExecutor 同构 ExecutorEvents,但不调 AI、不挂 MCP、
  * 不走 SDK。把 agent.code 视为 `async function (input, values, runCommand) { ... }` 函数体执行,
  * 返回值映射为 ExecutorResult。
@@ -205,6 +230,14 @@ export class CodeExecutor {
     if (this.disposed) return
 
     const normalized = normalizeCodeResult(raw)
+    // 校验 output_name 是否与 agent 声明的 outputs 匹配 —— 不合法则直接 onError 终态
+    const validationError = validateCodeOutput(this.agent, normalized)
+    if (validationError) {
+      logError(`[CodeExecutor] output validation failed: ${validationError}`)
+      if (this.disposed) return
+      this.events.onError(new Error(`代码节点输出校验失败: ${validationError}`))
+      return
+    }
     // code 节点全量写 shareValues —— 不受 allowed_write_values_keys 约束(那只针对 node_type='agent')
     const filteredValues =
       normalized.values && Object.keys(normalized.values).length > 0
