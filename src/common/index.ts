@@ -26,7 +26,22 @@ export type Output = z.infer<typeof OutputSchema>
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
   id: z.string().describe('Agent 唯一 ID'),
-  model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）'),
+  /**
+   * 节点类型(默认 'agent'):
+   * - 'agent': 走 ClaudeExecutor + AI SDK,与 work_mode/agent_prompt/model 等字段配合
+   * - 'code': 走 CodeExecutor,把 `code` 字段当作 AsyncFunction('input','values','cwd') 函数体执行,
+   *   不调用 AI、不挂 MCP、不走 SDK。运行时忽略 agent_prompt/model/effort/work_mode/tools 等字段
+   */
+  node_type: z.enum(['agent', 'code']).optional().describe('节点类型,默认 agent'),
+  /**
+   * code 节点的函数体源码;外层签名固定为 `async function (input, values, cwd) { ... }`,
+   * 返回值映射到 ExecutorResult: `{ output_name?, content, values? }`。仅 node_type='code' 生效。
+   * 入参语义:input = 上游 AgentComplete.content / no_input 时为 '开始';
+   * values = 当前 shareValues 全量(全量读不受 allowed_read_values_keys 约束);
+   * cwd = VSCode workspaceFolder 的绝对路径(可能 undefined)
+   */
+  code: z.string().optional().describe('代码节点的 JS 函数体'),
+  model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）').optional(),
   effort: z
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
@@ -55,6 +70,7 @@ export const AgentSchema = z.object({
     ),
   work_mode: z
     .enum(['task', 'chat', 'silent_task'])
+    .optional()
     .describe(
       '工作方式：task-任务达成后调用 AgentComplete 提交结果；chat-与用户的持续长期对话；silent_task-无人值守自动循环，必须通过 AgentComplete 终止',
     ),
@@ -529,7 +545,7 @@ export function buildAgentSystemPrompt(
   const {
     agent_prompt,
     outputs = [],
-    work_mode,
+    work_mode = 'task',
     allowed_read_values_keys = [],
     allowed_write_values_keys = [],
   } = agent

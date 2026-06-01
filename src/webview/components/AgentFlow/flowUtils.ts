@@ -31,7 +31,8 @@ const SIBLING_GAP = 40
 
 function estimateNodeHeight(agent: Agent): number {
   let h = HEADER_H
-  if (agent.model) h += MODEL_ROW_H
+  // model 标签 / code 标签都占同一行高度 —— code 节点没有 model 但显示 'code' 徽章
+  if (agent.model || agent.node_type === 'code') h += MODEL_ROW_H
   const n = agent.outputs?.length ?? 0
   if (n > 0) h += OUTPUT_BLOCK_PADDING + n * OUTPUT_ROW_H + (n - 1) * OUTPUT_GAP
   return h

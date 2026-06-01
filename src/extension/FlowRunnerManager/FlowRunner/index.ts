@@ -1,4 +1,5 @@
 import { match } from 'ts-pattern'
+import * as vscode from 'vscode'
 import {
   type Agent,
   type AIMessageType,
@@ -10,6 +11,14 @@ import {
 } from '@/common'
 import { logError } from '../../logger'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
+import { CodeExecutor } from './CodeExecutor'
+
+/**
+ * 节点执行器联合 —— ClaudeExecutor 走 AI SDK,CodeExecutor 把 agent.code 当函数体执行。
+ * 路由侧 FlowRunner 不区分二者:两者都实现 sendUserMessage / interrupt / answerQuestion /
+ * answerToolPermission / answerCompleteConfirm / kill 接口,且 ExecutorEvents 同构。
+ */
+type Executor = ClaudeExecutor | CodeExecutor
 
 type SignalHandler<K extends keyof FlowRunnerSignalEvents> = (
   data: FlowRunnerSignalEvents[K],
@@ -49,7 +58,7 @@ export type FlowRunnerOptions = {
  * (PersistedDataController save / setShareValues 等)更新后所有读取链路看到最新值。
  */
 export class FlowRunner {
-  private executors = new Map<string, ClaudeExecutor>()
+  private executors = new Map<string, Executor>()
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
@@ -148,6 +157,13 @@ export class FlowRunner {
     const initialAgent = this.findAgentById(agentId)
     if (!initialAgent) {
       this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })
+      return
+    }
+    // code 节点没有 SDK session,无法 fork;webview 端不应给出 fork 入口。这里只兜底
+    if (initialAgent.node_type === 'code') {
+      this.fire('flow.signal.error', {
+        msg: `代码节点 "${initialAgent.agent_name}" 不支持 fork`,
+      })
       return
     }
     // 本期单 executor 约束:fork 时清掉所有现存 executor
@@ -281,7 +297,7 @@ export class FlowRunner {
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   /**
-   * 启动一个 Agent run:创建 ClaudeExecutor 并写入 executors Map。
+   * 启动一个 Agent run:按 node_type 分流 ClaudeExecutor / CodeExecutor 并写入 executors Map。
    * @param fireFlowStartSignal - 是否在首条 SDK 消息抵达时 fire flow.signal.flowStart
    *   (eager 路径需要;fork 路径由外层 spawnForFork 走 signal.fork 替代,故为 false)
    */
@@ -292,6 +308,21 @@ export class FlowRunner {
     currentValues: Record<string, string>,
     fireFlowStartSignal: boolean,
   ): void {
+    if (agent.node_type === 'code') {
+      const executor: CodeExecutor = new CodeExecutor('eager', () => {
+        const latestFlow = this.getLatestFlow()
+        return {
+          initMessage,
+          agent,
+          currentValues,
+          shareValueKeys: latestFlow.shareValuesKeys ?? [],
+          cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+          events: this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal),
+        }
+      })
+      this.executors.set(runId, executor)
+      return
+    }
     const executor: ClaudeExecutor = new ClaudeExecutor('eager', () => {
       const latestFlow = this.getLatestFlow()
       return {
@@ -307,11 +338,13 @@ export class FlowRunner {
     this.executors.set(runId, executor)
   }
 
-  /** 构造 ClaudeExecutor 的事件回调 —— 上层路由(runId、kill)在此闭包注入 */
+  /** 构造 Executor 的事件回调 —— 上层路由(runId、kill)在此闭包注入。
+   * 闭包对 ClaudeExecutor / CodeExecutor 同构:onComplete 回调里只比对 executor 引用,
+   * 不区分类型,所以 getExecutor 用 Executor 联合即可。 */
   private buildExecutorEvents(
     runId: string,
     agent: Agent,
-    getExecutor: () => ClaudeExecutor,
+    getExecutor: () => Executor,
     fireFlowStartSignal: boolean = false,
   ) {
     return {
