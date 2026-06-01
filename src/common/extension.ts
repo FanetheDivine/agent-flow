@@ -272,6 +272,7 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
       }).extend({
         no_input: z.literal(true),
         node_type: z.literal('agent'),
+        auto_allowed_tools: z.literal(true),
         outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
       }) satisfies z.ZodType<Agent>
       const LiteFlow = FlowSchema.pick({ id: true, name: true, shareValuesKeys: true }).extend({
