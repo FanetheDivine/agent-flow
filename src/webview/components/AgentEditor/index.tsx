@@ -26,6 +26,7 @@ import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, buildAgentSystemPrompt } from '@/comm
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { Md } from '../text-components'
+import { CodeEditor } from '../CodeEditor'
 
 /**
  * 编辑器表单值 —— agent / code 两类节点共用一张表单(node_type / code 为隐藏字段)。
@@ -567,9 +568,11 @@ export const AgentEditor: FC = () => {
                   </div>
                 </div>
                 <FormItem name='code' noStyle>
-                  <Input.TextArea
-                    className='!h-full flex-1 resize-none rounded-none border-0 bg-transparent! p-3 font-mono text-[12px]! text-[#cdd6f4]! shadow-none focus:shadow-none'
-                    placeholder={"// 例如:\nreturn { output_name: '输出', content: 'hi ' + input }"}
+                  <CodeEditor
+                    shareValueKeys={shareValueKeys.map((k) => k.key)}
+                    outputs={(watchedValues?.outputs ?? [])
+                      .map((o: any) => o?.output_name)
+                      .filter(Boolean)}
                   />
                 </FormItem>
                 <div className='border-t border-[#313244] px-3 py-1 text-[#94e2d5] select-none'>

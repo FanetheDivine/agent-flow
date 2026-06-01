@@ -511,6 +511,18 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): s
 </head>
 <body>
     <div id="root"></div>
+    <script>
+      window._monacoReady = new Promise((resolve) => {
+        const vsBase = '${webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'monaco'))}'
+        const loader = document.createElement('script')
+        loader.src = vsBase + '/loader.js'
+        loader.onload = () => {
+          window.require.config({ paths: { vs: vsBase } })
+          window.require(['vs/editor/editor.main'], () => resolve(window.monaco))
+        }
+        document.head.appendChild(loader)
+      })
+    </script>
     <script src="${scriptUri}"></script>
 </body>
 </html>
