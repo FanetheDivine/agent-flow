@@ -31,7 +31,11 @@ export const AgentSchema = z.object({
    * node_type='code' 的节点由 {@link CodeSchema}(从本 schema 派生)定义,走 CodeExecutor 不调 AI。
    */
   node_type: z.literal('agent').optional().describe('节点类型,默认 agent'),
-  model: z.string().min(1).describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）').optional(),
+  model: z
+    .string()
+    .min(1)
+    .describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）')
+    .optional(),
   effort: z
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
@@ -655,7 +659,7 @@ export function buildAgentSystemPrompt(
           '## 任务描述',
           agent_prompt,
           '## 完成任务',
-          '一旦达成「任务描述」的结束条件，**立即**调用 AgentControllerMcp 的 AgentComplete 工具提交结果并选择输出分支，否则系统会持续以「继续」让你循环。',
+          '一旦达成「任务描述」的结束条件，**立即**调用 AgentControllerMcp 的 AgentComplete 工具提交结果并选择输出分支。',
           '## 输出分支',
           outputs.length === 0
             ? '此任务没有输出分支。'
