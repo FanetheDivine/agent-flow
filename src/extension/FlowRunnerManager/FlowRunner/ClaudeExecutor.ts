@@ -324,7 +324,12 @@ export class ClaudeExecutor {
     }
     // plan_mode agent 的 ExitPlanMode 工具：拦截并挂起，等待用户确认计划。
     // 确认后 SDK 收到 allow，模型继续执行；拒绝则收到 deny（isError tool_result）。
+    // silent_task 无人值守：自动接受，fire onToolPermissionResult 供 webview 历史卡片回显。
     if (toolName.includes('ExitPlanMode')) {
+      if (this.agent.work_mode === 'silent_task') {
+        this.events.onToolPermissionResult({ toolUseId: toolUseID, allow: true, updatedInput: toolInput })
+        return Promise.resolve({ behavior: 'allow', updatedInput: toolInput })
+      }
       return this.requestToolPermission(toolUseID, toolName, toolInput)
     }
     const { must_confirm_tools, deny_tools } = this.agent
