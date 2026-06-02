@@ -284,6 +284,7 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
         no_input: z.literal(true),
         node_type: z.literal('agent'),
         auto_allowed_tools: z.literal(true),
+        must_confirm_tools: z.tuple([z.literal('Bash(git merge)'), z.literal('Bash(git push)')]),
         outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
       }) satisfies z.ZodType<Agent>
       const LiteCode = CodeSchema.pick({
