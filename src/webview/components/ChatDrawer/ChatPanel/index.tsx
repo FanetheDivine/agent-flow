@@ -237,6 +237,7 @@ export const ChatPanel: FC<Props> = ({
     .with('awaiting-question', () => ({ text: '需要回答', color: 'warning' }))
     .with('awaiting-tool-permission', () => ({ text: '请求授权', color: 'warning' }))
     .with('awaiting-complete-confirm', () => ({ text: '等待完成确认', color: 'warning' }))
+    .with('awaiting-exit-plan', () => ({ text: '计划等待确认', color: 'warning' }))
     .with('completed', () => ({ text: '已完成', color: 'success' }))
     .with('stopped', () => ({ text: '已停止', color: 'default' }))
     .with('error', () => ({ text: '出错', color: 'error' }))
