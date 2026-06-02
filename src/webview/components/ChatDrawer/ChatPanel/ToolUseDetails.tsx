@@ -336,7 +336,7 @@ type Props = {
   toolName: string
   input: unknown
   result?: ToolResult
-  /** 无 result 时是否视为成功 —— 仅 AgentComplete 用 */
+  /** 无 result 时是否视为成功 —— 仅 CompleteTask 用 */
   treatNoResultAsSuccess?: boolean
 }
 
