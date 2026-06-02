@@ -1,7 +1,16 @@
 import { createSdkMcpServer, SdkMcpToolDefinition, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { toJSONSchema } from 'zod/v4/core'
-import { type Agent, type Flow, AgentSchema, FlowSchema, OutputSchema, validateFlow } from '.'
+import {
+  type Agent,
+  type Code,
+  type Flow,
+  AgentSchema,
+  CodeSchema,
+  FlowSchema,
+  OutputSchema,
+  validateFlow,
+} from '.'
 
 // 仅extension可用
 
@@ -275,11 +284,23 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
         auto_allowed_tools: z.literal(true),
         outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
       }) satisfies z.ZodType<Agent>
+      const LiteCode = CodeSchema.pick({
+        id: true,
+        agent_name: true,
+        agent_desc: true,
+        code: true,
+        no_input: true,
+      }).extend({
+        node_type: z.literal('code'),
+        outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
+      }) satisfies z.ZodType<Code>
       const LiteFlow = FlowSchema.pick({ id: true, name: true, shareValuesKeys: true }).extend({
         agents: z
-          .array(LiteAgent)
+          .array(z.union([LiteAgent, LiteCode]))
           .optional()
-          .describe('当前 Flow 内的 agent，其 outputs 定义了连接边'),
+          .describe(
+            '当前 Flow 内的 agent，其 outputs 定义了连接边。Agent节点会唤起AI,Code节点会执行js代码',
+          ),
       }) satisfies z.ZodType<Flow>
       return {
         content: [
@@ -291,6 +312,7 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
                   .registry<{ id?: string }>()
                   .add(LiteOutput, { id: 'Output' })
                   .add(LiteAgent, { id: 'Agent' })
+                  .add(LiteCode, { id: 'Code' })
                   .add(LiteFlow, { id: 'Flow' }),
               ).schemas,
               null,

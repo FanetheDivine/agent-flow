@@ -124,7 +124,20 @@ export const CodeSchema = AgentSchema.pick({
    * values = 当前 shareValues 全量(全量读不受 allowed_read_values_keys 约束);
    * runCommand = async (command: string, timeout?: number) => Promise<string>,在 VSCode workspaceFolder 下执行 shell 命令并返回 stdout+stderr;timeout 单位毫秒,默认 600000(10 分钟)
    */
-  code: z.string().describe('代码节点的 JS 函数体'),
+  code: z
+    .string()
+    .describe(
+      [
+        '代码节点的 JS 函数体.',
+        '/**',
+        '* @param input string 上游或用户的输入',
+        '* @param values Record<string,string> 当前shareValues的全部数据',
+        '* @param runCommand (command: string)=>Promise<string> 在当前目录执行shell命令',
+        '* @return Promise<{output_name?:string, content:string, values?:Record<string,string>}> 输出分支/输出内容，values会被合并更新至当前shareValues',
+        '*/',
+        'async function (input, values, runCommand) { /** code的值在这里 */ }',
+      ].join('\n'),
+    ),
 })
 
 /** @see {@link CodeSchema} */
