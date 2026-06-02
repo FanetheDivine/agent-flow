@@ -116,6 +116,7 @@ export const AgentEditor: FC = () => {
         agent_prompt: src.agent_prompt,
         auto_allowed_tools: src.auto_allowed_tools,
         must_confirm_tools: src.must_confirm_tools,
+        deny_tools: src.deny_tools,
         work_mode: src.work_mode ?? 'task',
         no_input: src.no_input ?? false,
         plan_mode: src.plan_mode ?? false,
@@ -314,6 +315,29 @@ export const AgentEditor: FC = () => {
                       `特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`,
                       `Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。`,
                       `组合命令中任一子命令命中即要求确认`,
+                    ].join('\n'),
+                  }}
+                >
+                  <Select
+                    mode='tags'
+                    placeholder='选择或输入工具名（回车添加自定义）'
+                    options={TOOL_OPTIONS}
+                  />
+                </FormItem>
+              )}
+              {!isCodeNode && (
+                <FormItem
+                  name='deny_tools'
+                  label='禁止使用的工具'
+                  tooltip={{
+                    classNames: {
+                      container: 'w-max whitespace-pre',
+                    },
+                    title: [
+                      `禁止 Agent 调用的工具，优先级最高，命中即直接拒绝`,
+                      `特殊值 "${MCP_WILDCARD}" 匹配所有 mcp__* 工具`,
+                      `Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。`,
+                      `组合命令中任一子命令命中即禁止`,
                     ].join('\n'),
                   }}
                 >

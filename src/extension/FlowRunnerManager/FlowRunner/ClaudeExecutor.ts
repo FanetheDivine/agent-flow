@@ -377,8 +377,20 @@ export class ClaudeExecutor {
         })
       }
     }
-    const { auto_allowed_tools, must_confirm_tools } = this.agent
+    const { auto_allowed_tools, must_confirm_tools, deny_tools } = this.agent
     const toolInput = input as Record<string, unknown>
+    // 优先级 0：命中 deny 列表，直接禁止，不弹窗。
+    // Bash 命令级：组合命令中任一子命令命中即禁止（防绕过）
+    if (
+      deny_tools &&
+      (matchTool(toolName, deny_tools, toolInput) ||
+        matchToolAnySubCommand(toolName, deny_tools, toolInput))
+    ) {
+      return Promise.resolve({
+        behavior: 'deny',
+        message: `禁止使用`,
+      })
+    }
     // 优先级 1：命中 must_confirm 列表，始终要求确认。
     // Bash 命令级：组合命令中任一子命令命中即要求确认（防绕过）
     if (

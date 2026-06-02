@@ -58,6 +58,15 @@ export const AgentSchema = z.object({
         'Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。' +
         '组合命令中任一子命令命中即要求确认。',
     ),
+  deny_tools: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '禁止使用的工具名；优先级最高，命中即直接 deny 不弹窗。' +
+        '特殊值 "MCP" 匹配所有 mcp__* 工具。' +
+        'Bash匹配所有命令，"Bash(cmd)" 匹配命令前缀。' +
+        '组合命令中任一子命令命中即禁止。',
+    ),
   work_mode: z
     .enum(['task', 'chat', 'silent_task'])
     .optional()
@@ -276,7 +285,7 @@ export function validateFlow(flow: Flow): FlowValidationResult {
   return result
 }
 
-/** 通配符：匹配所有 `mcp__*` 工具。用于 auto_allowed_tools / must_confirm_tools 的字符串项 */
+/** 通配符：匹配所有 `mcp__*` 工具。用于 auto_allowed_tools / must_confirm_tools / deny_tools 的字符串项 */
 export const MCP_WILDCARD = 'MCP'
 
 /** Claude Code 预设提供的常见工具名，用于 AgentEditModal 的候选项。
@@ -449,7 +458,7 @@ export function matchSubCommand(subCmd: string, commandPattern: string): boolean
  * - 裸 `Bash`（不带括号）：匹配整个 Bash 工具，不检查命令内容
  *
  * @param toolName - SDK 传入的工具名
- * @param patterns - auto_allowed_tools 或 must_confirm_tools 的字符串数组
+ * @param patterns - auto_allowed_tools、must_confirm_tools 或 deny_tools 的字符串数组
  * @param input - 工具调用的入参（Bash 工具含 `command` 字段）
  */
 export function matchTool(
@@ -490,15 +499,16 @@ export function matchTool(
 }
 
 /**
- * Bash 命令级 must_confirm 检查：组合命令中**任一**子命令命中即要求确认。
+ * Bash 命令级 must_confirm / deny 检查：组合命令中**任一**子命令命中即要求确认或禁止。
  *
  * 与 {@link matchTool} 的区别：matchTool 要求所有子命令都匹配（用于 auto_allowed 防绕过），
- * 本函数只要有一个子命令匹配就返回 true（用于 must_confirm：只要有一个危险命令就需要确认）。
+ * 本函数只要有一个子命令匹配就返回 true（用于 must_confirm：只要有一个危险命令就需要确认；
+ * 用于 deny_tools：只要有一个危险命令即禁止）。
  *
  * 仅对 Bash 工具的 `Bash(pattern)` 规则有意义；非 Bash 工具或裸工具名规则不走此路径。
  *
  * @param toolName - SDK 传入的工具名
- * @param patterns - must_confirm_tools 的字符串数组
+ * @param patterns - must_confirm_tools 或 deny_tools 的字符串数组
  * @param input - 工具调用的入参（Bash 工具含 `command` 字段）
  */
 export function matchToolAnySubCommand(
