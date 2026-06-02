@@ -141,6 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
       .with('result', () => `Agent「${agentName}」生成完毕`)
       .with('awaiting-question', () => `Agent「${agentName}」需要回答`)
       .with('awaiting-tool-permission', () => `Agent「${agentName}」请求授权`)
+      .with('awaiting-complete-confirm', () => `Agent「${agentName}」等待完成确认`)
       .with('flow-completed', () => `工作流「${flowName}」已完成`)
       .with('agent-error', () => `Agent「${agentName}」运行出错`)
       .exhaustive()
@@ -157,6 +158,7 @@ export function activate(context: vscode.ExtensionContext) {
   const runnerManager = new FlowRunnerManager(
     postMessageToWebview,
     (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.shareValues ?? {},
+    (flowId) => currentFlows.flows.find((f) => f.id === flowId),
     (flowId, runId) => {
       const state = flowRunStateManager.getFlowRunStates()[flowId]
       const run = state?.runs.find((r) => r.runId === runId)
@@ -261,20 +263,32 @@ export function activate(context: vscode.ExtensionContext) {
       .slice(0, messageIdx + 1)
       .map((m) => structuredClone(m))
 
-    // 用 SDK 端的新 transcript uuid 覆盖切片中 user/assistant 类型 SDK 消息的 uuid
-    // —— forkSession remap 后的真实 uuid 必须同步到 webview,否则后续再 fork
-    // 时 locateFork 命中的还是源 uuid,SDK 在新 session 中查不到。
+    // 用双 transcript（源 session + 新 session）建 srcUuid→newUuid 映射，
+    // 据此替换切片中所有带 uuid 的 SDK 消息 uuid。
+    // forkSession 的新 session transcript 是源 session 的保序前缀切片，按位置严格对应，
+    // 这是唯一可靠的对齐方式（webview echo 无 uuid，顺序对齐会错位导致贴错 uuid）。
     try {
-      const newTranscript = await getSessionMessages(newSessionId, { dir })
-      let tIdx = 0
+      const [srcTranscript, newTranscript] = await Promise.all([
+        getSessionMessages(srcSessionId, { dir }),
+        getSessionMessages(newSessionId, { dir }),
+      ])
+      const uuidMap = new Map<string, string>()
+      const len = Math.min(srcTranscript.length, newTranscript.length)
+      for (let i = 0; i < len; i++) {
+        const srcUuid = srcTranscript[i].uuid
+        const newUuid = newTranscript[i].uuid
+        if (srcUuid && newUuid) uuidMap.set(srcUuid, newUuid)
+      }
       for (const m of slicedMessages) {
         if (m.type !== 'flow.signal.aiMessage') continue
-        const sdkMsg = m.data.message as { type?: string; uuid?: string }
-        if (sdkMsg.type !== 'user' && sdkMsg.type !== 'assistant') continue
-        // webview 主动 echo 的 user 通常无 uuid,不会进 transcript,跳过
+        const sdkMsg = m.data.message as { uuid?: string }
         if (!sdkMsg.uuid) continue
-        if (tIdx >= newTranscript.length) break
-        sdkMsg.uuid = newTranscript[tIdx++].uuid
+        const remapped = uuidMap.get(sdkMsg.uuid)
+        if (remapped) {
+          sdkMsg.uuid = remapped
+        } else {
+          logError('[fork] uuid not in srcTranscript mapping, keeping original', sdkMsg.uuid)
+        }
       }
     } catch (err) {
       // 拿不到 transcript 时不阻断 fork,仅打日志;UI 仍能进入新 Flow,只是再 fork 会失败
@@ -305,6 +319,7 @@ export function activate(context: vscode.ExtensionContext) {
       answeredToolPermissions: { ...sourceState.answeredToolPermissions },
       pendingQuestions: [],
       pendingToolPermissions: [],
+      pendingCompleteConfirms: [],
       shareValues: { ...sourceState.shareValues },
     }
 
@@ -321,9 +336,10 @@ export function activate(context: vscode.ExtensionContext) {
     // userMessage / answerQuestion / interrupt 都能正常匹配到此 runner。
     // fork 切片末端只可能是 user/text/thinking/turn_end —— SDK 不支持把
     // askUserQuestion 作为 fork 终点。
+    // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
+    // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
     runnerManager.spawnForFork({
       flowId: newFlowId,
-      flow: newFlow,
       agentId,
       resumeSessionId: newSessionId,
       runId: newRunId,
@@ -438,9 +454,11 @@ export function activate(context: vscode.ExtensionContext) {
           const { type, data } = e
           if (type === 'flow.command.flowStart') {
             const { flowId } = data as ExtensionFlowCommandEvents['flow.command.flowStart']
+            // flow 必须存在才能启动;FlowRunner 内部通过 getLatestFlow 实时取,
+            // 这里只做 fail-fast 校验,不再把 flow 注入到 data 里
             const flow = currentFlows.flows.find((f) => f.id === flowId)
             if (!flow) return
-            runnerManager.handleCommand(type, { ...data, flow })
+            runnerManager.handleCommand(type, data)
           } else {
             runnerManager.handleCommand(type, data)
           }

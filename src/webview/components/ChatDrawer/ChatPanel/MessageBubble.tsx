@@ -1,6 +1,6 @@
-import { memo, type FC, type ReactNode } from 'react'
-import { Tag, Tooltip } from 'antd'
-import { BranchesOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { memo, useState, type FC, type ReactNode } from 'react'
+import { Button, Input, Radio, Tag, Tooltip } from 'antd'
+import { BranchesOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
 import { match } from 'ts-pattern'
 import type {
@@ -44,6 +44,10 @@ export type BubbleCtx = {
   answeredToolPermissions?: Record<string, { allow: boolean }>
   onToolPermissionAllow?: (toolUseId: string) => void
   onToolPermissionDeny?: (toolUseId: string) => void
+  /** 当前挂起的 CompleteTask 完成前确认 toolUseId 集合 */
+  pendingCompleteConfirmToolUseIds?: Set<string>
+  onCompleteConfirmAccept?: (toolUseId: string) => void
+  onCompleteConfirmDeny?: (toolUseId: string, reason: string) => void
   /**
    * 触发会话 fork。target.kind:
    * - `message`：以 SDK 消息 UUID 为切片终点
@@ -314,10 +318,119 @@ function subRunStatusLabel(phase?: AgentPhase): string {
     .with('interrupted', () => '已停止')
     .with('awaiting-question', () => '等待回答')
     .with('awaiting-tool-permission', () => '等待授权')
+    .with('awaiting-complete-confirm', () => '等待确认')
     .with('completed', () => '已完成')
     .with('stopped', () => '已停止')
     .with('error', () => '子 Agent 出错')
     .exhaustive()
+}
+
+/** CompleteTask 结果主体：完成分支 Tag + content + 共享数据写入(values)。
+ *  被「完成卡片」(agent_complete) 与「完成前确认卡片」复用。 */
+const CompleteTaskBody: FC<{
+  outputName?: string
+  content?: string
+  values?: Record<string, string>
+}> = ({ outputName, content, values }) => {
+  const shareEntries = values ? Object.entries(values) : []
+  return (
+    <div className='min-w-45'>
+      <Tag color='green' className='m-0 text-[10px]'>
+        完成{outputName ? ` → ${outputName}` : ''}
+      </Tag>
+      {content && (
+        <div className='mt-2'>
+          <Md content={content} />
+        </div>
+      )}
+      {shareEntries.length > 0 && (
+        <div className='mt-2 border-t border-[#45475a] pt-2'>
+          <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
+          <div className='flex flex-col gap-1'>
+            {shareEntries.map(([k, v]) => (
+              <div key={k} className='flex flex-col text-[11px]'>
+                <Tag color='blue' className='m-0 mr-1 self-start text-[10px]'>
+                  {k}
+                </Tag>
+                <Md className='ml-4' content={v} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 完成前确认卡片 —— 作为 AI 气泡渲染（role:'ai'），样式与 agent_complete 完成气泡完全一致：
+ *  左侧 filled 气泡、无自绘边框，气泡外观由 Bubble filled 提供 */
+const CompleteTaskConfirmCard: FC<{
+  outputName?: string
+  content?: string
+  values?: Record<string, string>
+  onAccept: () => void
+  onDeny: (reason: string) => void
+}> = ({ outputName, content, values, onAccept, onDeny }) => {
+  const [choice, setChoice] = useState<'accept' | 'deny' | null>(null)
+  const [reason, setReason] = useState('')
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault()
+      if (reason.trim()) onDeny(reason.trim())
+    }
+  }
+
+  return (
+    <div className='flex flex-col gap-2 overflow-x-hidden'>
+      <CompleteTaskBody outputName={outputName} content={content} values={values} />
+      <div className='flex items-center gap-2 border-t border-[#45475a] pt-2'>
+        <ExclamationCircleOutlined className='text-[#f9e2af]' />
+        <span className='text-xs font-semibold text-[#cdd6f4]'>完成前确认</span>
+      </div>
+      <Radio.Group
+        value={choice}
+        onChange={(e) => {
+          const val = e.target.value as 'accept' | 'deny'
+          setChoice(val)
+          if (val === 'accept') onAccept()
+        }}
+        className='flex flex-col gap-1'
+      >
+        <label className='flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-[#313244]'>
+          <Radio value='accept' />
+          <span className='text-sm text-[#cdd6f4]'>同意</span>
+        </label>
+        <label className='flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-[#313244]'>
+          <Radio value='deny' />
+          <span className='text-sm text-[#cdd6f4]'>拒绝</span>
+        </label>
+      </Radio.Group>
+      {choice === 'deny' && (
+        <div className='flex flex-col gap-1 pl-6'>
+          <Input.TextArea
+            autoSize={{ minRows: 1, maxRows: 3 }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder='请输入拒绝原因...'
+            className='text-sm'
+          />
+          <div className='flex justify-end'>
+            <Button
+              type='primary'
+              danger
+              size='small'
+              disabled={!reason.trim()}
+              onClick={() => onDeny(reason.trim())}
+            >
+              发送
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function renderItemToBubble(
@@ -326,7 +439,7 @@ function renderItemToBubble(
   sessionCompleted = false,
   itemContextUsage?: { used: number; total: number },
   runId?: string,
-): RenderedBubble | null {
+): RenderedBubble | RenderedBubble[] | null {
   /**
    * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素,作为 Copyable.extra 注入。
    * fork icon 与 CopyButton 同列垂直堆叠（见 Copyable 组件实现）,不再用 absolute 定位。
@@ -365,9 +478,6 @@ function renderItemToBubble(
       if (item.streaming) {
         return { key: item.key, role: 'ai', content: md }
       }
-      // 与 user 对齐:只要 messageUuid 存在即放行 fork。turn 是否闭环不再作为
-      // 守卫条件 —— fork 切片末端的 text 项 turnClosed=false（切片不含后续 result）,
-      // 但 fork 本身合法,不能因此拦下。
       const fork =
         runId && item.messageUuid
           ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
@@ -467,38 +577,68 @@ function renderItemToBubble(
           }
         }
       }
-      if (ctx) {
-        const isPendingPerm = ctx.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
-        const answeredPerm = ctx.answeredToolPermissions?.[item.toolUseId]
-        if (isPendingPerm || answeredPerm) {
-          return {
-            key: item.key,
-            role: 'system',
-            content: (
-              <ToolPermissionCard
-                toolName={item.toolName}
-                input={item.input}
-                mode={isPendingPerm ? 'active' : 'historical'}
-                answered={answeredPerm}
-                onAllow={() => ctx.onToolPermissionAllow?.(item.toolUseId)}
-                onDeny={() => ctx.onToolPermissionDeny?.(item.toolUseId)}
-              />
-            ),
-          }
-        }
+      // 先计算权限状态，以便在 defaultOpen 中判断是否展开参数
+      const isPendingPerm = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
+      const answeredPerm = ctx?.answeredToolPermissions?.[item.toolUseId]
+      const isPendingCompleteConfirm =
+        ctx?.pendingCompleteConfirmToolUseIds?.has(item.toolUseId) ?? false
+      const permItem = {
+        key: item.key + '-perm',
+        role: 'system' as const,
+        content: (
+          <ToolPermissionCard
+            toolName={item.toolName}
+            input={item.input}
+            mode={isPendingPerm ? 'active' : 'historical'}
+            answered={answeredPerm}
+            onAllow={() => ctx!.onToolPermissionAllow?.(item.toolUseId)}
+            onDeny={() => ctx!.onToolPermissionDeny?.(item.toolUseId)}
+          />
+        ),
       }
-      return {
+      const toolUseItem = {
         key: item.key,
-        role: 'ai',
+        role: 'ai' as const,
         content: (
           <ToolUseDetails
             toolName={item.toolName}
             input={item.input}
             result={item.result}
-            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('AgentComplete')}
+            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('CompleteTask')}
           />
         ),
       }
+      const completeInput = item.input as Record<string, any> | undefined
+      const confirmItem: RenderedBubble | null =
+        isPendingCompleteConfirm && ctx
+          ? {
+              key: item.key + '-confirm',
+              role: 'ai',
+              content: (
+                <CompleteTaskConfirmCard
+                  outputName={completeInput?.output_name ?? completeInput?.output?.name}
+                  content={
+                    typeof completeInput?.content === 'string' ? completeInput.content : undefined
+                  }
+                  values={
+                    completeInput?.values && typeof completeInput.values === 'object'
+                      ? completeInput.values
+                      : undefined
+                  }
+                  onAccept={() => ctx.onCompleteConfirmAccept?.(item.toolUseId)}
+                  onDeny={(reason) => ctx.onCompleteConfirmDeny?.(item.toolUseId, reason)}
+                />
+              ),
+            }
+          : null
+      if (isPendingPerm) {
+        return confirmItem ? [permItem, confirmItem] : permItem
+      }
+
+      if (answeredPerm) {
+        return confirmItem ? [permItem, toolUseItem, confirmItem] : [permItem, toolUseItem]
+      }
+      return confirmItem ? [toolUseItem, confirmItem] : toolUseItem
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
@@ -540,36 +680,17 @@ function renderItemToBubble(
         .filter(Boolean)
         .join('\n')
       const breakdown = item.modelBreakdown ?? []
-      const shareEntries = item.values ? Object.entries(item.values) : []
       return {
         key: item.key,
         role: 'ai',
         content: (
           <Copyable text={completionText}>
             <div>
-              <Tag color='green' className='m-0 text-[10px]'>
-                完成{item.outputName ? ` → ${item.outputName}` : ''}
-              </Tag>
-              {item.displayContent && (
-                <div className='mt-2'>
-                  <Md content={item.displayContent} />
-                </div>
-              )}
-              {shareEntries.length > 0 && (
-                <div className='mt-2 border-t border-[#45475a] pt-2'>
-                  <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
-                  <div className='flex flex-col gap-1'>
-                    {shareEntries.map(([k, v]) => (
-                      <div key={k} className='text-[11px]'>
-                        <Tag color='blue' className='m-0 mr-1 text-[10px]'>
-                          {k}
-                        </Tag>
-                        <span className='break-all whitespace-pre-wrap text-[#cdd6f4]'>{v}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <CompleteTaskBody
+                outputName={item.outputName}
+                content={item.displayContent}
+                values={item.values}
+              />
               {(breakdown.length > 0 || item.totalCost !== undefined || itemContextUsage) && (
                 <div className='mt-2 border-t border-[#45475a] pt-2'>
                   <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
@@ -596,6 +717,20 @@ function renderItemToBubble(
         ),
       }
     }
+    case 'error': {
+      return {
+        key: item.key,
+        role: 'ai',
+        content: (
+          <div className='flex min-w-20 flex-col gap-2'>
+            <Tag color={'error'} className='self-start'>
+              错误信息
+            </Tag>
+            <div className='break-all whitespace-pre-wrap'>{item.message}</div>
+          </div>
+        ),
+      }
+    }
   }
 }
 
@@ -613,7 +748,8 @@ export function toBubbleItems(
     // 这里把它作为 runId 透传给 buildForkIcon 拼 fork target
     const bubble = renderItemToBubble(item, ctx, sessionCompleted, cu, sessionId)
     if (!bubble) continue
-    out.push(bubble)
+    if (Array.isArray(bubble)) out.push(...bubble)
+    else out.push(bubble)
   }
   return out
 }

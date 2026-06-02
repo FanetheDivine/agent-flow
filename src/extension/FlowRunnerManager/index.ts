@@ -12,21 +12,49 @@ type GetRunInfo = (
   flowId: string,
   runId: string,
 ) => { sessionId?: string; agentId: string; parentToolUseId?: string } | undefined
+type GetLatestFlow = (flowId: string) => Flow | undefined
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
   private postMessage: PostMessage
   private getLatestShareValues: GetLatestShareValues
+  private getLatestFlow: GetLatestFlow
   private getRunInfo: GetRunInfo
 
   constructor(
     postMessage: PostMessage,
     getLatestShareValues: GetLatestShareValues,
+    getLatestFlow: GetLatestFlow,
     getRunInfo: GetRunInfo,
   ) {
     this.postMessage = postMessage
     this.getLatestShareValues = getLatestShareValues
+    this.getLatestFlow = getLatestFlow
     this.getRunInfo = getRunInfo
+  }
+
+  /**
+   * 构造 FlowRunner 时注入 flow 数据源 —— FlowRunner 不再持有 flow 字段,
+   * 所有读取链路通过 getLatestFlow(flowId) 实时取,确保 webview save 后改的 agent
+   * 能立即在 lazy 启动闭包里被读到。flowId 在此处闭包绑定,FlowRunner 内无需感知。
+   */
+  private createRunner(flowId: string): FlowRunner {
+    const runner = new FlowRunner({
+      getLatestShareValues: () => this.getLatestShareValues(flowId),
+      getLatestFlow: () => {
+        const flow = this.getLatestFlow(flowId)
+        if (!flow) throw new Error(`[FlowRunnerManager] flow "${flowId}" not found`)
+        return flow
+      },
+      getRunInfo: (rid) => this.getRunInfo(flowId, rid),
+    })
+    runner.listenAllSignals((eventType, signalData) => {
+      this.postMessage({
+        type: eventType,
+        data: { ...signalData, flowId },
+      } as ExtensionToWebviewMessage)
+    })
+    return runner
   }
 
   /**
@@ -40,19 +68,10 @@ export class FlowRunnerManager {
   handleCommand(type: keyof ExtensionFlowCommandEvents, data: any): void {
     match(type)
       .with('flow.command.flowStart', () => {
-        const { flowId, runId, agentId, flow, initMessage, mode } =
-          data as ExtensionFlowCommandEvents['flow.command.flowStart'] & { flow: Flow }
+        const { flowId, runId, agentId, initMessage, mode } =
+          data as ExtensionFlowCommandEvents['flow.command.flowStart']
         this.disposeRunner(flowId)
-        const runner = new FlowRunner(flow, {
-          getLatestShareValues: () => this.getLatestShareValues(flowId),
-          getRunInfo: (rid) => this.getRunInfo(flowId, rid),
-        })
-        runner.listenAllSignals((eventType, signalData) => {
-          this.postMessage({
-            type: eventType,
-            data: { ...signalData, flowId },
-          } as ExtensionToWebviewMessage)
-        })
+        const runner = this.createRunner(flowId)
         this.runners.set(flowId, runner)
         runner.emit('flow.command.flowStart', { runId, agentId, initMessage, mode })
       })
@@ -73,6 +92,11 @@ export class FlowRunnerManager {
         const { flowId, ...rest } =
           data as ExtensionFlowCommandEvents['flow.command.toolPermissionResult']
         this.runners.get(flowId)?.emit('flow.command.toolPermissionResult', rest)
+      })
+      .with('flow.command.answerCompleteTaskConfirm', () => {
+        const { flowId, ...rest } =
+          data as ExtensionFlowCommandEvents['flow.command.answerCompleteTaskConfirm']
+        this.runners.get(flowId)?.emit('flow.command.answerCompleteTaskConfirm', rest)
       })
       .with('flow.command.setShareValues', () => {
         const { flowId, ...rest } =
@@ -111,27 +135,19 @@ export class FlowRunnerManager {
    * - 不发 flow.signal.flowStart;runId 由 extension 端通过 signal.fork 同步
    * - mode:'manual' 时 agentId 必须是 flow.agents 中真实 agent;'host' 时可以是
    *   HOST_AGENT_ID(对应 host run)或子 agent id(对应子 run)
+   * - 调用前必须先把 newFlow 写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId)
+   *   实时取最新引用(lazy 闭包内读到的是用户改 agent 后的最新值)
    */
   spawnForFork(params: {
     flowId: string
-    flow: Flow
     agentId: string
     resumeSessionId: string
     runId: string
     mode: 'manual' | 'host'
   }): void {
-    const { flowId, flow, agentId, resumeSessionId, runId, mode } = params
+    const { flowId, agentId, resumeSessionId, runId, mode } = params
     this.disposeRunner(flowId)
-    const runner = new FlowRunner(flow, {
-      getLatestShareValues: () => this.getLatestShareValues(flowId),
-      getRunInfo: (rid) => this.getRunInfo(flowId, rid),
-    })
-    runner.listenAllSignals((eventType, signalData) => {
-      this.postMessage({
-        type: eventType,
-        data: { ...signalData, flowId },
-      } as ExtensionToWebviewMessage)
-    })
+    const runner = this.createRunner(flowId)
     this.runners.set(flowId, runner)
     runner.spawnForFork({ runId, agentId, resumeSessionId, mode })
   }

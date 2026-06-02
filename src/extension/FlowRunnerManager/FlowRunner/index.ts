@@ -1,8 +1,13 @@
+import { execaCommand } from 'execa'
+import * as fs from 'fs'
+import * as path from 'path'
 import { match } from 'ts-pattern'
+import * as vscode from 'vscode'
 import {
   type Agent,
   type AIMessageType,
   type AskUserQuestionOutput,
+  type Code,
   type FlowRunnerCommandEvents,
   type Flow,
   type FlowRunnerSignalEvents,
@@ -13,6 +18,53 @@ import {
 import { buildHostMcpServer, type RunAgentOutput } from '@/common/extension'
 import { logError } from '../../logger'
 import { ClaudeExecutor, type ExecutorResult } from './ClaudeExecutor'
+import { CodeExecutor } from './CodeExecutor'
+
+/**
+ * Windows 上 `bash` 命令可能被 WSL 拦截,需要显式定位 Git Bash 的 bash.exe。
+ * 策略:用 `where git` 找到 git.exe 路径,推导同目录下的 bash.exe(Git for Windows 布局:
+ * `Git/cmd/git.exe` → `Git/bin/bash.exe`);找不到则尝试常见安装路径。
+ * 结果缓存,只解析一次。
+ */
+let _gitBashPath: string | undefined
+let _gitBashResolved = false
+async function resolveGitBash(): Promise<string | undefined> {
+  if (_gitBashResolved) return _gitBashPath
+  _gitBashResolved = true
+  try {
+    const { stdout } = await execaCommand('where git')
+    const gitExe = stdout.trim().split('\n')[0].trim()
+    if (gitExe) {
+      // Git/cmd/git.exe → Git/bin/bash.exe
+      const candidate = path.resolve(path.dirname(gitExe), '..', 'bin', 'bash.exe')
+      if (fs.existsSync(candidate)) {
+        _gitBashPath = candidate
+        return _gitBashPath
+      }
+    }
+  } catch {
+    /* where git 失败则继续尝试 */
+  }
+  // 常见安装路径兜底
+  const fallbacks = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ]
+  for (const p of fallbacks) {
+    if (fs.existsSync(p)) {
+      _gitBashPath = p
+      return _gitBashPath
+    }
+  }
+  return undefined
+}
+
+/**
+ * 节点执行器联合 —— ClaudeExecutor 走 AI SDK,CodeExecutor 把 agent.code 当函数体执行。
+ * 路由侧 FlowRunner 不区分二者:两者都实现 sendUserMessage / interrupt / answerQuestion /
+ * answerToolPermission / answerCompleteConfirm / kill 接口,且 ExecutorEvents 同构。
+ */
+type Executor = ClaudeExecutor | CodeExecutor
 
 type SignalHandler<K extends keyof FlowRunnerSignalEvents> = (
   data: FlowRunnerSignalEvents[K],
@@ -30,6 +82,13 @@ export type FlowRunnerOptions = {
    * 时调用此回调，由外部（reducer 镜像 FlowRunStateManager）作为唯一真相源。
    */
   getLatestShareValues: () => Record<string, string>
+  /**
+   * 取当前 Flow 最新引用。
+   * webview 编辑 agent 后发 `save` 命令会整体替换 currentFlows,旧 Flow 引用会过时;
+   * FlowRunner 不持有 flow 字段,所有读 agent / shareValuesKeys 的地方都通过此回调
+   * 取最新值,确保 fork 后(lazy 模式构造到首次启动间)用户改 agent 在首次启动时生效。
+   */
+  getLatestFlow: () => Flow
   /**
    * 取指定 runId 的 RunState 信息(sessionId / agentId / parentToolUseId)。
    * 用于 host run interrupt 后子 run executor 已被 cascadeKill 删除时,
@@ -57,6 +116,9 @@ type RunAgentHandler = {
  *
  * 路由规则:所有 command 按 runId 在 Map 中寻址,Executor 自身不持有任何 run 路由信息。
  *
+ * 数据源:Flow 不作为字段持有,统一通过 `getLatestFlow()` 回调实时取,确保外部
+ * (PersistedDataController save / setShareValues 等)更新后所有读取链路看到最新值。
+ *
  * host 模式:
  * - flowStart 时 agentId === HOST_AGENT_ID,FlowRunner 创建 host executor
  *   (buildHostSystemPrompt + buildHostMcpServer,仅暴露 runAgent 工具)
@@ -65,12 +127,11 @@ type RunAgentHandler = {
  * - 子 run 走普通 buildAgentMcpServer + buildAgentSystemPrompt
  */
 export class FlowRunner {
-  readonly flow: Flow
-
-  private executors = new Map<string, ClaudeExecutor>()
+  private executors = new Map<string, Executor>()
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
+  private readonly getLatestFlow: () => Flow
   private readonly getRunInfo?: FlowRunnerOptions['getRunInfo']
   /** runId → 该 run 当前 mode('manual' / 'host' parent / 'host' sub-run) */
   private runMode = new Map<string, 'manual' | 'host-parent' | 'host-sub'>()
@@ -79,9 +140,9 @@ export class FlowRunner {
   /** 子 run → host run runId(用于 host run interrupt 时级联 kill 子 executor) */
   private subRunToHost = new Map<string, string>()
 
-  constructor(flow: Flow, options: FlowRunnerOptions) {
-    this.flow = flow
+  constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
+    this.getLatestFlow = options.getLatestFlow
     this.getRunInfo = options.getRunInfo
   }
 
@@ -128,6 +189,11 @@ export class FlowRunner {
       .with('flow.command.toolPermissionResult', () => {
         this.handleToolPermissionResult(
           data as FlowRunnerCommandEvents['flow.command.toolPermissionResult'],
+        )
+      })
+      .with('flow.command.answerCompleteTaskConfirm', () => {
+        this.handleAnswerCompleteConfirm(
+          data as FlowRunnerCommandEvents['flow.command.answerCompleteTaskConfirm'],
         )
       })
       .with('flow.command.killFlow', () => {
@@ -193,39 +259,57 @@ export class FlowRunner {
       parent_tool_use_id: null,
     }
     if (mode === 'host' && agentId === HOST_AGENT_ID) {
-      // host run fork:用 host system prompt + host MCP(仅 runAgent)
-      const events = this.buildExecutorEvents(runId, undefined, () => executor)
-      const executor: ClaudeExecutor = new ClaudeExecutor(
-        dummyInit,
-        this.makeHostFakeAgent(),
-        this.getLatestShareValues(),
-        events,
+      // host run fork:用 host system prompt + host MCP(仅 runAgent),lazy 构造
+      const executor: ClaudeExecutor = new ClaudeExecutor('lazy', () => ({
+        initMessage: dummyInit,
+        agent: this.makeHostFakeAgent(),
+        currentValues: this.getLatestShareValues(),
+        shareValueKeys: this.getLatestFlow().shareValuesKeys ?? [],
+        events: this.buildExecutorEvents(runId, undefined, () => executor),
         resumeSessionId,
-        'lazy',
-        {
-          systemPromptOverride: buildHostSystemPrompt(this.flow),
-          mcpServerFactory: () => buildHostMcpServer({ onRunAgent: this.makeRunAgentHandler(runId) }),
-        },
-      )
+        systemPromptOverride: buildHostSystemPrompt(this.getLatestFlow()),
+        mcpServerFactory: () =>
+          buildHostMcpServer({ onRunAgent: this.makeRunAgentHandler(runId) }),
+      }))
       this.executors.set(runId, executor)
       this.runMode.set(runId, 'host-parent')
       return
     }
     // 普通 fork(manual run / host 子 run)
-    const agent = this.findAgentById(agentId)
-    if (!agent) {
+    // 提前 fail-fast:agent 必须存在才启动 lazy executor。lazy 闭包内仍会重新查最新 agent
+    // 应用变更;若运行期间 agent 被删,fallback 到此处校验过的 initialAgent 不让首次启动崩。
+    const initialAgent = this.findAgentById(agentId)
+    if (!initialAgent) {
       this.fire('flow.signal.error', { msg: `Agent "${agentId}" not found in flow` })
       return
     }
-    const events = this.buildExecutorEvents(runId, agent, () => executor)
-    const executor: ClaudeExecutor = new ClaudeExecutor(
-      dummyInit,
-      agent,
-      this.getLatestShareValues(),
-      events,
-      resumeSessionId,
-      'lazy',
-    )
+    // code 节点没有 SDK session,无法 fork;webview 端不应给出 fork 入口。这里只兜底
+    if (initialAgent.node_type === 'code') {
+      this.fire('flow.signal.error', {
+        msg: `代码节点 "${initialAgent.agent_name}" 不支持 fork`,
+      })
+      return
+    }
+    const executor: ClaudeExecutor = new ClaudeExecutor('lazy', () => {
+      // lazy 模式首次 createQuery 时才进入此闭包:重查 agent / shareValues / shareValuesKeys
+      // 取最新值,让构造到首次启动间用户改动 flow/agent 生效。flow 通过 getLatestFlow()
+      // 回调取最新引用——webview save 命令会整体替换 currentFlows,持有 fork 时刻快照
+      // 会拿到过时的 agents 与 shareValuesKeys。
+      const latestFlow = this.getLatestFlow()
+      const found = latestFlow.agents?.find((a) => a.id === agentId)
+      // fork 仅支持 node_type='agent';若最新 flow 把该节点改成 code,回退到构造时校验过的 initialAgent
+      const latestAgent = found && found.node_type !== 'code' ? found : initialAgent
+      return {
+        initMessage: dummyInit,
+        agent: latestAgent,
+        currentValues: this.getLatestShareValues(),
+        shareValueKeys: latestFlow.shareValuesKeys ?? [],
+        events: this.buildExecutorEvents(runId, latestAgent, () => executor),
+        resumeSessionId,
+        flowBaseUrl: latestFlow.base_url,
+        flowApiKey: latestFlow.api_key,
+      }
+    })
     this.executors.set(runId, executor)
     this.runMode.set(runId, mode === 'host' ? 'host-sub' : 'manual')
   }
@@ -324,20 +408,28 @@ export class FlowRunner {
     if (!info || !info.parentToolUseId) return
     const subAgent = this.findAgentById(info.agentId)
     if (!subAgent) return
-    const events = this.buildExecutorEvents(runId, subAgent, () => executor)
+    // code 节点无 SDK session,不可 lazy resume
+    if (subAgent.node_type === 'code') return
     const dummyInit: UserMessageType = {
       type: 'user',
       message: { role: 'user', content: '' },
       parent_tool_use_id: null,
     }
-    const executor: ClaudeExecutor = new ClaudeExecutor(
-      dummyInit,
-      subAgent,
-      this.getLatestShareValues(),
-      events,
-      info.sessionId,
-      'lazy',
-    )
+    const executor: ClaudeExecutor = new ClaudeExecutor('lazy', () => {
+      const latestFlow = this.getLatestFlow()
+      const found = latestFlow.agents?.find((a) => a.id === info.agentId)
+      const latestAgent = found && found.node_type !== 'code' ? found : subAgent
+      return {
+        initMessage: dummyInit,
+        agent: latestAgent,
+        currentValues: this.getLatestShareValues(),
+        shareValueKeys: latestFlow.shareValuesKeys ?? [],
+        events: this.buildExecutorEvents(runId, latestAgent, () => executor),
+        resumeSessionId: info.sessionId,
+        flowBaseUrl: latestFlow.base_url,
+        flowApiKey: latestFlow.api_key,
+      }
+    })
     this.executors.set(runId, executor)
     this.runMode.set(runId, 'host-sub')
     executor.sendUserMessage(message)
@@ -376,27 +468,34 @@ export class FlowRunner {
     executor.answerToolPermission(toolUseId, allow)
   }
 
+  private handleAnswerCompleteConfirm({
+    runId,
+    toolUseId,
+    accept,
+    reason,
+  }: FlowRunnerCommandEvents['flow.command.answerCompleteTaskConfirm']): void {
+    const executor = this.executors.get(runId)
+    if (!executor) return
+    executor.answerCompleteConfirm(toolUseId, accept, reason)
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   /**
    * 启动 host run:用 host system prompt + 仅 runAgent MCP server。
-   * host AI 视为 never_complete:不会调 AgentComplete,Flow 终止靠用户主动 killFlow。
+   * host AI 视为 never_complete:不会调 CompleteTask,Flow 终止靠用户主动 killFlow。
    */
   private startHostRun(runId: string, initMessage: UserMessageType): void {
-    const fakeHostAgent = this.makeHostFakeAgent()
-    const events = this.buildExecutorEvents(runId, undefined, () => executor, true)
-    const executor: ClaudeExecutor = new ClaudeExecutor(
+    const executor: ClaudeExecutor = new ClaudeExecutor('eager', () => ({
       initMessage,
-      fakeHostAgent,
-      this.getLatestShareValues(),
-      events,
-      undefined,
-      'eager',
-      {
-        systemPromptOverride: buildHostSystemPrompt(this.flow),
-        mcpServerFactory: () => buildHostMcpServer({ onRunAgent: this.makeRunAgentHandler(runId) }),
-      },
-    )
+      agent: this.makeHostFakeAgent(),
+      currentValues: this.getLatestShareValues(),
+      shareValueKeys: this.getLatestFlow().shareValuesKeys ?? [],
+      events: this.buildExecutorEvents(runId, undefined, () => executor, true),
+      systemPromptOverride: buildHostSystemPrompt(this.getLatestFlow()),
+      mcpServerFactory: () =>
+        buildHostMcpServer({ onRunAgent: this.makeRunAgentHandler(runId) }),
+    }))
     this.executors.set(runId, executor)
     this.runMode.set(runId, 'host-parent')
   }
@@ -404,13 +503,14 @@ export class FlowRunner {
   /**
    * 构造一个供 ClaudeExecutor 使用的"假 Agent"代表 host —— ClaudeExecutor 内部依赖
    * agent.model / agent.effort / agent.work_mode / agent.auto_allowed_tools 等字段。
-   * host 走 'chat' work_mode(不挂 AgentComplete,host AI 调度子 Agent 时各种工具自动放行)。
+   * host 走 'chat' work_mode(不挂 CompleteTask,host AI 调度子 Agent 时各种工具自动放行)。
    */
   private makeHostFakeAgent(): Agent {
+    const flow = this.getLatestFlow()
     return {
       id: HOST_AGENT_ID,
-      model: this.flow.host_model || 'sonnet',
-      effort: this.flow.host_effort,
+      model: flow.host_model || 'sonnet',
+      effort: flow.host_effort,
       work_mode: 'chat',
       agent_name: 'AI 托管',
       auto_allowed_tools: true,
@@ -530,19 +630,54 @@ export class FlowRunner {
   }
 
   /**
-   * 启动一个 Agent run:创建 ClaudeExecutor 并写入 executors Map。
+   * 启动一个 Agent run:按 node_type 分流 ClaudeExecutor / CodeExecutor 并写入 executors Map。
    * @param fireFlowStartSignal - 是否在首条 SDK 消息抵达时 fire flow.signal.flowStart
    *   (eager 路径需要;fork 路径由外层 spawnForFork 走 signal.fork 替代,故为 false)
    */
   private runAgent(
     runId: string,
     initMessage: UserMessageType,
-    agent: Agent,
+    agent: Agent | Code,
     currentValues: Record<string, string>,
     fireFlowStartSignal: boolean,
   ): void {
-    const events = this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal)
-    const executor: ClaudeExecutor = new ClaudeExecutor(initMessage, agent, currentValues, events)
+    if (agent.node_type === 'code') {
+      const executor: CodeExecutor = new CodeExecutor('eager', () => {
+        const latestFlow = this.getLatestFlow()
+        const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath
+        return {
+          initMessage,
+          agent,
+          currentValues,
+          shareValueKeys: latestFlow.shareValuesKeys ?? [],
+          runCommand: async (command: string, timeout?: number) => {
+            // Windows 上 `bash` 会被 WSL 拦截,需要显式定位 Git Bash
+            const shell = process.platform === 'win32' ? ((await resolveGitBash()) ?? 'bash') : true
+            const { stdout, stderr } = await execaCommand(command, {
+              cwd,
+              timeout: timeout ?? 600_000,
+              shell,
+            })
+            return stdout + stderr
+          },
+          events: this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal),
+        }
+      })
+      this.executors.set(runId, executor)
+      return
+    }
+    const executor: ClaudeExecutor = new ClaudeExecutor('eager', () => {
+      const latestFlow = this.getLatestFlow()
+      return {
+        initMessage,
+        agent,
+        currentValues,
+        shareValueKeys: latestFlow.shareValuesKeys ?? [],
+        events: this.buildExecutorEvents(runId, agent, () => executor, fireFlowStartSignal),
+        flowBaseUrl: latestFlow.base_url,
+        flowApiKey: latestFlow.api_key,
+      }
+    })
     this.executors.set(runId, executor)
   }
 
@@ -573,13 +708,15 @@ export class FlowRunner {
   }
 
   /**
-   * 构造 ClaudeExecutor 的事件回调 —— 上层路由(runId、kill)在此闭包注入。
+   * 构造 Executor 的事件回调 —— 上层路由(runId、kill)在此闭包注入。
    * `agent` 为 undefined 表示 host run(没有真实 agent 定义,签发 signal 时用 HOST_AGENT_ID)。
+   * 闭包对 ClaudeExecutor / CodeExecutor 同构:onComplete 回调里只比对 executor 引用,
+   * 不区分类型,所以 getExecutor 用 Executor 联合即可。
    */
   private buildExecutorEvents(
     runId: string,
-    agent: Agent | undefined,
-    getExecutor: () => ClaudeExecutor,
+    agent: Agent | Code | undefined,
+    getExecutor: () => Executor,
     fireFlowStartSignal: boolean = false,
   ) {
     const agentId = agent?.id ?? HOST_AGENT_ID
@@ -603,12 +740,13 @@ export class FlowRunner {
         if (this.executors.get(runId) !== getExecutor()) return
         const role = this.runMode.get(runId)
         if (role === 'host-sub') {
-          // 子 run AgentComplete:resolve host AI 的 runAgent promise + fire signal
+          // 子 run CompleteTask:resolve host AI 的 runAgent promise + fire signal
           this.onHostSubAgentComplete(runId, result)
           return
         }
-        // host-parent / manual:走原 onAgentComplete 路径
-        if (agent) this.onAgentComplete(runId, agent, result)
+        // host-parent / manual:走 onCompleteTask 路径(host run agent 为 undefined,
+        // 是 never_complete,不会真正触发;manual run 才推进 next_agent)
+        if (agent) this.onCompleteTask(runId, agent, result)
       },
       onToolPermissionRequest: ({
         toolUseId,
@@ -623,6 +761,19 @@ export class FlowRunner {
           runId,
           toolUseId,
           toolName,
+          input,
+        })
+      },
+      onCompleteConfirmRequest: ({
+        toolUseId,
+        input,
+      }: {
+        toolUseId: string
+        input: Record<string, unknown>
+      }) => {
+        this.fire('flow.signal.agentCompleteConfirmRequest', {
+          runId,
+          toolUseId,
           input,
         })
       },
@@ -645,13 +796,17 @@ export class FlowRunner {
           }
           this.subRunToHost.delete(runId)
         }
-        this.fire('flow.signal.agentError', { runId, agentId, err })
+        this.fire('flow.signal.agentError', {
+          runId,
+          agentId,
+          err: err.message || String(err),
+        })
       },
     }
   }
 
   /**
-   * 子 run AgentComplete:resolve host AI 等待中的 runAgent promise + fire 子 run agentComplete signal。
+   * 子 run CompleteTask:resolve host AI 等待中的 runAgent promise + fire 子 run agentComplete signal。
    * 不追加 next_agent run(host 模式不走 outputs.next_agent)。
    */
   private onHostSubAgentComplete(subRunId: string, result: ExecutorResult): void {
@@ -681,19 +836,19 @@ export class FlowRunner {
     })
   }
 
-  private onAgentComplete(runId: string, agent: Agent, result: ExecutorResult): void {
+  private onCompleteTask(runId: string, agent: Agent | Code, result: ExecutorResult): void {
     try {
-      this.doOnAgentComplete(runId, agent, result)
+      this.doOnCompleteTask(runId, agent, result)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      logError(`[FlowRunner] onAgentComplete failed (agent=${agent.id}):`, err)
+      logError(`[FlowRunner] onCompleteTask failed (agent=${agent.id}):`, err)
       this.fire('flow.signal.error', { msg: `agent complete failed: ${msg}` })
       // 继续向上抛，让 MCP withErrorBoundary 也能把 isError 反馈给 AI
       throw err
     }
   }
 
-  private doOnAgentComplete(runId: string, agent: Agent, result: ExecutorResult): void {
+  private doOnCompleteTask(runId: string, agent: Agent | Code, result: ExecutorResult): void {
     const { outputName, content } = result
 
     // 查找下一个 agent
@@ -707,7 +862,7 @@ export class FlowRunner {
         return
       }
 
-      // 终结旧 executor(query 仍可能在发送 AgentComplete 的 tool_result 尾音)。
+      // 终结旧 executor(query 仍可能在发送 CompleteTask 的 tool_result 尾音)。
       // 必须 kill 后再建新 executor —— 旧消息不会被错误地挂到新 run 上。本期 runtime
       // 单 executor 约束,kill 旧 executor + Map.delete(oldRunId) + Map.set(newRunId,..)
       this.killExecutor(runId)
@@ -739,6 +894,7 @@ export class FlowRunner {
       this.killExecutor(runId)
       this.fire('flow.signal.agentComplete', {
         runId,
+        output: { name: result.outputName },
         content: result.content,
         values: result.values,
         result: result.resultMessage,
@@ -748,8 +904,8 @@ export class FlowRunner {
 
   // ── 工具方法 ────────────────────────────────────────────────────────────
 
-  private findAgentById(id: string): Agent | undefined {
-    return (this.flow.agents ?? []).find((a) => a.id === id)
+  private findAgentById(id: string): Agent | Code | undefined {
+    return (this.getLatestFlow().agents ?? []).find((a) => a.id === id)
   }
 
   private killExecutor(runId: string): void {

@@ -21,11 +21,12 @@ import type {
 } from '@/common'
 import {
   getAnsweredToolPermissions,
+  getPendingCompleteConfirmsFor,
   getPendingQuestionsFor,
   getPendingToolPermissionsFor,
   getRunPhase,
 } from '@/common'
-import type { AgentRun } from '@/webview/store/flow'
+import type { AgentRun, PendingCompleteConfirm } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
 import { toBubbleItems, type AnsweredInfo, type BubbleCtx } from './MessageBubble'
 
@@ -36,6 +37,7 @@ type Item = BubbleItemType
 const EMPTY_RUNS: AgentRun[] = []
 const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
 const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
+const EMPTY_PENDING_COMPLETE_CONFIRMS: PendingCompleteConfirm[] = []
 
 /**
  * 暴露给 ChatPanel 的命令式 API。
@@ -124,7 +126,20 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     return getPendingToolPermissionsFor(fs, agentId)
   }, [fs, runId, agentId])
 
+  const pendingCompleteConfirms = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_COMPLETE_CONFIRMS
+    if (runId) {
+      const list = fs.pendingCompleteConfirms
+      const filtered = list.filter((c) => c.runId === runId)
+      if (filtered.length === list.length) return list
+      if (filtered.length === 0) return EMPTY_PENDING_COMPLETE_CONFIRMS
+      return filtered
+    }
+    return getPendingCompleteConfirmsFor(fs, agentId)
+  }, [fs, runId, agentId])
+
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
+  const answerCompleteConfirm = useFlowStore((s) => s.answerCompleteConfirm)
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
@@ -143,6 +158,11 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     return new Set(pendingToolPerms.map((p) => p.toolUseId))
   }, [pendingToolPerms])
 
+  const pendingCompleteConfirmToolUseIds = useMemo(() => {
+    if (pendingCompleteConfirms.length === 0) return undefined
+    return new Set(pendingCompleteConfirms.map((c) => c.toolUseId))
+  }, [pendingCompleteConfirms])
+
   const onToolPermissionAllow = useCallback(
     (toolUseId: string) => {
       const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
@@ -158,6 +178,24 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       answerToolPermission(flowId, p.runId, toolUseId, false)
     },
     [answerToolPermission, flowId, pendingToolPerms],
+  )
+
+  const onCompleteConfirmAccept = useCallback(
+    (toolUseId: string) => {
+      const c = pendingCompleteConfirms.find((c) => c.toolUseId === toolUseId)
+      if (!c) return
+      answerCompleteConfirm(flowId, c.runId, toolUseId, true)
+    },
+    [answerCompleteConfirm, flowId, pendingCompleteConfirms],
+  )
+
+  const onCompleteConfirmDeny = useCallback(
+    (toolUseId: string, reason: string) => {
+      const c = pendingCompleteConfirms.find((c) => c.toolUseId === toolUseId)
+      if (!c) return
+      answerCompleteConfirm(flowId, c.runId, toolUseId, false, reason)
+    },
+    [answerCompleteConfirm, flowId, pendingCompleteConfirms],
   )
 
   /**
@@ -230,6 +268,9 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
+      pendingCompleteConfirmToolUseIds,
+      onCompleteConfirmAccept,
+      onCompleteConfirmDeny,
       // host 子 run 禁用 fork:fork 走 handleFork 时按 viewRun.agentId 起 spawnForFork,
       // 子 run 的 fork 只会 spawn 子 run executor,新 Flow 的 host run 没 executor —— 用户在
       // 新 Flow 子 run 视图继续对话 → AgentComplete 也无 host run 接收,死循环。
@@ -245,6 +286,9 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       answeredToolPermissions,
       onToolPermissionAllow,
       onToolPermissionDeny,
+      pendingCompleteConfirmToolUseIds,
+      onCompleteConfirmAccept,
+      onCompleteConfirmDeny,
       onForkRequest,
       isSubRun,
       toolUseIdToSubRunId,

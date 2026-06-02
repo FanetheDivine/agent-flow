@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, type FC, type ReactNode } from 'react'
-import { App, Drawer } from 'antd'
+import { App, Drawer, Modal } from 'antd'
 import {
   agentChatInputState,
   getRunPhase,
@@ -80,6 +80,13 @@ export const ChatDrawer: FC<Props> = ({
     return getRunPhase(viewRun, runState)
   }, [viewRun, runState])
 
+  // 当前面板对应的 agent 是否为 code 节点 —— 用于发送前的富文本拦截
+  const isCodeNode = useFlowStore((s): boolean => {
+    if (!flowId || !viewAgentId) return false
+    const flow = s.flows.find((f) => f.id === flowId)
+    return flow?.agents?.find((a) => a.id === viewAgentId)?.node_type === 'code'
+  })
+
   /**
    * ChatInput 状态:
    * - 无 flowId / viewAgentId → disabled
@@ -103,14 +110,43 @@ export const ChatDrawer: FC<Props> = ({
   const isSilentAgent = useFlowStore((s): boolean => {
     if (!flowId || !viewAgentId) return false
     const flow = s.flows.find((f) => f.id === flowId)
-    return flow?.agents?.find((a) => a.id === viewAgentId)?.work_mode === 'silent_task'
+    const found = flow?.agents?.find((a) => a.id === viewAgentId)
+    if (!found || found.node_type === 'code') return false
+    return found.work_mode === 'silent_task'
   })
-
 
   const onSend = useCallback(
     async (content: UserMessageType['message']['content']): Promise<boolean> => {
       if (!flowId || !viewAgentId) return false
       if (inputState === 'disabled' || inputState === 'loading') return false
+
+      // code 节点不接收富文本(图片 / 附件 / 其他非 text 块):弹确认提示
+      // 用户确认后仅提取 text 块拼接为字符串再发送。
+      // 注:本期 CodeExecutor 是 eager 一次性执行,正常路径不会让用户走到 sendUserMessage,
+      // 但发送入口仍按节点类型做这层 UI 拦截,避免用户误以为图片可被代码节点处理。
+      let effectiveContent = content
+      if (isCodeNode && Array.isArray(content)) {
+        const hasNonText = content.some((b: any) => b?.type !== 'text')
+        if (hasNonText) {
+          const ok = await new Promise<boolean>((resolve) => {
+            Modal.confirm({
+              title: '代码节点无法接收富文本',
+              content: '确定提取其中的纯文本继续发送?',
+              okText: '继续发送',
+              cancelText: '取消',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            })
+          })
+          if (!ok) return false
+          const textOnly = content
+            .filter((b: any) => b?.type === 'text')
+            .map((b: any) => b.text ?? '')
+            .filter(Boolean)
+            .join('\n')
+          effectiveContent = textOnly
+        }
+      }
 
       // 同会话追问:viewRun 已存在且处于 result/interrupted。
       // 子 run 在 host run interrupt 后被级联标记为 stopped(forceStopped),
@@ -122,7 +158,7 @@ export const ChatDrawer: FC<Props> = ({
           runPhase === 'interrupted' ||
           (isSubRun && runPhase === 'stopped'))
       ) {
-        sendUserMessage(flowId, viewRunId, content)
+        sendUserMessage(flowId, viewRunId, effectiveContent)
         chatPanelRef.current?.forceScrollToBottom()
         return true
       }
@@ -135,7 +171,7 @@ export const ChatDrawer: FC<Props> = ({
         targetAgentId,
         {
           type: 'user',
-          message: { role: 'user', content },
+          message: { role: 'user', content: effectiveContent },
           parent_tool_use_id: null,
         },
         mode,
@@ -152,6 +188,7 @@ export const ChatDrawer: FC<Props> = ({
       isSubRun,
       isHostFlow,
       isHostIdle,
+      isCodeNode,
       sendUserMessage,
       startFlow,
     ],

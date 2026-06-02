@@ -12,6 +12,7 @@ import {
   type FlowRunState,
   type PendingQuestion,
   type PendingToolPermission,
+  type PendingCompleteConfirm,
   type MessageEffect,
   type UserMessageType,
   type AskUserQuestionOutput,
@@ -23,7 +24,7 @@ import {
   flowIsDestructiveReadOnly,
   getFlowPhase,
 } from '@/common'
-import type { Agent } from '@/common'
+import type { Agent, Code } from '@/common'
 import { clearBuildCacheForRuns } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
@@ -101,6 +102,14 @@ type FlowStoreType = StoreState & {
   ) => void
   /** 回答工具权限请求 —— 调用方持有 pendingToolPermission.runId 直接传入 */
   answerToolPermission: (flowId: string, runId: string, toolUseId: string, allow: boolean) => void
+  /** 回答 CompleteTask 完成前确认 */
+  answerCompleteConfirm: (
+    flowId: string,
+    runId: string,
+    toolUseId: string,
+    accept: boolean,
+    reason?: string,
+  ) => void
   /** 中断当前 run —— 调用方决定要中断哪个 run */
   interruptAgent: (flowId: string, runId: string) => void
   killFlow: (flowId: string) => void
@@ -135,7 +144,7 @@ type FlowStoreType = StoreState & {
    * 通过 antd notification 直接弹(store 不持有 notification 实例)。
    */
   openFlowEditor: (flowId: string, opts?: { focus?: 'host_model' }) => void
-  copyAgents: (newAgents: Agent[], flowId: string) => Agent[] | undefined
+  copyAgents: (newAgents: (Agent | Code)[], flowId: string) => (Agent | Code)[] | undefined
   /** destroy 指定 flow + run 的所有通知 key(供 host icon 进入子 run 时清掉对应通知) */
   destroyRunNotifications: (flowId: string, runId: string) => void
 }
@@ -149,6 +158,7 @@ export type {
   FlowRunState,
   PendingQuestion,
   PendingToolPermission,
+  PendingCompleteConfirm,
 }
 export { agentChatInputState, flowCanBeKilled, flowIsDestructiveReadOnly }
 
@@ -233,11 +243,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   /** 把 updateFlowRunState 返回的 notifications 翻译成 antd notification.info 调用 */
   const fireNotifications = (effects: MessageEffect[]) => {
     for (const n of effects) {
-      // 自动打开 ChatPanel（result / awaiting-question / awaiting-tool-permission / flow-completed）
+      // 自动打开 ChatPanel（result / awaiting-question / awaiting-tool-permission / awaiting-complete-confirm / flow-completed）
       if (
         n.reason === 'result' ||
         n.reason === 'awaiting-question' ||
         n.reason === 'awaiting-tool-permission' ||
+        n.reason === 'awaiting-complete-confirm' ||
         n.reason === 'flow-completed'
       ) {
         autoOpenChatDrawer(n)
@@ -253,6 +264,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           .with('result', () => `Agent「${n.agentName}」生成完毕`)
           .with('awaiting-question', () => `Agent「${n.agentName}」需要回答`)
           .with('awaiting-tool-permission', () => `Agent「${n.agentName}」请求授权`)
+          .with('awaiting-complete-confirm', () => `Agent「${n.agentName}」等待完成确认`)
           .with('flow-completed', () => `工作流「${n.flowName}」已完成`)
           .with('agent-error', () => `Agent「${n.agentName}」运行出错`)
           .exhaustive(),
@@ -550,6 +562,12 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
         data: { flowId, runId, toolUseId, allow },
       })
     },
+    answerCompleteConfirm: (flowId, runId, toolUseId, accept, reason) => {
+      dispatchCommand({
+        type: 'flow.command.answerCompleteTaskConfirm',
+        data: { flowId, runId, toolUseId, accept, reason },
+      })
+    },
     interruptAgent: (flowId, runId) => {
       const { flowRunStates } = get()
       const fs = flowRunStates[flowId]
@@ -584,7 +602,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     copyAgents: (newAgents, flowId) => {
-      let remapped: Agent[] = []
+      let remapped: (Agent | Code)[] = []
       get().save((flows) => {
         const flow = flows.find((f) => f.id === flowId)
         if (!flow) return
