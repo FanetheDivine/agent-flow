@@ -142,6 +142,7 @@ export type FlowPhase =
   | 'awaiting-question'
   | 'awaiting-tool-permission'
   | 'awaiting-complete-confirm'
+  | 'awaiting-exit-plan'
   | 'completed'
   | 'stopped'
   | 'error'
@@ -159,6 +160,7 @@ export type AgentPhase =
   | 'awaiting-question'
   | 'awaiting-tool-permission'
   | 'awaiting-complete-confirm'
+  | 'awaiting-exit-plan'
   | 'completed'
   | 'stopped'
   | 'error'
@@ -205,6 +207,13 @@ export type PendingCompleteConfirm = {
   runId: string
 }
 
+export type PendingExitPlanMode = {
+  toolUseId: string
+  planFilePath: string
+  /** 所属 run */
+  runId: string
+}
+
 /**
  * 单个 Flow 的运行态状态 —— extension 与 webview 同步的核心数据。
  *
@@ -227,6 +236,10 @@ export type FlowRunState = {
   pendingToolPermissions: PendingToolPermission[]
   /** 当前挂起的 CompleteTask 完成前确认队列(按 runId 区分归属) */
   pendingCompleteConfirms: PendingCompleteConfirm[]
+  /** 当前挂起的 ExitPlanMode 确认队列(按 runId 区分归属) */
+  pendingExitPlanModes: PendingExitPlanMode[]
+  /** 已回答的 ExitPlanMode：toolUseId -> confirmed，用于 UI 回显历史态 */
+  answeredExitPlanModes: Record<string, { confirmed: boolean }>
   /** Flow 运行时的共享数据 */
   shareValues: Record<string, string>
 }
@@ -245,6 +258,7 @@ export type MessageEffect = {
     | 'awaiting-question'
     | 'awaiting-tool-permission'
     | 'awaiting-complete-confirm'
+    | 'awaiting-exit-plan'
     | 'flow-completed'
     | 'agent-error'
 }
@@ -293,6 +307,8 @@ export function updateFlowRunState(
       pendingQuestions: [],
       pendingToolPermissions: [],
       pendingCompleteConfirms: [],
+      pendingExitPlanModes: [],
+      answeredExitPlanModes: {},
       shareValues: state?.shareValues ?? {},
     }
     return {
@@ -310,6 +326,8 @@ export function updateFlowRunState(
       pendingQuestions: [],
       pendingToolPermissions: [],
       pendingCompleteConfirms: [],
+      pendingExitPlanModes: [],
+      answeredExitPlanModes: {},
       ...state,
       shareValues: msg.data.values,
     }
@@ -334,7 +352,8 @@ export function updateFlowRunState(
       (agent.node_type === 'code' || agent.work_mode === 'silent_task') &&
       opts.reason !== 'agent-error' &&
       opts.reason !== 'flow-completed' &&
-      opts.reason !== 'awaiting-complete-confirm'
+      opts.reason !== 'awaiting-complete-confirm' &&
+      opts.reason !== 'awaiting-exit-plan'
     )
       return
     effects.push({
@@ -350,6 +369,7 @@ export function updateFlowRunState(
       draft.pendingQuestions = []
       draft.pendingToolPermissions = []
       draft.pendingCompleteConfirms = []
+      draft.pendingExitPlanModes = []
     }
 
     // ── command.killFlow:任何状态下强制终止(包括终态,幂等) ──────────
@@ -508,6 +528,21 @@ export function updateFlowRunState(
           reason: 'awaiting-complete-confirm',
         })
       })
+      .with({ type: 'flow.signal.exitPlanModeRequest' }, ({ data }) => {
+        if (!draft.pendingExitPlanModes.some((p) => p.toolUseId === data.toolUseId)) {
+          draft.pendingExitPlanModes.push({
+            toolUseId: data.toolUseId,
+            planFilePath: data.planFilePath,
+            runId: run.runId,
+          })
+        }
+        pushEffect({
+          flowId,
+          runId: run.runId,
+          agentId: run.agentId,
+          reason: 'awaiting-exit-plan',
+        })
+      })
       .with({ type: 'flow.signal.agentError' }, () => {
         clearPendings()
         pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'agent-error' })
@@ -546,6 +581,12 @@ export function updateFlowRunState(
       .with({ type: 'flow.command.answerCompleteTaskConfirm' }, ({ data }) => {
         draft.pendingCompleteConfirms = draft.pendingCompleteConfirms.filter(
           (c) => c.toolUseId !== data.toolUseId,
+        )
+      })
+      .with({ type: 'flow.command.exitPlanModeResult' }, ({ data }) => {
+        draft.answeredExitPlanModes[data.toolUseId] = { confirmed: data.confirmed }
+        draft.pendingExitPlanModes = draft.pendingExitPlanModes.filter(
+          (p) => p.toolUseId !== data.toolUseId,
         )
       })
       // ── fork：源 Flow 状态完全不变,新 Flow 的 RunState 由调用方在 store 外侧写入 ──
@@ -589,6 +630,7 @@ export function getRunPhase(run: AgentRun, state: FlowRunState): AgentPhase {
     return 'awaiting-tool-permission'
   if (state.pendingCompleteConfirms.some((c) => c.runId === run.runId))
     return 'awaiting-complete-confirm'
+  if (state.pendingExitPlanModes.some((p) => p.runId === run.runId)) return 'awaiting-exit-plan'
   if (state.pendingQuestions.some((q) => q.runId === run.runId)) return 'awaiting-question'
   // 倒序找:agentInterrupted 在末条 aiMessage 之后出现 → interrupted;反之视为已恢复
   for (let i = run.messages.length - 1; i >= 0; i--) {
@@ -625,6 +667,7 @@ function aggregatePhase(phases: AgentPhase[]): FlowPhase {
   const order: AgentPhase[] = [
     'awaiting-tool-permission',
     'awaiting-complete-confirm',
+    'awaiting-exit-plan',
     'awaiting-question',
     'result',
     'running',
@@ -759,6 +802,37 @@ export function getPendingCompleteConfirmsFor(
   return list.filter((c) => runIdToAgent.get(c.runId) === agentId)
 }
 
+const EMPTY_PENDING_EXIT_PLAN_MODES: PendingExitPlanMode[] = []
+
+/**
+ * 取属于该 agent 的 pendingExitPlanModes —— 引用稳定策略与 getPendingQuestionsFor 一致。
+ */
+export function getPendingExitPlanModesFor(
+  state: FlowRunState | undefined,
+  agentId: string,
+): PendingExitPlanMode[] {
+  if (!state) return EMPTY_PENDING_EXIT_PLAN_MODES
+  const list = state.pendingExitPlanModes
+  if (list.length === 0) return EMPTY_PENDING_EXIT_PLAN_MODES
+  const runIdToAgent = new Map(state.runs.map((r) => [r.runId, r.agentId]))
+  let allBelong = true
+  let anyBelong = false
+  for (const p of list) {
+    const a = runIdToAgent.get(p.runId)
+    if (a === agentId) anyBelong = true
+    else allBelong = false
+  }
+  if (allBelong) return list
+  if (!anyBelong) return EMPTY_PENDING_EXIT_PLAN_MODES
+  return list.filter((p) => runIdToAgent.get(p.runId) === agentId)
+}
+
+export function getAnsweredExitPlanModes(
+  state: FlowRunState | undefined,
+): Record<string, { confirmed: boolean }> | undefined {
+  return state?.answeredExitPlanModes
+}
+
 // ── UI helper ────────────────────────────────────────────────────────────────
 
 /**
@@ -780,6 +854,7 @@ export const agentChatInputState = (p: AgentPhase): AgentChatInputState =>
         'awaiting-question',
         'awaiting-tool-permission',
         'awaiting-complete-confirm',
+        'awaiting-exit-plan',
       ),
       () => 'loading' as const,
     )
@@ -800,6 +875,7 @@ export const flowCanBeKilled = (p: FlowPhase) =>
         'awaiting-question',
         'awaiting-tool-permission',
         'awaiting-complete-confirm',
+        'awaiting-exit-plan',
       ),
       () => true,
     )

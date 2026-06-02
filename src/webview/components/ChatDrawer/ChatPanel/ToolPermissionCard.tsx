@@ -10,6 +10,11 @@ type Props = {
   answered?: { allow: boolean }
   onAllow?: () => void
   onDeny?: () => void
+  /** ExitPlanMode 专属：显示"计划已生成"样式 */
+  exitPlan?: {
+    planFilePath: string
+    onViewPlan?: () => void
+  }
 }
 
 function formatInput(input: unknown): string {
@@ -27,38 +32,67 @@ export const ToolPermissionCard: FC<Props> = ({
   answered,
   onAllow,
   onDeny,
+  exitPlan,
 }) => {
   const isActive = mode === 'active'
+  const isExitPlan = !!exitPlan
+
   return (
     <div className='flex flex-col gap-2 rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
       <div className='flex items-center gap-2'>
         <SafetyOutlined className='text-[#f9e2af]' />
-        <span className='text-[11px] font-semibold text-[#cdd6f4]'>请求使用工具</span>
-        <Tag color='warning' className='m-0 text-[10px]'>
-          {toolName}
-        </Tag>
+        <span className='text-[11px] font-semibold text-[#cdd6f4]'>
+          {isExitPlan ? '计划已生成' : '请求使用工具'}
+        </span>
+        {!isExitPlan && (
+          <Tag color='warning' className='m-0 text-[10px]'>
+            {toolName}
+          </Tag>
+        )}
         {mode === 'historical' && answered && (
           <Tag
             color={answered.allow ? 'success' : 'error'}
             className='m-0 ml-auto text-[10px]'
             icon={answered.allow ? <CheckOutlined /> : <StopOutlined />}
           >
-            {answered.allow ? '已允许' : '已拒绝'}
+            {isExitPlan
+              ? answered.allow
+                ? '已确认'
+                : '已放弃'
+              : answered.allow
+                ? '已允许'
+                : '已拒绝'}
           </Tag>
         )}
       </div>
 
-      <pre className='m-0 max-h-40 overflow-auto rounded bg-[#11111b] p-2 text-[10.5px] whitespace-pre-wrap text-[#cdd6f4]'>
-        {formatInput(input)}
-      </pre>
+      {isExitPlan ? (
+        <span className='text-[11px] text-[#cdd6f4]'>
+          计划已生成，
+          <a
+            href='#'
+            onClick={(e) => {
+              e.preventDefault()
+              exitPlan?.onViewPlan?.()
+            }}
+            className='text-[#89b4fa] hover:underline'
+          >
+            点击查看
+          </a>
+        </span>
+      ) : (
+        <pre className='m-0 max-h-40 overflow-auto rounded bg-[#11111b] p-2 text-[10.5px] whitespace-pre-wrap text-[#cdd6f4]'>
+          {formatInput(input)}
+        </pre>
+      )}
 
       {isActive && (
         <div className='flex justify-end gap-2'>
           <Button size='small' icon={<CloseOutlined />} onClick={onDeny}>
-            拒绝
+            {isExitPlan ? '放弃' : '拒绝'}
           </Button>
           <Button type='primary' size='small' icon={<CheckOutlined />} onClick={onAllow}>
-            允许
+            {isExitPlan ? '确认' : '允许'}
           </Button>
         </div>
       )}

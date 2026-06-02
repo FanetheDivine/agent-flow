@@ -2,21 +2,22 @@ import type { NotificationInstance } from 'antd/es/notification/interface'
 import { produce } from 'immer'
 import { match } from 'ts-pattern'
 import { create } from 'zustand'
-import type { Flow } from '@/common'
 import {
-  type AgentPhase,
-  type AgentChatInputState,
-  type AgentRun,
-  type ExtensionFlowCommandMessage,
-  type FlowPhase,
-  type FlowRunState,
-  type PendingQuestion,
-  type PendingToolPermission,
-  type PendingCompleteConfirm,
-  type MessageEffect,
-  type UserMessageType,
-  type AskUserQuestionOutput,
-  type ExtensionToWebviewMessage,
+  AgentPhase,
+  AgentChatInputState,
+  AgentRun,
+  ExtensionFlowCommandMessage,
+  Flow,
+  FlowPhase,
+  FlowRunState,
+  PendingQuestion,
+  PendingToolPermission,
+  PendingCompleteConfirm,
+  PendingExitPlanMode,
+  MessageEffect,
+  UserMessageType,
+  AskUserQuestionOutput,
+  ExtensionToWebviewMessage,
   updateFlowRunState,
   agentChatInputState,
   flowCanBeKilled,
@@ -90,6 +91,10 @@ type FlowStoreType = StoreState & {
     accept: boolean,
     reason?: string,
   ) => void
+  /** 回答 ExitPlanMode 确认 */
+  answerExitPlanMode: (flowId: string, runId: string, toolUseId: string, confirmed: boolean) => void
+  /** 在 VSCode 中以 Markdown 预览打开计划文件 */
+  openPlanFile: (planFilePath: string) => void
   /** 中断当前 run —— 调用方决定要中断哪个 run */
   interruptAgent: (flowId: string, runId: string) => void
   killFlow: (flowId: string) => void
@@ -121,6 +126,7 @@ export type {
   PendingQuestion,
   PendingToolPermission,
   PendingCompleteConfirm,
+  PendingExitPlanMode,
 }
 export { agentChatInputState, flowCanBeKilled, flowIsDestructiveReadOnly }
 
@@ -177,12 +183,13 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
   /** 把 updateFlowRunState 返回的 notifications 翻译成 antd notification.info 调用 */
   const fireNotifications = (effects: MessageEffect[]) => {
     for (const n of effects) {
-      // 自动打开 ChatPanel（result / awaiting-question / awaiting-tool-permission / awaiting-complete-confirm / flow-completed）
+      // 自动打开 ChatPanel（result / awaiting-question / awaiting-tool-permission / awaiting-complete-confirm / awaiting-exit-plan / flow-completed）
       if (
         n.reason === 'result' ||
         n.reason === 'awaiting-question' ||
         n.reason === 'awaiting-tool-permission' ||
         n.reason === 'awaiting-complete-confirm' ||
+        n.reason === 'awaiting-exit-plan' ||
         n.reason === 'flow-completed'
       ) {
         autoOpenChatDrawer(n)
@@ -199,6 +206,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           .with('awaiting-question', () => `Agent「${n.agentName}」需要回答`)
           .with('awaiting-tool-permission', () => `Agent「${n.agentName}」请求授权`)
           .with('awaiting-complete-confirm', () => `Agent「${n.agentName}」等待完成确认`)
+          .with('awaiting-exit-plan', () => `Agent「${n.agentName}」计划已生成`)
           .with('flow-completed', () => `工作流「${n.flowName}」已完成`)
           .with('agent-error', () => `Agent「${n.agentName}」运行出错`)
           .exhaustive(),
@@ -449,6 +457,18 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       dispatchCommand({
         type: 'flow.command.answerCompleteTaskConfirm',
         data: { flowId, runId, toolUseId, accept, reason },
+      })
+    },
+    answerExitPlanMode: (flowId, runId, toolUseId, confirmed) => {
+      dispatchCommand({
+        type: 'flow.command.exitPlanModeResult',
+        data: { flowId, runId, toolUseId, confirmed },
+      })
+    },
+    openPlanFile: (planFilePath) => {
+      postMessageToExtension({
+        type: 'openPlanFile',
+        data: { planFilePath },
       })
     },
     interruptAgent: (flowId, runId) => {

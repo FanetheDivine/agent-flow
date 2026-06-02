@@ -142,6 +142,7 @@ export function activate(context: vscode.ExtensionContext) {
       .with('awaiting-question', () => `Agent「${agentName}」需要回答`)
       .with('awaiting-tool-permission', () => `Agent「${agentName}」请求授权`)
       .with('awaiting-complete-confirm', () => `Agent「${agentName}」等待完成确认`)
+      .with('awaiting-exit-plan', () => `Agent「${agentName}」计划已生成`)
       .with('flow-completed', () => `工作流「${flowName}」已完成`)
       .with('agent-error', () => `Agent「${agentName}」运行出错`)
       .exhaustive()
@@ -309,6 +310,8 @@ export function activate(context: vscode.ExtensionContext) {
       pendingQuestions: [],
       pendingToolPermissions: [],
       pendingCompleteConfirms: [],
+      pendingExitPlanModes: [],
+      answeredExitPlanModes: { ...sourceState.answeredExitPlanModes },
       shareValues: { ...sourceState.shareValues },
     }
 
@@ -426,6 +429,14 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.TextEditorRevealType.InCenter,
               )
             }
+          } catch {
+            // 文件不存在或无法打开时静默忽略
+          }
+        })
+        .with({ type: 'openPlanFile' }, async ({ data }) => {
+          try {
+            const uri = vscode.Uri.file(data.planFilePath)
+            await vscode.commands.executeCommand('markdown.showPreviewToSide', uri)
           } catch {
             // 文件不存在或无法打开时静默忽略
           }

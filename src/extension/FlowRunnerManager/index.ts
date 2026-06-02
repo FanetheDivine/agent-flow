@@ -86,6 +86,11 @@ export class FlowRunnerManager {
           data as ExtensionFlowCommandEvents['flow.command.answerCompleteTaskConfirm']
         this.runners.get(flowId)?.emit('flow.command.answerCompleteTaskConfirm', rest)
       })
+      .with('flow.command.exitPlanModeResult', () => {
+        const { flowId, ...rest } =
+          data as ExtensionFlowCommandEvents['flow.command.exitPlanModeResult']
+        this.runners.get(flowId)?.emit('flow.command.exitPlanModeResult', rest)
+      })
       .with('flow.command.setShareValues', () => {
         const { flowId, ...rest } =
           data as ExtensionFlowCommandEvents['flow.command.setShareValues']

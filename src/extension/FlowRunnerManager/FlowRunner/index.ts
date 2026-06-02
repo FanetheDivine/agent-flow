@@ -162,6 +162,11 @@ export class FlowRunner {
           data as FlowRunnerCommandEvents['flow.command.answerCompleteTaskConfirm'],
         )
       })
+      .with('flow.command.exitPlanModeResult', () => {
+        this.handleExitPlanModeResult(
+          data as FlowRunnerCommandEvents['flow.command.exitPlanModeResult'],
+        )
+      })
       .with('flow.command.killFlow', () => {
         // killFlow 走 FlowRunnerManager.disposeRunner，不在此处处理
       })
@@ -339,6 +344,16 @@ export class FlowRunner {
     executor.answerCompleteConfirm(toolUseId, accept, reason)
   }
 
+  private handleExitPlanModeResult({
+    runId,
+    toolUseId,
+    confirmed,
+  }: FlowRunnerCommandEvents['flow.command.exitPlanModeResult']): void {
+    const executor = this.executors.get(runId)
+    if (!executor || executor instanceof CodeExecutor) return
+    executor.answerExitPlanMode(toolUseId, confirmed)
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   /**
@@ -448,6 +463,15 @@ export class FlowRunner {
       },
       onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => {
         this.fire('flow.signal.answerQuestion', { runId, toolUseId, output })
+      },
+      onExitPlanModeRequest: ({
+        toolUseId,
+        planFilePath,
+      }: {
+        toolUseId: string
+        planFilePath: string
+      }) => {
+        this.fire('flow.signal.exitPlanModeRequest', { runId, toolUseId, planFilePath })
       },
       onError: (err: Error) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)

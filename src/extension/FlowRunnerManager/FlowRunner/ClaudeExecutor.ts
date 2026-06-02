@@ -77,6 +77,11 @@ export type ExecutorEvents = {
    * 并移出 pendingQuestions —— 让 webview 在无人值守模式下也能看到自动答案。
    */
   onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => void
+  /**
+   * plan_mode agent 调用 ExitPlanMode 时触发，上层据此 fire
+   * `flow.signal.exitPlanModeRequest`，挂起等待用户确认。
+   */
+  onExitPlanModeRequest?: (data: { toolUseId: string; planFilePath: string }) => void
   /** 错误 */
   onError: (err: Error) => void
 }
@@ -151,6 +156,12 @@ export class ClaudeExecutor {
   private pendingCompleteConfirms = new Map<
     string,
     { resolve: (result: PermissionResult) => void; input: Record<string, unknown> }
+  >()
+
+  /** 挂起中的 ExitPlanMode 确认：toolUseId -> { resolve, planFilePath } */
+  private pendingExitPlanModePermissions = new Map<
+    string,
+    { resolve: (result: PermissionResult) => void; planFilePath: string }
   >()
 
   /**
@@ -326,6 +337,10 @@ export class ClaudeExecutor {
       pending.resolve({ behavior: 'deny', message: reason })
     }
     this.pendingCompleteConfirms.clear()
+    for (const [, pending] of this.pendingExitPlanModePermissions) {
+      pending.resolve({ behavior: 'deny', message: reason })
+    }
+    this.pendingExitPlanModePermissions.clear()
   }
 
   private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
@@ -377,6 +392,12 @@ export class ClaudeExecutor {
         })
       }
     }
+    // plan_mode agent 的 ExitPlanMode 工具：拦截并挂起，等待用户确认计划。
+    // 确认后 SDK 收到 allow，模型继续执行；拒绝则收到 deny（isError tool_result）。
+    if (toolName.includes('ExitPlanMode')) {
+      const planFilePath = (input as { planFilePath?: string })?.planFilePath ?? ''
+      return this.requestExitPlanMode(toolUseID, planFilePath)
+    }
     const { auto_allowed_tools, must_confirm_tools, deny_tools } = this.agent
     const toolInput = input as Record<string, unknown>
     // 优先级 0：命中 deny 列表，直接禁止，不弹窗。
@@ -427,6 +448,29 @@ export class ClaudeExecutor {
       this.pendingToolPermissions.set(toolUseId, { resolve, input })
       this.events.onToolPermissionRequest({ toolUseId, toolName, input })
     })
+  }
+
+  private requestExitPlanMode(toolUseId: string, planFilePath: string): Promise<PermissionResult> {
+    return new Promise<PermissionResult>((resolve) => {
+      this.pendingExitPlanModePermissions.set(toolUseId, { resolve, planFilePath })
+      this.events.onExitPlanModeRequest?.({ toolUseId, planFilePath })
+    })
+  }
+
+  /**
+   * 回答 ExitPlanMode 确认。
+   * - confirmed=true：放行 ExitPlanMode 工具调用，模型继续执行
+   * - confirmed=false：SDK 收到 isError tool_result，模型知道用户拒绝了计划
+   */
+  answerExitPlanMode(toolUseId: string, confirmed: boolean): void {
+    const pending = this.pendingExitPlanModePermissions.get(toolUseId)
+    if (!pending) return
+    this.pendingExitPlanModePermissions.delete(toolUseId)
+    pending.resolve(
+      confirmed
+        ? { behavior: 'allow', updatedInput: { planFilePath: pending.planFilePath } }
+        : { behavior: 'deny', message: 'user denied' },
+    )
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────

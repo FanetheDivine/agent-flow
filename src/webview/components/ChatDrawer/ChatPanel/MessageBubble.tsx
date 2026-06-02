@@ -42,6 +42,13 @@ export type BubbleCtx = {
   pendingCompleteConfirmToolUseIds?: Set<string>
   onCompleteConfirmAccept?: (toolUseId: string) => void
   onCompleteConfirmDeny?: (toolUseId: string, reason: string) => void
+  /** 当前挂起的 ExitPlanMode 确认 toolUseId 集合 */
+  pendingExitPlanModeToolUseIds?: Set<string>
+  /** 已回答的 ExitPlanMode 历史 */
+  answeredExitPlanModes?: Record<string, { confirmed: boolean }>
+  onExitPlanModeConfirm?: (toolUseId: string) => void
+  onExitPlanModeDeny?: (toolUseId: string) => void
+  onViewPlan?: (planFilePath: string) => void
   /**
    * 触发会话 fork。target.kind:
    * - `message`：以 SDK 消息 UUID 为切片终点
@@ -510,6 +517,28 @@ function renderItemToBubble(
       }
     }
     case 'tool_use': {
+      // ExitPlanMode 专属处理：复用 ToolPermissionCard 但展示"计划已生成"样式
+      if (item.toolName === 'ExitPlanMode') {
+        const isPendingExitPlan =
+          ctx?.pendingExitPlanModeToolUseIds?.has(item.toolUseId) ?? false
+        const answeredExitPlan = ctx?.answeredExitPlanModes?.[item.toolUseId]
+        const planFilePath = (item.input as { planFilePath?: string })?.planFilePath ?? ''
+        return {
+          key: item.key + '-exit-plan',
+          role: 'system' as const,
+          content: (
+            <ToolPermissionCard
+              toolName='ExitPlanMode'
+              input={item.input}
+              mode={isPendingExitPlan ? 'active' : 'historical'}
+              answered={answeredExitPlan ? { allow: answeredExitPlan.confirmed } : undefined}
+              onAllow={() => ctx!.onExitPlanModeConfirm?.(item.toolUseId)}
+              onDeny={() => ctx!.onExitPlanModeDeny?.(item.toolUseId)}
+              exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
+            />
+          ),
+        }
+      }
       // 先计算权限状态，以便在 defaultOpen 中判断是否展开参数
       const isPendingPerm = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       const answeredPerm = ctx?.answeredToolPermissions?.[item.toolUseId]

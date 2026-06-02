@@ -16,11 +16,13 @@ import { match } from 'ts-pattern'
 import type { AskUserQuestionOutput, PendingQuestion, PendingToolPermission } from '@/common'
 import {
   getAnsweredToolPermissions,
+  getAnsweredExitPlanModes,
   getPendingCompleteConfirmsFor,
+  getPendingExitPlanModesFor,
   getPendingQuestionsFor,
   getPendingToolPermissionsFor,
 } from '@/common'
-import type { AgentRun, PendingCompleteConfirm } from '@/webview/store/flow'
+import type { AgentRun, PendingCompleteConfirm, PendingExitPlanMode } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
 import { toBubbleItems, type AnsweredInfo, type BubbleCtx } from './MessageBubble'
 
@@ -32,6 +34,7 @@ const EMPTY_RUNS: AgentRun[] = []
 const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
 const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
 const EMPTY_PENDING_COMPLETE_CONFIRMS: PendingCompleteConfirm[] = []
+const EMPTY_PENDING_EXIT_PLAN_MODES: PendingExitPlanMode[] = []
 
 /**
  * 暴露给 ChatPanel 的命令式 API。
@@ -132,8 +135,24 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     return getPendingCompleteConfirmsFor(fs, agentId)
   }, [fs, runId, agentId])
 
+  const pendingExitPlanModes = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_EXIT_PLAN_MODES
+    if (runId) {
+      const list = fs.pendingExitPlanModes
+      const filtered = list.filter((p) => p.runId === runId)
+      if (filtered.length === list.length) return list
+      if (filtered.length === 0) return EMPTY_PENDING_EXIT_PLAN_MODES
+      return filtered
+    }
+    return getPendingExitPlanModesFor(fs, agentId)
+  }, [fs, runId, agentId])
+
+  const answeredExitPlanModes = useMemo(() => getAnsweredExitPlanModes(fs), [fs])
+
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
   const answerCompleteConfirm = useFlowStore((s) => s.answerCompleteConfirm)
+  const answerExitPlanMode = useFlowStore((s) => s.answerExitPlanMode)
+  const openPlanFile = useFlowStore((s) => s.openPlanFile)
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
@@ -156,6 +175,11 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     if (pendingCompleteConfirms.length === 0) return undefined
     return new Set(pendingCompleteConfirms.map((c) => c.toolUseId))
   }, [pendingCompleteConfirms])
+
+  const pendingExitPlanModeToolUseIds = useMemo(() => {
+    if (pendingExitPlanModes.length === 0) return undefined
+    return new Set(pendingExitPlanModes.map((p) => p.toolUseId))
+  }, [pendingExitPlanModes])
 
   const onToolPermissionAllow = useCallback(
     (toolUseId: string) => {
@@ -190,6 +214,31 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       answerCompleteConfirm(flowId, c.runId, toolUseId, false, reason)
     },
     [answerCompleteConfirm, flowId, pendingCompleteConfirms],
+  )
+
+  const onExitPlanModeConfirm = useCallback(
+    (toolUseId: string) => {
+      const p = pendingExitPlanModes.find((p) => p.toolUseId === toolUseId)
+      if (!p) return
+      answerExitPlanMode(flowId, p.runId, toolUseId, true)
+    },
+    [answerExitPlanMode, flowId, pendingExitPlanModes],
+  )
+
+  const onExitPlanModeDeny = useCallback(
+    (toolUseId: string) => {
+      const p = pendingExitPlanModes.find((p) => p.toolUseId === toolUseId)
+      if (!p) return
+      answerExitPlanMode(flowId, p.runId, toolUseId, false)
+    },
+    [answerExitPlanMode, flowId, pendingExitPlanModes],
+  )
+
+  const onViewPlan = useCallback(
+    (planFilePath: string) => {
+      openPlanFile(planFilePath)
+    },
+    [openPlanFile],
   )
 
   /**
@@ -228,6 +277,11 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       pendingCompleteConfirmToolUseIds,
       onCompleteConfirmAccept,
       onCompleteConfirmDeny,
+      pendingExitPlanModeToolUseIds,
+      answeredExitPlanModes,
+      onExitPlanModeConfirm,
+      onExitPlanModeDeny,
+      onViewPlan,
       onFork: onForkRequest,
     }),
     [
@@ -240,6 +294,11 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       pendingCompleteConfirmToolUseIds,
       onCompleteConfirmAccept,
       onCompleteConfirmDeny,
+      pendingExitPlanModeToolUseIds,
+      answeredExitPlanModes,
+      onExitPlanModeConfirm,
+      onExitPlanModeDeny,
+      onViewPlan,
       onForkRequest,
     ],
   )
