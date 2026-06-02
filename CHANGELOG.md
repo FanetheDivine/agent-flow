@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.37
+
+- 新增隔离模式（`isolation_mode`）：开启后不再注入各级 settings 和 CLAUDE.md
+- 移除禁用 Claude 预设提示词（`disable_claude_preset`）与提示词完全自定义（`raw_prompt`）功能
+- 优化默认 flow
+
 ## v0.0.36
 
 - 修复 Code 节点无法复制的问题

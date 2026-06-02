@@ -44,7 +44,7 @@ pnpm build-extension   # 生成 .vsix 文件
 - **三种工作模式**：`task`（围绕任务推进，达成结束条件后调 `CompleteTask` 流转到下一节点，极端情况下可调 `TerminateTask` 中止任务）/ `chat`（长期对话，禁止 `CompleteTask`）/ `silent_task`（无人值守循环：AskUserQuestion 自动应答、每轮 result 自动续「继续」、未授权工具直接 deny，由 `CompleteTask` 或 `TerminateTask` 终止；首次切换时弹一次警告 modal，需谨慎选择模型 / effort / 提示词）。
 - **无输入启动**：开启 `no_input` 的 Agent 在节点上显示启动按钮，点击后始终以"开始"为初始消息自动运行，无需手动输入。
 - **Plan 模式**：开启 `plan_mode` 的 Agent 以计划 / 只读模式运行——Claude 注入的系统提示词倾向改变（偏向先制定计划），且不会实际执行文件修改等写操作，适合先让 Agent 给出方案再决定是否落地。
-- **系统提示词自由度**：除默认骨架外，Agent 可开启 `disable_claude_preset`（不再附加 Claude Code 预设系统提示词，仅用插件构建的提示词，适合轻量 Agent）或 `raw_prompt`（提示词完全自定义，直接以 `agent_prompt` 作为最终系统提示词，不附加任何骨架——顶部规则 / work_mode 分支 / 可读写数据 / 任务描述 / 输出分支 / 共享数据快照均不输出）。
+- **隔离模式**：开启 `isolation_mode` 的 Agent 不再注入各级 settings 和 CLAUDE.md，适合需要独立上下文环境、不受宿主项目约束的 Agent。
 - **API 端点分层配置**：Flow 与 Agent 均可单独配置 `base_url` / `api_key`；Agent 非空时覆盖 Flow 默认值，留空则回落到 Flow，两端都不填时沿用环境变量，便于同一工作流内不同 Agent 走不同的模型服务。
 - **完成前确认（按分支独立配置）**：在 Output 上开启 `require_confirm`，Agent 选择该分支调用 `CompleteTask` 时不立即推进，先在对话中弹出确认卡片要求用户确认（同意 / 拒绝，拒绝可填原因）；同意才流转到下一节点，拒绝则作为工具错误回喂 Agent 让其继续修正。粒度按分支独立——同一 Agent 的不同 output 可以分别配置；无 outputs / `chat` 模式不适用。
 - **上下文隔离**：每个 Agent 有自己独立的对话上下文。
