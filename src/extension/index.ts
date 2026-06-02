@@ -404,13 +404,18 @@ export function activate(context: vscode.ExtensionContext) {
           }
         })
         .with({ type: 'openFile' }, async ({ data }) => {
-          const { filename, line } = data
+          const { filename, line, placement } = data
           const folders = vscode.workspace.workspaceFolders
           if (!folders?.length) return
           try {
             const uri = vscode.Uri.joinPath(folders[0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
-            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside)
+            const editor = await vscode.window.showTextDocument(
+              doc,
+              match(placement)
+                .with('active', () => vscode.ViewColumn.Active)
+                .otherwise(() => vscode.ViewColumn.Beside),
+            )
             if (line) {
               const [startLine, endLine] = line
               const startPos = new vscode.Position(Math.max(0, startLine - 1), 0)

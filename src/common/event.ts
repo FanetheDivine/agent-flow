@@ -51,8 +51,8 @@ export type ExtensionFromWebviewEvents = {
   load: undefined
   /** 全量保存 flows */
   save: Flow[]
-  /** 打开文件，line 存在时跳转并选中对应行 */
-  openFile: { filename: string; line?: [number, number] }
+  /** 打开文件；line 存在时跳转并选中对应行；placement 说明打开位置 默认beside */
+  openFile: { filename: string; line?: [number, number]; placement?: 'active' | 'beside' }
   /** 在 VSCode 中预览一段外部粘入的文本附件（非文件系统文件） */
   previewAttachment: { name: string; content: string }
 } & ExtensionFlowCommandEvents
@@ -158,6 +158,15 @@ type FlowSignalPayload = {
     input: Record<string, unknown>
   }
   /**
+   * plan_mode agent 调用 ExitPlanMode，等待用户确认计划。
+   * 确认后 SDK 收到 allow，模型继续执行；拒绝则收到 deny。
+   */
+  exitPlanModeRequest: {
+    runId: string
+    toolUseId: string
+    planFilePath: string
+  }
+  /**
    * 会话 fork 完成：从源 Flow 复制 transcript 切片到新 Flow。
    * - flowId（由 WithFlowId 注入）= sourceFlowId（源 Flow id）
    * - newFlowId / newRunState：新 Flow 的 id 与对应运行态
@@ -225,6 +234,12 @@ type FlowCommandPayload = {
     accept: boolean
     /** 拒绝时填写的原因，accept=true 时忽略 */
     reason?: string
+  }
+  /** 回答 ExitPlanMode 确认：同意则放行 ExitPlanMode 原流程，拒绝则 SDK 收到 isError */
+  exitPlanModeResult: {
+    runId: string
+    toolUseId: string
+    confirmed: boolean
   }
   /** 彻底终止 Flow:销毁 FlowRunner,所有 run 转 stopped。仅需 flowId,不要求 runId */
   killFlow: object
