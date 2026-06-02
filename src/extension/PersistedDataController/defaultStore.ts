@@ -229,7 +229,7 @@ const PresetFlows: Flow[] = [
         no_input: true,
         agent_prompt: [
           '切换main分支。',
-          '查看上一个tag到最新提交**全部**、**完整**commit message，更新readme.md/Claude.md/Changelog.md，并由用户确认。',
+          '查看上一个tag到最新提交**全部**、**完整**commit message，更新readme.md/Claude.md/Changelog.md，并由用户确认。Changelog.md只保留最新版本；当归档文件（changelogs/目录下）累积到10个版本时，新建下一个归档文件，命名格式为v起始版本-v结束版本.md（如v0.0.38-v0.0.47.md）。',
           '更新完毕后，执行npm run release更新并发布新版本。',
         ].join('\n'),
         outputs: [],
