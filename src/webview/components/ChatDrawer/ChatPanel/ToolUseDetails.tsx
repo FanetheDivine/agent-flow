@@ -67,7 +67,7 @@ function getToolCategory(toolName: string): ToolCategory {
       return 'agent'
     case 'TodoWrite':
       return 'task'
-    case 'AgentComplete':
+    case 'CompleteTask':
       return 'flow'
     default:
       return 'other'
@@ -99,7 +99,7 @@ function getSummaryArg(toolName: string, input: any): string | undefined {
       const n = Array.isArray(input.todos) ? input.todos.length : 0
       return n > 0 ? `${n} 项任务` : undefined
     }
-    case 'AgentComplete': {
+    case 'CompleteTask': {
       const out = input?.output?.name ?? input?.output_name
       return typeof out === 'string' ? `→ ${out}` : undefined
     }

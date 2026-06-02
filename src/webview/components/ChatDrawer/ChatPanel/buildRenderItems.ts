@@ -444,11 +444,10 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
           const toolName =
             'server_name' in block ? `${block.server_name}::${block.name}` : block.name
           if (
-            toolName === 'AgentControllerMcp::AgentComplete' ||
-            toolName === 'mcp__AgentControllerMcp__AgentComplete' ||
+            toolName.includes('CompleteTask') ||
             (block.type === 'mcp_tool_use' &&
               (block as any).server_name === 'AgentControllerMcp' &&
-              block.name === 'AgentComplete')
+              block.name === 'CompleteTask')
           ) {
             // 创建 render item 让 MessageBubble 可挂 AgentCompleteConfirmCard；
             // pendingAgentCompleteId 非空时 user 消息放行以便处理 tool_result（拒绝 vs 接受）。

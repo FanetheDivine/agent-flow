@@ -353,10 +353,10 @@ export class ClaudeExecutor {
         this.pendingPermissions.set(toolUseID, resolve)
       })
     }
-    // require_confirm 粒度按 output 配置：根据 AgentComplete 入参里的 output_name
+    // require_confirm 粒度按 output 配置：根据 CompleteTask 入参里的 output_name
     // 找到对应 output，require_confirm===true 时拦截。无 outputs / 无 output_name 直接放行。
-    // chat 模式不挂载 AgentComplete，此分支不会进入。
-    if (toolName === 'mcp__AgentControllerMcp__AgentComplete') {
+    // chat 模式不挂载 CompleteTask，此分支不会进入。
+    if (toolName.includes('CompleteTask')) {
       const completeInput = input as Record<string, unknown>
       const outputName = completeInput.output_name
       const matchedOutput =
@@ -455,16 +455,16 @@ export class ClaudeExecutor {
         })
       },
       onTerminate: (reason) => {
-        // silent_task 专用:模型确定无法完成时调 terminateTask 工具触发。
+        // 模型确定无法完成时调 TerminateTask 工具触发。
         // 标记 disposed 让 for-await 退出,fire onError 让 reducer 把 run 推到 error 终态;
         // 同时 interrupt SDK 让流尽快收尾(不阻塞回调,异常吞掉即可)。
         if (this.completed || this.disposed) return
         this.disposed = true
         this.pendingCompleteResult = null
         this.rejectAllPendingPermissions('terminated')
-        this.events.onError(new Error(`terminateTask: ${reason}`))
+        this.events.onError(new Error(`TerminateTask: ${reason}`))
         this.queryInstance?.interrupt().catch((err) => {
-          logError('[ClaudeExecutor] interrupt after terminateTask failed:', err)
+          logError('[ClaudeExecutor] interrupt after TerminateTask failed:', err)
         })
       },
     })

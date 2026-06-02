@@ -537,7 +537,7 @@ function renderItemToBubble(
             toolName={item.toolName}
             input={item.input}
             result={item.result}
-            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('AgentComplete')}
+            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('CompleteTask')}
           />
         ),
       }
