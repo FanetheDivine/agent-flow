@@ -4,13 +4,13 @@ import { CloseOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
-import type { AskUserQuestionOutput, PendingQuestion } from '@/common'
+import type { AskUserQuestionInput, AskUserQuestionOutput, PendingToolPermission } from '@/common'
 import {
   formatTokenCount,
   formatTokenCost,
   getAgentPhase,
   getFlowPhase,
-  getPendingQuestionsFor,
+  getPendingToolPermissionsFor,
   getRunPhase,
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
@@ -19,7 +19,7 @@ import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { MessageList, type MessageListRef } from './MessageList'
 
 // 模块级常量 —— useMemo 在「无 pending」时返回稳定空数组,避免新引用触发上层 effect。
-const EMPTY_PENDING_QUESTIONS: PendingQuestion[] = []
+const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
 
 export type ChatPanelRef = {
   forceScrollToBottom: () => void
@@ -51,7 +51,7 @@ export const ChatPanel: FC<Props> = ({
   ref,
 }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
-  const answerQuestion = useFlowStore((s) => s.answerQuestion)
+  const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
 
   const agentName = useFlowStore(
     (s) =>
@@ -69,21 +69,26 @@ export const ChatPanel: FC<Props> = ({
     return getAgentPhase(fs, agentId)
   })
   const flowPhase = useFlowStore((s) => getFlowPhase(s.flowRunStates[flowId]))
-  // pendingQuestions 仅给底部 AskUserQuestionCard 用;ctx / pendingToolPerms / answered* 已搬到 MessageList。
+  // pendingToolPerms 给状态标签 / loading / 底部 AskUserQuestionCard 用;ctx / answered* 在 MessageList。
   // selector 必须返回稳定引用,否则 useSyncExternalStore 在 store 未变时仍因引用不同
   // 持续判定快照变化触发重渲染 → "Maximum update depth exceeded"。
   const fs = useFlowStore((s) => s.flowRunStates[flowId])
-  const pendingQuestions = useMemo(() => {
-    if (!fs) return EMPTY_PENDING_QUESTIONS
+  const pendingToolPerms = useMemo(() => {
+    if (!fs) return EMPTY_PENDING_TOOL_PERMS
     if (runId) {
-      const list = fs.pendingQuestions
-      const filtered = list.filter((q) => q.runId === runId)
+      const list = fs.pendingToolPermissions
+      const filtered = list.filter((p) => p.runId === runId)
       if (filtered.length === list.length) return list
-      if (filtered.length === 0) return EMPTY_PENDING_QUESTIONS
+      if (filtered.length === 0) return EMPTY_PENDING_TOOL_PERMS
       return filtered
     }
-    return getPendingQuestionsFor(fs, agentId)
+    return getPendingToolPermissionsFor(fs, agentId)
   }, [fs, runId, agentId])
+  // 底部固定 AskUserQuestionCard 只取 AskUserQuestion 类型的挂起项
+  const pendingQuestions = useMemo(
+    () => pendingToolPerms.filter((p) => p.toolName.includes('AskUserQuestion')),
+    [pendingToolPerms],
+  )
   const allRuns = useFlowStore((s) => s.flowRunStates[flowId]?.runs)
   // runs:仅本组件 token 统计 + Welcome / Skeleton 长度判断用;消息渲染由 MessageList 自己派生
   const runs = useMemo<AgentRun[]>(() => {
@@ -174,7 +179,7 @@ export const ChatPanel: FC<Props> = ({
     const toolUseIds: string[] = []
     for (const pq of pendingQuestions) {
       toolUseIds.push(pq.toolUseId)
-      for (const q of pq.input.questions ?? []) {
+      for (const q of (pq.input as AskUserQuestionInput).questions ?? []) {
         allQuestions.push(q)
       }
     }
@@ -200,20 +205,21 @@ export const ChatPanel: FC<Props> = ({
       }
 
       for (const pq of pendingQuestions) {
+        const questions = (pq.input as AskUserQuestionInput).questions ?? []
         const pqAnswers: Record<string, string> = {}
-        for (const q of pq.input.questions ?? []) {
+        for (const q of questions) {
           const ans = answersPerQuestion[q.question] ?? []
           pqAnswers[q.question] = ans.join('\x1F')
         }
-        answerQuestion(flowId, pq.runId, pq.toolUseId, {
-          questions: pq.input.questions,
-          answers: pqAnswers,
+        // AskUserQuestion 回答 = allow + updatedInput={questions,answers}
+        answerToolPermission(flowId, pq.runId, pq.toolUseId, true, {
+          updatedInput: { questions, answers: pqAnswers },
         })
       }
 
       scrollToBottom()
     },
-    [answerQuestion, flowId, pendingQuestions, scrollToBottom],
+    [answerToolPermission, flowId, pendingQuestions, scrollToBottom],
   )
 
   useImperativeHandle(
@@ -226,6 +232,14 @@ export const ChatPanel: FC<Props> = ({
     [scrollToBottom],
   )
 
+  // awaiting-tool-permission 标签按本视图首个 pending 的 toolName 分流(.includes)
+  const firstPendingToolName = pendingToolPerms[0]?.toolName
+  const toolPermStatusLabel = (): string => {
+    if (firstPendingToolName?.includes('AskUserQuestion')) return '需要回答'
+    if (firstPendingToolName?.includes('CompleteTask')) return '等待完成确认'
+    if (firstPendingToolName?.includes('ExitPlanMode')) return '计划等待确认'
+    return '请求授权'
+  }
   const { text: statusText, color: statusColor } = match<
     AgentPhase,
     { text: string; color: 'processing' | 'warning' | 'default' | 'success' | 'error' }
@@ -234,10 +248,7 @@ export const ChatPanel: FC<Props> = ({
     .with('running', () => ({ text: '生成中', color: 'processing' }))
     .with('result', () => ({ text: '生成完毕', color: 'success' }))
     .with('interrupted', () => ({ text: '已中断', color: 'warning' }))
-    .with('awaiting-question', () => ({ text: '需要回答', color: 'warning' }))
-    .with('awaiting-tool-permission', () => ({ text: '请求授权', color: 'warning' }))
-    .with('awaiting-complete-confirm', () => ({ text: '等待完成确认', color: 'warning' }))
-    .with('awaiting-exit-plan', () => ({ text: '计划等待确认', color: 'warning' }))
+    .with('awaiting-tool-permission', () => ({ text: toolPermStatusLabel(), color: 'warning' }))
     .with('completed', () => ({ text: '已完成', color: 'success' }))
     .with('stopped', () => ({ text: '已停止', color: 'default' }))
     .with('error', () => ({ text: '出错', color: 'error' }))
@@ -322,7 +333,10 @@ export const ChatPanel: FC<Props> = ({
             agentId={agentId}
             runId={runId}
             loading={
-              phase === 'running' || phase === 'starting' || phase === 'awaiting-complete-confirm'
+              phase === 'running' ||
+              phase === 'starting' ||
+              (phase === 'awaiting-tool-permission' &&
+                !!firstPendingToolName?.includes('CompleteTask'))
             }
           />
         ))}

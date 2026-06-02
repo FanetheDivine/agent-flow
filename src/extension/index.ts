@@ -133,16 +133,21 @@ export function activate(context: vscode.ExtensionContext) {
   // notifyUser webPanel不存在或不可见 弹 VSCode 通知。
   // notifyUser: 当 panel 不存在或不可见时弹 VSCode 通知。
   flowRunStateManager.setNotifyHandler((data) => {
-    const { agentName, flowId, flowName, reason } = data
+    const { agentName, flowId, flowName, reason, toolName } = data
 
     if (currentPanel && currentPanel.visible) return
 
+    // awaiting-tool-permission 按 toolName 分流文案(.includes 对 mcp__ 与 :: 两种格式都成立)
+    const toolPermLabel = (): string => {
+      if (toolName?.includes('AskUserQuestion')) return `Agent「${agentName}」需要回答`
+      if (toolName?.includes('CompleteTask')) return `Agent「${agentName}」等待完成确认`
+      if (toolName?.includes('ExitPlanMode')) return `Agent「${agentName}」计划已生成`
+      return `Agent「${agentName}」请求授权`
+    }
+
     const msg = match(reason)
       .with('result', () => `Agent「${agentName}」生成完毕`)
-      .with('awaiting-question', () => `Agent「${agentName}」需要回答`)
-      .with('awaiting-tool-permission', () => `Agent「${agentName}」请求授权`)
-      .with('awaiting-complete-confirm', () => `Agent「${agentName}」等待完成确认`)
-      .with('awaiting-exit-plan', () => `Agent「${agentName}」计划已生成`)
+      .with('awaiting-tool-permission', () => toolPermLabel())
       .with('flow-completed', () => `工作流「${flowName}」已完成`)
       .with('agent-error', () => `Agent「${agentName}」运行出错`)
       .exhaustive()
@@ -213,7 +218,7 @@ export function activate(context: vscode.ExtensionContext) {
    *    forkSession(newSessionId, { upToMessageId: srcUuid }) 在新 session 中找
    *    不到该 uuid,直接报错。
    * 3. **同步 spawn FlowRunner**：拿到 runId 写入 newRunState,webview 后续可正常
-   *    sendUserMessage / answerQuestion / interrupt（不再 silent drop）
+   *    sendUserMessage / answerToolPermission / interrupt（不再 silent drop）
    */
   const handleFork = async (
     data: ExtensionFlowCommandEvents['flow.command.fork'],
@@ -305,13 +310,8 @@ export function activate(context: vscode.ExtensionContext) {
     const newRunState: FlowRunState = {
       killed: false,
       runs: newRuns,
-      answeredQuestions: { ...sourceState.answeredQuestions },
       answeredToolPermissions: { ...sourceState.answeredToolPermissions },
-      pendingQuestions: [],
       pendingToolPermissions: [],
-      pendingCompleteConfirms: [],
-      pendingExitPlanModes: [],
-      answeredExitPlanModes: { ...sourceState.answeredExitPlanModes },
       shareValues: { ...sourceState.shareValues },
     }
 
@@ -325,7 +325,7 @@ export function activate(context: vscode.ExtensionContext) {
     flowRunStateManager.setRunState(newFlowId, newRunState)
 
     // 立即 spawn FlowRunner 启动 SDK(lazy 模式);runId 已确定,webview 后续派发的
-    // userMessage / answerQuestion / interrupt 都能正常匹配到此 runner。
+    // userMessage / answerToolPermission / interrupt 都能正常匹配到此 runner。
     // fork 切片末端只可能是 user/text/thinking/turn_end —— SDK 不支持把
     // askUserQuestion 作为 fork 终点。
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——

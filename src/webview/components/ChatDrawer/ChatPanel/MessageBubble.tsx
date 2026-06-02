@@ -2,7 +2,7 @@ import { memo, useState, type FC, type ReactNode } from 'react'
 import { Button, Input, Radio, Tag, Tooltip } from 'antd'
 import { BranchesOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { Bubble, Think } from '@ant-design/x'
-import type { AskUserQuestionOutput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
+import type { ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
@@ -27,27 +27,20 @@ export type AnsweredInfo = {
 }
 
 export type BubbleCtx = {
-  pendingToolUseId?: string
-  /** 所有未回答的 AskUserQuestion toolUseId 集合，用于从消息列表中隐藏 */
-  pendingToolUseIds?: Set<string>
-  answeredMap: Map<string, AnsweredInfo>
-  onActiveSubmit?: (toolUseId: string, output: AskUserQuestionOutput) => void
-  /** 当前挂起的工具权限请求 toolUseId 集合 */
+  /**
+   * 当前挂起的工具权限请求 toolUseId 集合 —— 四类挂起统一(AskUserQuestion / CompleteTask /
+   * ExitPlanMode / must_confirm)。ask_user_question 卡片据此隐藏 pending(改由输入框上方固定卡片渲染);
+   * tool_use 卡片据此切 active / historical。
+   */
   pendingToolPermissionToolUseIds?: Set<string>
-  /** 已回答的工具权限历史 */
-  answeredToolPermissions?: Record<string, { allow: boolean }>
+  /** 已回答的工具权限历史:toolUseId -> { allow, updatedInput }(AskUserQuestion 答案在 updatedInput) */
+  answeredToolPermissions?: Record<string, { allow: boolean; updatedInput?: unknown }>
+  /** AskUserQuestion 历史卡片答案展示:toolUseId -> { values }(从 answeredToolPermissions.updatedInput 解析) */
+  answeredMap: Map<string, AnsweredInfo>
+  /** allow 回调(CompleteTask 接受 / ExitPlanMode 确认 / 普通工具允许) */
   onToolPermissionAllow?: (toolUseId: string) => void
-  onToolPermissionDeny?: (toolUseId: string) => void
-  /** 当前挂起的 CompleteTask 完成前确认 toolUseId 集合 */
-  pendingCompleteConfirmToolUseIds?: Set<string>
-  onCompleteConfirmAccept?: (toolUseId: string) => void
-  onCompleteConfirmDeny?: (toolUseId: string, reason: string) => void
-  /** 当前挂起的 ExitPlanMode 确认 toolUseId 集合 */
-  pendingExitPlanModeToolUseIds?: Set<string>
-  /** 已回答的 ExitPlanMode 历史 */
-  answeredExitPlanModes?: Record<string, { confirmed: boolean }>
-  onExitPlanModeConfirm?: (toolUseId: string) => void
-  onExitPlanModeDeny?: (toolUseId: string) => void
+  /** deny 回调(message 供 CompleteTask 拒绝原因回喂模型) */
+  onToolPermissionDeny?: (toolUseId: string, message?: string) => void
   onViewPlan?: (planFilePath: string) => void
   /**
    * 触发会话 fork。target.kind:
@@ -497,9 +490,7 @@ function renderItemToBubble(
           content: <AskUserQuestionCard input={item.input} mode='historical' />,
         }
       }
-      const isPending = ctx.pendingToolUseIds
-        ? ctx.pendingToolUseIds.has(item.toolUseId)
-        : ctx.pendingToolUseId === item.toolUseId
+      const isPending = ctx.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       // pending 卡片不在消息列表中渲染（改为固定在输入框上方），只渲染已回答的历史卡片
       if (isPending) return null
       const answered = ctx.answeredMap.get(item.toolUseId)
@@ -517,11 +508,52 @@ function renderItemToBubble(
       }
     }
     case 'tool_use': {
-      // ExitPlanMode 专属处理：复用 ToolPermissionCard 但展示"计划已生成"样式
-      if (item.toolName === 'ExitPlanMode') {
-        const isPendingExitPlan =
-          ctx?.pendingExitPlanModeToolUseIds?.has(item.toolUseId) ?? false
-        const answeredExitPlan = ctx?.answeredExitPlanModes?.[item.toolUseId]
+      const isPending = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
+      const answered = ctx?.answeredToolPermissions?.[item.toolUseId]
+
+      // CompleteTask：完成前确认。pending 时在工具详情下方挂确认卡片;历史只显示工具详情
+      // (成功完成由 agent_complete 卡片体现,拒绝则带 isError result)。
+      if (item.toolName.includes('CompleteTask')) {
+        const completeInput = item.input as Record<string, any> | undefined
+        const toolUseItem: RenderedBubble = {
+          key: item.key,
+          role: 'ai',
+          content: (
+            <ToolUseDetails
+              toolName={item.toolName}
+              input={item.input}
+              result={item.result}
+              treatNoResultAsSuccess={sessionCompleted}
+            />
+          ),
+        }
+        if (isPending && ctx) {
+          const confirmItem: RenderedBubble = {
+            key: item.key + '-confirm',
+            role: 'ai',
+            content: (
+              <CompleteTaskConfirmCard
+                outputName={completeInput?.output_name ?? completeInput?.output?.name}
+                content={
+                  typeof completeInput?.content === 'string' ? completeInput.content : undefined
+                }
+                values={
+                  completeInput?.values && typeof completeInput.values === 'object'
+                    ? completeInput.values
+                    : undefined
+                }
+                onAccept={() => ctx.onToolPermissionAllow?.(item.toolUseId)}
+                onDeny={(reason) => ctx.onToolPermissionDeny?.(item.toolUseId, reason)}
+              />
+            ),
+          }
+          return [toolUseItem, confirmItem]
+        }
+        return toolUseItem
+      }
+
+      // ExitPlanMode：复用 ToolPermissionCard 但展示"计划已生成"样式（=== 改 .includes 修复 latent bug）
+      if (item.toolName.includes('ExitPlanMode')) {
         const planFilePath = (item.input as { planFilePath?: string })?.planFilePath ?? ''
         return {
           key: item.key + '-exit-plan',
@@ -530,77 +562,42 @@ function renderItemToBubble(
             <ToolPermissionCard
               toolName='ExitPlanMode'
               input={item.input}
-              mode={isPendingExitPlan ? 'active' : 'historical'}
-              answered={answeredExitPlan ? { allow: answeredExitPlan.confirmed } : undefined}
-              onAllow={() => ctx!.onExitPlanModeConfirm?.(item.toolUseId)}
-              onDeny={() => ctx!.onExitPlanModeDeny?.(item.toolUseId)}
+              mode={isPending ? 'active' : 'historical'}
+              answered={answered ? { allow: answered.allow } : undefined}
+              onAllow={() => ctx!.onToolPermissionAllow?.(item.toolUseId)}
+              onDeny={() => ctx!.onToolPermissionDeny?.(item.toolUseId)}
               exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
             />
           ),
         }
       }
-      // 先计算权限状态，以便在 defaultOpen 中判断是否展开参数
-      const isPendingPerm = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
-      const answeredPerm = ctx?.answeredToolPermissions?.[item.toolUseId]
-      const isPendingCompleteConfirm =
-        ctx?.pendingCompleteConfirmToolUseIds?.has(item.toolUseId) ?? false
-      const permItem = {
+
+      // 通用工具权限(must_confirm 等)：pending 显示授权卡片;answered 显示历史授权卡片 + 工具详情;
+      // 未触发权限(普通工具)只显示工具详情。
+      const permItem: RenderedBubble = {
         key: item.key + '-perm',
-        role: 'system' as const,
+        role: 'system',
         content: (
           <ToolPermissionCard
             toolName={item.toolName}
             input={item.input}
-            mode={isPendingPerm ? 'active' : 'historical'}
-            answered={answeredPerm}
+            mode={isPending ? 'active' : 'historical'}
+            answered={answered ? { allow: answered.allow } : undefined}
             onAllow={() => ctx!.onToolPermissionAllow?.(item.toolUseId)}
             onDeny={() => ctx!.onToolPermissionDeny?.(item.toolUseId)}
           />
         ),
       }
-      const toolUseItem = {
+      const toolUseItem: RenderedBubble = {
         key: item.key,
-        role: 'ai' as const,
+        role: 'ai',
         content: (
-          <ToolUseDetails
-            toolName={item.toolName}
-            input={item.input}
-            result={item.result}
-            treatNoResultAsSuccess={sessionCompleted && item.toolName.includes('CompleteTask')}
-          />
+          <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
         ),
       }
-      const completeInput = item.input as Record<string, any> | undefined
-      const confirmItem: RenderedBubble | null =
-        isPendingCompleteConfirm && ctx
-          ? {
-              key: item.key + '-confirm',
-              role: 'ai',
-              content: (
-                <CompleteTaskConfirmCard
-                  outputName={completeInput?.output_name ?? completeInput?.output?.name}
-                  content={
-                    typeof completeInput?.content === 'string' ? completeInput.content : undefined
-                  }
-                  values={
-                    completeInput?.values && typeof completeInput.values === 'object'
-                      ? completeInput.values
-                      : undefined
-                  }
-                  onAccept={() => ctx.onCompleteConfirmAccept?.(item.toolUseId)}
-                  onDeny={(reason) => ctx.onCompleteConfirmDeny?.(item.toolUseId, reason)}
-                />
-              ),
-            }
-          : null
-      if (isPendingPerm) {
-        return confirmItem ? [permItem, confirmItem] : permItem
-      }
-
-      if (answeredPerm) {
-        return confirmItem ? [permItem, toolUseItem, confirmItem] : [permItem, toolUseItem]
-      }
-      return confirmItem ? [toolUseItem, confirmItem] : toolUseItem
+      if (isPending) return permItem
+      if (answered) return [permItem, toolUseItem]
+      return toolUseItem
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []

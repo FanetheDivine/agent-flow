@@ -6,7 +6,6 @@ import * as vscode from 'vscode'
 import {
   type Agent,
   type AIMessageType,
-  type AskUserQuestionOutput,
   type Code,
   type FlowRunnerCommandEvents,
   type Flow,
@@ -58,8 +57,8 @@ async function resolveGitBash(): Promise<string | undefined> {
 
 /**
  * 节点执行器联合 —— ClaudeExecutor 走 AI SDK,CodeExecutor 把 agent.code 当函数体执行。
- * 路由侧 FlowRunner 不区分二者:两者都实现 sendUserMessage / interrupt / answerQuestion /
- * answerToolPermission / answerCompleteConfirm / kill 接口,且 ExecutorEvents 同构。
+ * 路由侧 FlowRunner 不区分二者:两者都实现 sendUserMessage / interrupt /
+ * answerToolPermission / kill 接口,且 ExecutorEvents 同构。
  */
 type Executor = ClaudeExecutor | CodeExecutor
 
@@ -149,22 +148,9 @@ export class FlowRunner {
       .with('flow.command.interrupt', () => {
         this.handleInterrupt(data as FlowRunnerCommandEvents['flow.command.interrupt'])
       })
-      .with('flow.command.answerQuestion', () => {
-        this.handleAnswerQuestion(data as FlowRunnerCommandEvents['flow.command.answerQuestion'])
-      })
       .with('flow.command.toolPermissionResult', () => {
         this.handleToolPermissionResult(
           data as FlowRunnerCommandEvents['flow.command.toolPermissionResult'],
-        )
-      })
-      .with('flow.command.answerCompleteTaskConfirm', () => {
-        this.handleAnswerCompleteConfirm(
-          data as FlowRunnerCommandEvents['flow.command.answerCompleteTaskConfirm'],
-        )
-      })
-      .with('flow.command.exitPlanModeResult', () => {
-        this.handleExitPlanModeResult(
-          data as FlowRunnerCommandEvents['flow.command.exitPlanModeResult'],
         )
       })
       .with('flow.command.killFlow', () => {
@@ -313,45 +299,16 @@ export class FlowRunner {
     this.fire('flow.signal.agentInterrupted', { runId })
   }
 
-  private handleAnswerQuestion({
-    runId,
-    toolUseId,
-    output,
-  }: FlowRunnerCommandEvents['flow.command.answerQuestion']): void {
-    const executor = this.executors.get(runId)
-    if (!executor) return
-    executor.answerQuestion(toolUseId, output)
-  }
-
   private handleToolPermissionResult({
     runId,
     toolUseId,
     allow,
+    updatedInput,
+    message,
   }: FlowRunnerCommandEvents['flow.command.toolPermissionResult']): void {
     const executor = this.executors.get(runId)
     if (!executor) return
-    executor.answerToolPermission(toolUseId, allow)
-  }
-
-  private handleAnswerCompleteConfirm({
-    runId,
-    toolUseId,
-    accept,
-    reason,
-  }: FlowRunnerCommandEvents['flow.command.answerCompleteTaskConfirm']): void {
-    const executor = this.executors.get(runId)
-    if (!executor) return
-    executor.answerCompleteConfirm(toolUseId, accept, reason)
-  }
-
-  private handleExitPlanModeResult({
-    runId,
-    toolUseId,
-    confirmed,
-  }: FlowRunnerCommandEvents['flow.command.exitPlanModeResult']): void {
-    const executor = this.executors.get(runId)
-    if (!executor || executor instanceof CodeExecutor) return
-    executor.answerExitPlanMode(toolUseId, confirmed)
+    executor.answerToolPermission(toolUseId, allow, { updatedInput, message })
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
@@ -448,30 +405,24 @@ export class FlowRunner {
           input,
         })
       },
-      onCompleteConfirmRequest: ({
+      onToolPermissionResult: ({
         toolUseId,
-        input,
+        allow,
+        updatedInput,
+        message,
       }: {
         toolUseId: string
-        input: Record<string, unknown>
+        allow: boolean
+        updatedInput?: unknown
+        message?: string
       }) => {
-        this.fire('flow.signal.agentCompleteConfirmRequest', {
+        this.fire('flow.signal.toolPermissionResult', {
           runId,
           toolUseId,
-          input,
+          allow,
+          updatedInput,
+          message,
         })
-      },
-      onAnswerQuestion: (toolUseId: string, output: AskUserQuestionOutput) => {
-        this.fire('flow.signal.answerQuestion', { runId, toolUseId, output })
-      },
-      onExitPlanModeRequest: ({
-        toolUseId,
-        planFilePath,
-      }: {
-        toolUseId: string
-        planFilePath: string
-      }) => {
-        this.fire('flow.signal.exitPlanModeRequest', { runId, toolUseId, planFilePath })
       },
       onError: (err: Error) => {
         logError(`[FlowRunner] agent ${agent.id} error:`, err)

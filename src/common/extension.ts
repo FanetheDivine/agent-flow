@@ -308,7 +308,7 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
     }),
   )
   // plan_mode agent:注册 ExitPlanMode 工具,模型调用时触发 canUseTool 拦截,
-  // 由 ClaudeExecutor.requestExitPlanMode 挂起等待用户确认。
+  // 经统一的 requestToolPermission 挂起等待用户确认(与 AskUserQuestion / CompleteTask / must_confirm 同通道)。
   // Handler 仅在用户 allow 后才被调用,此处返回确认文案即可。
   if (agent.plan_mode === true) {
     const exitPlanModeTool = tool(
