@@ -20,26 +20,22 @@ export type Output = z.infer<typeof OutputSchema>
 
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
-  id: z.string().describe('Agent 唯一 ID'),
+  id: z.string().describe('节点ID'),
   is_entry: z.boolean().optional().describe('建议的入口节点'),
   /**
    * 节点类型,省略即 'agent':走 ClaudeExecutor + AI SDK,与 work_mode/agent_prompt/model 等字段配合。
    * node_type='code' 的节点由 {@link CodeSchema}(从本 schema 派生)定义,走 CodeExecutor 不调 AI。
    */
-  node_type: z.literal('agent').optional().describe('节点类型,默认 agent'),
-  model: z
-    .string()
-    .min(1)
-    .describe('使用的模型，可选 "sonnet"（复杂推理）或 "haiku"（快速简单）')
-    .optional(),
+  node_type: z.literal('agent').optional().describe('节点类型'),
+  model: z.string().min(1).describe('模型名称').optional(),
   effort: z
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
     .describe('AI 思考的努力程度，影响响应速度与质量的权衡'),
-  agent_name: z.string().describe('Agent 名称，flow 内唯一'),
-  agent_desc: z.string().optional().describe('Agent 简介，简要描述该 Agent 的职责与定位'),
-  agent_prompt: z.string().describe('系统提示词，定义 Agent 的行为与职责，要具体可执行').optional(),
-  outputs: z.array(OutputSchema).optional().describe('输出分支，可以连接任意数量的 agent'),
+  agent_name: z.string().describe('节点名称'),
+  agent_desc: z.string().optional().describe('节点简介'),
+  agent_prompt: z.string().describe('Agent的系统提示词，详细描述Agent的任务和约束').optional(),
+  outputs: z.array(OutputSchema).optional().describe('输出分支，每个分支可以选择一个后继'),
   auto_allowed_tools: z
     .union([z.literal(true), z.array(z.string())])
     .optional()
@@ -73,25 +69,17 @@ export const AgentSchema = z.object({
     .describe(
       '工作方式：task-任务达成后调用 CompleteTask 提交结果；chat-与用户的持续长期对话；silent_task-无人值守自动循环，必须通过 CompleteTask 终止',
     ),
-  no_input: z
-    .boolean()
-    .optional()
-    .describe(
-      '无输入启动：true 时节点操作区显示启动按钮，点击时始终以"开始"为初始消息自动运行（忽略用户实际输入）',
-    ),
-  plan_mode: z
-    .boolean()
-    .optional()
-    .describe('Plan 模式：true 时以只读/计划模式运行，不会实际执行文件修改等写操作'),
+  no_input: z.boolean().optional().describe('是否忽略首条消息'),
+  plan_mode: z.boolean().optional().describe('以Plan 模式开启会话'),
   isolation_mode: z.boolean().optional().describe('不再注入全局/项目/local的settings和CLAUDE.md'),
   allowed_read_values_keys: z
     .array(z.string())
     .optional()
-    .describe('允许读取的 values key 子集；Agent 仅能通过系统提示词看到这些 key 的当前值'),
+    .describe('允许读取的 shareValues key，会话开始时被注入'),
   allowed_write_values_keys: z
     .array(z.string())
     .optional()
-    .describe('允许写入的 values key 子集；Agent 仅能在 CompleteTask 时写入这些 key'),
+    .describe('允许写入的 shareValues key，仅在 CompleteTask 时写入'),
   base_url: z
     .string()
     .optional()
@@ -122,14 +110,7 @@ export const CodeSchema = AgentSchema.pick({
   no_input: true,
   is_entry: true,
 }).extend({
-  node_type: z.literal('code').describe('节点类型,固定 code'),
-  /**
-   * code 节点的函数体源码;外层签名固定为 `async function (input, values, runCommand) { ... }`,
-   * 返回值映射到 ExecutorResult: `{ output_name?, content, values? }`。
-   * 入参语义:input = 上游 CompleteTask.content / no_input 时为 '开始';
-   * values = 当前 shareValues 全量(全量读不受 allowed_read_values_keys 约束);
-   * runCommand = async (command: string, timeout?: number) => Promise<string>,在 VSCode workspaceFolder 下执行 shell 命令并返回 stdout+stderr;timeout 单位毫秒,默认 600000(10 分钟)
-   */
+  node_type: z.literal('code').describe('节点类型'),
   code: z
     .string()
     .describe(
@@ -160,12 +141,12 @@ export type ShareValueKey = z.infer<typeof ShareValueKeySchema>
 
 /** Agent 作为节点构成的有向图 */
 export const FlowSchema = z.object({
-  id: z.string().describe('Flow 唯一标识'),
+  id: z.string().describe('Flow ID'),
   name: z.string().describe('Flow 名称'),
   agents: z
     .array(z.union([AgentSchema, CodeSchema]))
     .optional()
-    .describe('当前 Flow 内的 agent,其 outputs 定义了连接边'),
+    .describe('当前 Flow 内的 节点'),
   shareValuesKeys: z.array(ShareValueKeySchema).optional().describe('Flow 可用的共享数据 key 集合'),
   base_url: z
     .string()

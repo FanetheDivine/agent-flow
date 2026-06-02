@@ -264,43 +264,24 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
     {},
     withErrorBoundary('GetFlowJSONSchema', async () => {
       // AI 设计 Flow 用的精简 schema：从完整 schema 派生
-      // node_type 固定 agent / model 固定 sonnet / auto_allowed_tools 固定 true / work_mode 固定 task
-      // 不暴露 CodeSchema、must_confirm_tools、require_confirm、base_url、api_key 等
-      const LiteOutput = OutputSchema.pick({
-        output_name: true,
-        output_desc: true,
-        next_agent: true,
-        require_confirm: true,
-      })
       const LiteAgent = AgentSchema.pick({
         id: true,
         agent_name: true,
-        agent_desc: true,
         agent_prompt: true,
         allowed_read_values_keys: true,
         allowed_write_values_keys: true,
         is_entry: true,
+        no_input: true,
+        node_type: true,
+        outputs: true,
       }).extend({
-        no_input: z.literal(true),
-        node_type: z.literal('agent'),
+        model: z.literal('sonnet'),
         auto_allowed_tools: z.literal(true),
         must_confirm_tools: z.tuple([z.literal('Bash(git merge)'), z.literal('Bash(git push)')]),
-        outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
       }) satisfies z.ZodType<Agent>
-      const LiteCode = CodeSchema.pick({
-        id: true,
-        agent_name: true,
-        agent_desc: true,
-        code: true,
-        no_input: true,
-        is_entry: true,
-      }).extend({
-        node_type: z.literal('code'),
-        outputs: z.array(LiteOutput).optional().describe('输出分支，可以连接任意数量的 agent'),
-      }) satisfies z.ZodType<Code>
       const LiteFlow = FlowSchema.pick({ id: true, name: true, shareValuesKeys: true }).extend({
         agents: z
-          .array(z.union([LiteAgent, LiteCode]))
+          .array(z.union([LiteAgent, CodeSchema]))
           .optional()
           .describe(
             '当前 Flow 内的 agent，其 outputs 定义了连接边。Agent节点会唤起AI,Code节点会执行js代码',
@@ -314,9 +295,9 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
               toJSONSchema(
                 z
                   .registry<{ id?: string }>()
-                  .add(LiteOutput, { id: 'Output' })
+                  .add(OutputSchema, { id: 'Output' })
                   .add(LiteAgent, { id: 'Agent' })
-                  .add(LiteCode, { id: 'Code' })
+                  .add(CodeSchema, { id: 'Code' })
                   .add(LiteFlow, { id: 'Flow' }),
               ).schemas,
               null,
