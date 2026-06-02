@@ -275,14 +275,14 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
 
     // 计算哪些粘贴的节点有前驱（来自现有边或新粘贴的边）
     const existingIncoming = new Set(
-      edges.filter((e) => remappedIds.has(e.target)).map((e) => e.target)
+      edges.filter((e) => remappedIds.has(e.target)).map((e) => e.target),
     )
     const newIncoming = new Set(
       remapped.flatMap((a) =>
         (a.outputs ?? [])
           .filter((o) => o.next_agent && remappedIds.has(o.next_agent))
-          .map((o) => o.next_agent!)
-      )
+          .map((o) => o.next_agent!),
+      ),
     )
     const hasIncoming = new Set([...existingIncoming, ...newIncoming])
 
