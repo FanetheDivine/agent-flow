@@ -295,7 +295,7 @@ const CompleteTaskBody: FC<{
 }> = ({ outputName, content, values }) => {
   const shareEntries = values ? Object.entries(values) : []
   return (
-    <div className='min-w-45'>
+    <div className='min-w-75'>
       <Tag color='green' className='m-0 text-[10px]'>
         完成{outputName ? ` → ${outputName}` : ''}
       </Tag>
@@ -370,12 +370,12 @@ const CompleteTaskConfirmCard: FC<{
       {choice === 'deny' && (
         <div className='flex flex-col gap-1 pl-6'>
           <Input.TextArea
-            autoSize={{ minRows: 1, maxRows: 3 }}
+            autoSize={{ minRows: 1 }}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder='请输入拒绝原因...'
-            className='text-sm'
+            className='overflow-hidden text-sm'
           />
           <div className='flex justify-end'>
             <Button
