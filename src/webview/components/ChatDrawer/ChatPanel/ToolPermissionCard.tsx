@@ -7,13 +7,13 @@ const ALLOW_VALUE = 'allow'
 const DENY_VALUE = 'deny'
 
 const ALLOW_DENY_OPTIONS = [
-  { value: ALLOW_VALUE, label: '允许', description: '允许此工具调用' },
-  { value: DENY_VALUE, label: '拒绝', description: '拒绝此工具调用' },
+  { value: ALLOW_VALUE, label: '允许' },
+  { value: DENY_VALUE, label: '拒绝' },
 ]
 
 const EXIT_PLAN_OPTIONS = [
-  { value: ALLOW_VALUE, label: '确认', description: '确认执行此计划' },
-  { value: DENY_VALUE, label: '放弃', description: '放弃此计划' },
+  { value: ALLOW_VALUE, label: '确认' },
+  { value: DENY_VALUE, label: '拒绝' },
 ]
 
 type Props = {
@@ -91,11 +91,11 @@ export const ToolPermissionCard: FC<Props> = ({
     >
       <div className='flex items-center gap-2'>
         <SafetyOutlined className='text-[#f9e2af]' />
-        <span className='text-xs font-semibold text-[#cdd6f4]'>
+        <span className='font-semibold text-[#cdd6f4]'>
           {isExitPlan ? '计划已生成' : '请求使用工具'}
         </span>
         {!isExitPlan && (
-          <Tag color='warning' className='m-0 text-[10px]'>
+          <Tag color='warning' className='m-0 text-xs'>
             {toolName}
           </Tag>
         )}
@@ -108,7 +108,7 @@ export const ToolPermissionCard: FC<Props> = ({
             {isExitPlan
               ? answered.allow
                 ? '已确认'
-                : '已放弃'
+                : '已拒绝'
               : answered.allow
                 ? '已允许'
                 : '已拒绝'}
@@ -117,7 +117,7 @@ export const ToolPermissionCard: FC<Props> = ({
       </div>
 
       {isExitPlan ? (
-        <span className='text-[11px] text-[#cdd6f4]'>
+        <span className='text-[#cdd6f4]'>
           计划已生成，
           <a
             href='#'
