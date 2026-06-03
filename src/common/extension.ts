@@ -307,27 +307,6 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
       }
     }),
   )
-  // plan_mode agent:注册 ExitPlanMode 工具,模型调用时触发 canUseTool 拦截,
-  // 经统一的 requestToolPermission 挂起等待用户确认(与 AskUserQuestion / CompleteTask / must_confirm 同通道)。
-  // Handler 仅在用户 allow 后才被调用,此处返回确认文案即可。
-  if (agent.plan_mode === true) {
-    const exitPlanModeTool = tool(
-      'ExitPlanMode',
-      [
-        '当前处于 Plan 模式。当你完成计划制定后，调用此工具提交计划文件路径，等待用户确认。',
-        '用户确认后你可以继续执行后续操作；用户拒绝则需根据反馈调整计划。',
-      ].join('\n'),
-      {
-        planFilePath: z.string().describe('计划文件的绝对路径'),
-      },
-      withErrorBoundary('ExitPlanMode', async ({ planFilePath }) => {
-        return {
-          content: [{ type: 'text', text: `计划已确认（${planFilePath}），可继续执行` }],
-        }
-      }),
-    )
-    tools.push(exitPlanModeTool)
-  }
 
   tools.push(validateFlowTool, getFlowJSONSchemaTool)
 
