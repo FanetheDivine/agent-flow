@@ -362,7 +362,7 @@ export const AgentEditor: FC = () => {
                     <FormItem
                       name='plan_mode'
                       label='Plan模式'
-                      tooltip='系统提示词倾向会改变，AI会写计划并尝试执行，而不是完成任务'
+                      tooltip='对话开始进入Plan模式。系统提示词倾向会改变，AI会写计划并尝试执行，而不是完成任务。对Claude系列模型效果非常明显。'
                       valuePropName='checked'
                     >
                       <Switch />
