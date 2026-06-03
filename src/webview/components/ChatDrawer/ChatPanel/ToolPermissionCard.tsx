@@ -60,7 +60,7 @@ export const ToolPermissionCard: FC<Props> = ({
     if (!onChangeHeight) return
     const raf = requestAnimationFrame(() => {
       if (containerRef.current) {
-        onChangeHeight(containerRef.current.getBoundingClientRect().height + 90)
+        onChangeHeight(containerRef.current.getBoundingClientRect().height + 30)
       }
     })
     return () => cancelAnimationFrame(raf)
