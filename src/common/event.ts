@@ -55,8 +55,6 @@ export type ExtensionFromWebviewEvents = {
   openFile: { filename: string; line?: [number, number]; placement?: 'active' | 'beside' }
   /** 在 VSCode 中预览一段外部粘入的文本附件（非文件系统文件） */
   previewAttachment: { name: string; content: string }
-  /** 以 Markdown 预览方式打开计划文件（planFilePath 为绝对路径） */
-  openPlanFile: { planFilePath: string }
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的消息 */

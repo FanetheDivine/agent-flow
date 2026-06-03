@@ -82,8 +82,6 @@ type FlowStoreType = StoreState & {
     allow: boolean,
     opts?: { updatedInput?: unknown; message?: string },
   ) => void
-  /** 在 VSCode 中以 Markdown 预览打开计划文件 */
-  openPlanFile: (planFilePath: string) => void
   /** 中断当前 run —— 调用方决定要中断哪个 run */
   interruptAgent: (flowId: string, runId: string) => void
   killFlow: (flowId: string) => void
@@ -439,12 +437,6 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           updatedInput: opts?.updatedInput,
           message: opts?.message,
         },
-      })
-    },
-    openPlanFile: (planFilePath) => {
-      postMessageToExtension({
-        type: 'openPlanFile',
-        data: { planFilePath },
       })
     },
     interruptAgent: (flowId, runId) => {

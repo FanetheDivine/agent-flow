@@ -17,6 +17,7 @@ import type { PendingToolPermission } from '@/common'
 import { getAnsweredToolPermissions, getPendingToolPermissionsFor } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
+import { postMessageToExtension } from '@/webview/utils'
 import { toBubbleItems, type AnsweredInfo, type BubbleCtx } from './MessageBubble'
 
 type Item = BubbleItemType
@@ -108,7 +109,6 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
   }, [fs, runId, agentId])
 
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
-  const openPlanFile = useFlowStore((s) => s.openPlanFile)
   const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
@@ -141,12 +141,12 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     [answerToolPermission, flowId, pendingToolPerms],
   )
 
-  const onViewPlan = useCallback(
-    (planFilePath: string) => {
-      openPlanFile(planFilePath)
-    },
-    [openPlanFile],
-  )
+  const onViewPlan = useCallback((planFilePath: string) => {
+    postMessageToExtension({
+      type: 'openFile',
+      data: { filename: planFilePath, placement: 'active' },
+    })
+  }, [])
 
   /**
    * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示

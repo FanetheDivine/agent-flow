@@ -433,14 +433,6 @@ export function activate(context: vscode.ExtensionContext) {
             // 文件不存在或无法打开时静默忽略
           }
         })
-        .with({ type: 'openPlanFile' }, async ({ data }) => {
-          try {
-            const uri = vscode.Uri.file(data.planFilePath)
-            await vscode.commands.executeCommand('markdown.showPreviewToSide', uri)
-          } catch {
-            // 文件不存在或无法打开时静默忽略
-          }
-        })
         .with({ type: P.string.startsWith('flow.command.') }, async (e) => {
           // fork 是特殊命令：不走 runner，由 extension 自己处理 SDK forkSession
           if (e.type === 'flow.command.fork') {
