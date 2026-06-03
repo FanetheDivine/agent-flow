@@ -62,7 +62,7 @@ const roleStyles = {
  * 其它工具(CompleteTask / ExitPlanMode / must_confirm)无 answers,跳过。
  */
 function buildAnsweredMap(
-  answeredToolPermissions: Record<string, { allow: boolean; updatedInput?: unknown }>,
+  answeredToolPermissions: Record<string, { allow: boolean; updatedInput?: unknown; message?: string }>,
 ): Map<string, AnsweredInfo> {
   const answeredMap = new Map<string, AnsweredInfo>()
   for (const [toolUseId, ans] of Object.entries(answeredToolPermissions)) {

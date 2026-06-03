@@ -33,8 +33,8 @@ export type BubbleCtx = {
    * tool_use 卡片据此切 active / historical。
    */
   pendingToolPermissionToolUseIds?: Set<string>
-  /** 已回答的工具权限历史:toolUseId -> { allow, updatedInput }(AskUserQuestion 答案在 updatedInput) */
-  answeredToolPermissions?: Record<string, { allow: boolean; updatedInput?: unknown }>
+  /** 已回答的工具权限历史:toolUseId -> { allow, updatedInput, message }(AskUserQuestion 答案在 updatedInput;message 为 deny 理由) */
+  answeredToolPermissions?: Record<string, { allow: boolean; updatedInput?: unknown; message?: string }>
   /** AskUserQuestion 历史卡片答案展示:toolUseId -> { values }(从 answeredToolPermissions.updatedInput 解析) */
   answeredMap: Map<string, AnsweredInfo>
   /** allow 回调(CompleteTask 接受 / ExitPlanMode 确认 / 普通工具允许) */
@@ -564,7 +564,7 @@ function renderItemToBubble(
               toolName='ExitPlanMode'
               input={item.input}
               mode='historical'
-              answered={answered ? { allow: answered.allow } : undefined}
+              answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
               exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
             />
           ),
@@ -583,7 +583,7 @@ function renderItemToBubble(
             toolName={item.toolName}
             input={item.input}
             mode='historical'
-            answered={answered ? { allow: answered.allow } : undefined}
+            answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
           />
         ),
       }

@@ -200,7 +200,7 @@ export type FlowRunState = {
    * 已回答的工具权限请求:toolUseId -> { allow, updatedInput },用于 UI 回显历史态。
    * updatedInput 供 AskUserQuestion 历史卡片回显用户(或 silent 自动)填写的答案。
    */
-  answeredToolPermissions: Record<string, { allow: boolean; updatedInput?: unknown }>
+  answeredToolPermissions: Record<string, { allow: boolean; updatedInput?: unknown; message?: string }>
   /** 当前未回答的工具权限请求队列(按 runId 区分归属) —— 四类挂起统一入此队列 */
   pendingToolPermissions: PendingToolPermission[]
   /** Flow 运行时的共享数据 */
@@ -438,6 +438,7 @@ export function updateFlowRunState(
         draft.answeredToolPermissions[data.toolUseId] = {
           allow: data.allow,
           updatedInput: data.updatedInput,
+          message: data.message,
         }
         draft.pendingToolPermissions = draft.pendingToolPermissions.filter(
           (p) => p.toolUseId !== data.toolUseId,
@@ -469,6 +470,7 @@ export function updateFlowRunState(
         draft.answeredToolPermissions[data.toolUseId] = {
           allow: data.allow,
           updatedInput: data.updatedInput,
+          message: data.message,
         }
         draft.pendingToolPermissions = draft.pendingToolPermissions.filter(
           (p) => p.toolUseId !== data.toolUseId,
@@ -600,7 +602,7 @@ export function getPendingToolPermissionsFor(
 
 export function getAnsweredToolPermissions(
   state: FlowRunState | undefined,
-): Record<string, { allow: boolean; updatedInput?: unknown }> | undefined {
+): Record<string, { allow: boolean; updatedInput?: unknown; message?: string }> | undefined {
   return state?.answeredToolPermissions
 }
 

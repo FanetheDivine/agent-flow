@@ -1,27 +1,31 @@
 import { useLayoutEffect, useRef, useState, type FC } from 'react'
 import { Button, Tag } from 'antd'
 import { CheckOutlined, SafetyOutlined, StopOutlined } from '@ant-design/icons'
+import { match, P } from 'ts-pattern'
 import { RadioWithInput } from './RadioWithInput'
 
 const ALLOW_VALUE = 'allow'
 const DENY_VALUE = 'deny'
+const DENY_WITH_REASON_VALUE = 'deny-with-reason'
 
 const ALLOW_DENY_OPTIONS = [
   { value: ALLOW_VALUE, label: '允许' },
   { value: DENY_VALUE, label: '拒绝' },
+  { value: DENY_WITH_REASON_VALUE, label: '给出理由并拒绝' },
 ]
 
 const EXIT_PLAN_OPTIONS = [
   { value: ALLOW_VALUE, label: '确认' },
   { value: DENY_VALUE, label: '拒绝' },
+  { value: DENY_WITH_REASON_VALUE, label: '给出理由并拒绝' },
 ]
 
 type Props = {
   toolName: string
   input: unknown
   mode: 'active' | 'historical'
-  /** 历史态下的结果 */
-  answered?: { allow: boolean }
+  /** 历史态下的结果;reason 仅 deny 且用户填了理由时有值,用于历史卡片回显 */
+  answered?: { allow: boolean; reason?: string }
   onAllow?: () => void
   onDeny?: (reason?: string) => void
   /** ExitPlanMode 专属：显示"计划已生成"样式 */
@@ -67,12 +71,11 @@ export const ToolPermissionCard: FC<Props> = ({
   }, [selection, onChangeHeight])
 
   const handleSubmit = () => {
-    if (!selection) return
-    if (selection === ALLOW_VALUE) {
-      onAllow?.()
-    } else {
-      onDeny?.(denyReason.trim() || undefined)
-    }
+    match(selection)
+      .with(ALLOW_VALUE, () => onAllow?.())
+      .with(DENY_WITH_REASON_VALUE, () => onDeny?.(denyReason.trim() || undefined))
+      .with(DENY_VALUE, () => onDeny?.())
+      .otherwise(() => {})
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -82,7 +85,12 @@ export const ToolPermissionCard: FC<Props> = ({
   }
 
   const options = isExitPlan ? EXIT_PLAN_OPTIONS : ALLOW_DENY_OPTIONS
-  const historicalValue = answered ? (answered.allow ? ALLOW_VALUE : DENY_VALUE) : undefined
+  // 历史态 deny 且有非空理由 → 定位到"给出理由并拒绝",触发只读输入框回显 reason
+  const historicalValue = match(answered)
+    .with(P.nullish, () => undefined)
+    .with({ allow: true }, () => ALLOW_VALUE)
+    .with({ allow: false, reason: P.string.minLength(1) }, () => DENY_WITH_REASON_VALUE)
+    .otherwise(() => DENY_VALUE)
 
   return (
     <div
@@ -140,7 +148,7 @@ export const ToolPermissionCard: FC<Props> = ({
         options={options}
         inputTriggerValue={DENY_VALUE}
         value={isActive ? selection : historicalValue}
-        inputValue={isActive ? denyReason : undefined}
+        inputValue={isActive ? denyReason : answered?.reason}
         disabled={!isActive}
         inputPlaceholder={'输入拒绝原因...'}
         onChange={setSelection}
