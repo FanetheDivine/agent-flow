@@ -128,7 +128,7 @@ export const AgentEditor: FC = () => {
           output_name: o.output_name,
           output_desc: o.output_desc,
           next_agent: o.next_agent,
-          require_confirm: o.require_confirm ?? false,
+          require_confirm: o.require_confirm,
         })),
       }
       form.setFieldsValue(newFormValue)
