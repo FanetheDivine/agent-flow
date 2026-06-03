@@ -8,14 +8,8 @@ const ALLOW_VALUE = 'allow'
 const DENY_VALUE = 'deny'
 const DENY_WITH_REASON_VALUE = 'deny-with-reason'
 
-const ALLOW_DENY_OPTIONS = [
+const OPTIONS = [
   { value: ALLOW_VALUE, label: '允许' },
-  { value: DENY_VALUE, label: '拒绝' },
-  { value: DENY_WITH_REASON_VALUE, label: '给出理由并拒绝' },
-]
-
-const EXIT_PLAN_OPTIONS = [
-  { value: ALLOW_VALUE, label: '确认' },
   { value: DENY_VALUE, label: '拒绝' },
   { value: DENY_WITH_REASON_VALUE, label: '给出理由并拒绝' },
 ]
@@ -78,13 +72,22 @@ export const ToolPermissionCard: FC<Props> = ({
       .otherwise(() => {})
   }
 
+  // 点"允许"/"拒绝"无需额外输入,立即提交;"给出理由并拒绝"需先输入理由,仍走发送/Enter
+  const handleSelectionChange = (value: string) => {
+    setSelection(value)
+    match(value)
+      .with(ALLOW_VALUE, () => onAllow?.())
+      .with(DENY_VALUE, () => onDeny?.())
+      .otherwise(() => {})
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
     e.preventDefault()
     if (selection) handleSubmit()
   }
 
-  const options = isExitPlan ? EXIT_PLAN_OPTIONS : ALLOW_DENY_OPTIONS
+  const options = OPTIONS
   // 历史态 deny 且有非空理由 → 定位到"给出理由并拒绝",触发只读输入框回显 reason
   const historicalValue = match(answered)
     .with(P.nullish, () => undefined)
@@ -146,12 +149,12 @@ export const ToolPermissionCard: FC<Props> = ({
 
       <RadioWithInput
         options={options}
-        inputTriggerValue={DENY_VALUE}
+        inputTriggerValue={DENY_WITH_REASON_VALUE}
         value={isActive ? selection : historicalValue}
         inputValue={isActive ? denyReason : answered?.reason}
         disabled={!isActive}
-        inputPlaceholder={'输入拒绝原因...'}
-        onChange={setSelection}
+        inputPlaceholder={'输入原因...'}
+        onChange={handleSelectionChange}
         onInputChange={setDenyReason}
         onInputKeyDown={handleKeyDown}
       />
