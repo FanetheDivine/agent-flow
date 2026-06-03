@@ -1,3 +1,4 @@
+import * as path from 'path'
 import { forkSession, getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
@@ -409,9 +410,11 @@ export function activate(context: vscode.ExtensionContext) {
         .with({ type: 'openFile' }, async ({ data }) => {
           const { filename, line, placement } = data
           const folders = vscode.workspace.workspaceFolders
-          if (!folders?.length) return
+          if (!path.isAbsolute(filename) && !folders?.length) return
           try {
-            const uri = vscode.Uri.joinPath(folders[0].uri, filename)
+            const uri = path.isAbsolute(filename)
+              ? vscode.Uri.file(filename)
+              : vscode.Uri.joinPath(folders![0].uri, filename)
             const doc = await vscode.workspace.openTextDocument(uri)
             const editor = await vscode.window.showTextDocument(
               doc,
