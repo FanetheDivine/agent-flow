@@ -15,8 +15,10 @@ import {
 } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
+import { postMessageToExtension } from '@/webview/utils'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { MessageList, type MessageListRef } from './MessageList'
+import { ToolPermissionCard } from './ToolPermissionCard'
 
 // 模块级常量 —— useMemo 在「无 pending」时返回稳定空数组,避免新引用触发上层 effect。
 const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
@@ -87,6 +89,14 @@ export const ChatPanel: FC<Props> = ({
   // 底部固定 AskUserQuestionCard 只取 AskUserQuestion 类型的挂起项
   const pendingQuestions = useMemo(
     () => pendingToolPerms.filter((p) => p.toolName.includes('AskUserQuestion')),
+    [pendingToolPerms],
+  )
+  // 底部固定工具权限卡片：排除 AskUserQuestion 与 CompleteTask（后者有专属确认卡片）
+  const pendingPermCards = useMemo(
+    () =>
+      pendingToolPerms.filter(
+        (p) => !p.toolName.includes('AskUserQuestion') && !p.toolName.includes('CompleteTask'),
+      ),
     [pendingToolPerms],
   )
   const allRuns = useFlowStore((s) => s.flowRunStates[flowId]?.runs)
@@ -168,6 +178,10 @@ export const ChatPanel: FC<Props> = ({
   const [cardHeight, setCardHeight] = useState(240)
   const [dragging, setDragging] = useState(false)
 
+  // 工具权限卡片容器高度
+  const [permCardHeight, setPermCardHeight] = useState(240)
+  const [permDragging, setPermDragging] = useState(false)
+
   // 合并所有 pending questions 的 questions 数组到一张卡片
   const mergedInput = useMemo(() => {
     if (pendingQuestions.length === 0)
@@ -230,6 +244,24 @@ export const ChatPanel: FC<Props> = ({
       },
     }),
     [scrollToBottom],
+  )
+
+  const onViewPlan = useCallback((planFilePath: string) => {
+    postMessageToExtension({ type: 'openFile', data: { filename: planFilePath, placement: 'active' } })
+  }, [])
+
+  const onPermAllow = useCallback(
+    (perm: PendingToolPermission) => {
+      answerToolPermission(flowId, perm.runId, perm.toolUseId, true)
+    },
+    [answerToolPermission, flowId],
+  )
+
+  const onPermDeny = useCallback(
+    (perm: PendingToolPermission, reason?: string) => {
+      answerToolPermission(flowId, perm.runId, perm.toolUseId, false, reason ? { message: reason } : undefined)
+    },
+    [answerToolPermission, flowId],
   )
 
   // awaiting-tool-permission 标签按本视图首个 pending 的 toolName 分流(.includes)
@@ -382,6 +414,55 @@ export const ChatPanel: FC<Props> = ({
             </div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* 工具权限卡片 — 固定在底部；ExitPlanMode / must_confirm 类挂起时展示 */}
+      <AnimatePresence>
+        {pendingPermCards.length > 0 && (() => {
+          const perm = pendingPermCards[0]
+          const isExitPlan = perm.toolName.includes('ExitPlanMode')
+          const planFilePath = isExitPlan ? ((perm.input as { planFilePath?: string })?.planFilePath ?? '') : ''
+          return (
+            <motion.div
+              key={`perm-card-${perm.toolUseId}`}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: permCardHeight, opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={
+                permDragging ? { duration: 0 } : { type: 'spring', damping: 24, stiffness: 240 }
+              }
+              className='flex shrink-0 flex-col overflow-hidden border-t border-[#45475a]'
+            >
+              <motion.div
+                drag='y'
+                dragMomentum={false}
+                dragElastic={0}
+                dragConstraints={{ top: 0, bottom: 0 }}
+                onDragStart={() => setPermDragging(true)}
+                onDrag={(_, info) => {
+                  setPermCardHeight((h) => Math.max(80, Math.min(600, h - info.delta.y)))
+                }}
+                onDragEnd={() => setPermDragging(false)}
+                whileHover={{ backgroundColor: '#585b70' }}
+                whileDrag={{ backgroundColor: '#74758a' }}
+                className='flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-[#313244]'
+              >
+                <div className='h-0.5 w-8 rounded-full bg-[#6c7086]' />
+              </motion.div>
+              <div className='relative flex-1 overflow-auto px-3 py-2'>
+                <ToolPermissionCard
+                  toolName={perm.toolName}
+                  input={perm.input}
+                  mode='active'
+                  onAllow={() => onPermAllow(perm)}
+                  onDeny={(reason) => onPermDeny(perm, reason)}
+                  exitPlan={isExitPlan ? { planFilePath, onViewPlan: () => onViewPlan(planFilePath) } : undefined}
+                  onChangeHeight={(h) => setPermCardHeight(Math.max(80, Math.min(600, h)))}
+                />
+              </div>
+            </motion.div>
+          )
+        })()}
       </AnimatePresence>
     </div>
   )

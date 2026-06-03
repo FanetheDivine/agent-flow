@@ -1,6 +1,20 @@
-import { type FC } from 'react'
+import { useLayoutEffect, useRef, useState, type FC } from 'react'
 import { Button, Tag } from 'antd'
-import { CheckOutlined, CloseOutlined, SafetyOutlined, StopOutlined } from '@ant-design/icons'
+import { CheckOutlined, SafetyOutlined, StopOutlined } from '@ant-design/icons'
+import { RadioWithInput } from './RadioWithInput'
+
+const ALLOW_VALUE = 'allow'
+const DENY_VALUE = 'deny'
+
+const ALLOW_DENY_OPTIONS = [
+  { value: ALLOW_VALUE, label: '允许', description: '允许此工具调用' },
+  { value: DENY_VALUE, label: '拒绝', description: '拒绝此工具调用' },
+]
+
+const EXIT_PLAN_OPTIONS = [
+  { value: ALLOW_VALUE, label: '确认', description: '确认执行此计划' },
+  { value: DENY_VALUE, label: '放弃', description: '放弃此计划' },
+]
 
 type Props = {
   toolName: string
@@ -9,12 +23,13 @@ type Props = {
   /** 历史态下的结果 */
   answered?: { allow: boolean }
   onAllow?: () => void
-  onDeny?: () => void
+  onDeny?: (reason?: string) => void
   /** ExitPlanMode 专属：显示"计划已生成"样式 */
   exitPlan?: {
     planFilePath: string
     onViewPlan?: () => void
   }
+  onChangeHeight?: (height: number) => void
 }
 
 function formatInput(input: unknown): string {
@@ -33,15 +48,50 @@ export const ToolPermissionCard: FC<Props> = ({
   onAllow,
   onDeny,
   exitPlan,
+  onChangeHeight,
 }) => {
   const isActive = mode === 'active'
   const isExitPlan = !!exitPlan
+  const [selection, setSelection] = useState<string | undefined>(undefined)
+  const [denyReason, setDenyReason] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!onChangeHeight) return
+    const raf = requestAnimationFrame(() => {
+      if (containerRef.current) {
+        onChangeHeight(containerRef.current.getBoundingClientRect().height + 90)
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [selection, onChangeHeight])
+
+  const handleSubmit = () => {
+    if (!selection) return
+    if (selection === ALLOW_VALUE) {
+      onAllow?.()
+    } else {
+      onDeny?.(denyReason.trim() || undefined)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+    e.preventDefault()
+    if (selection) handleSubmit()
+  }
+
+  const options = isExitPlan ? EXIT_PLAN_OPTIONS : ALLOW_DENY_OPTIONS
+  const historicalValue = answered ? (answered.allow ? ALLOW_VALUE : DENY_VALUE) : undefined
 
   return (
-    <div className='flex flex-col gap-2 rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'>
+    <div
+      ref={containerRef}
+      className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'
+    >
       <div className='flex items-center gap-2'>
         <SafetyOutlined className='text-[#f9e2af]' />
-        <span className='text-[11px] font-semibold text-[#cdd6f4]'>
+        <span className='text-xs font-semibold text-[#cdd6f4]'>
           {isExitPlan ? '计划已生成' : '请求使用工具'}
         </span>
         {!isExitPlan && (
@@ -73,7 +123,7 @@ export const ToolPermissionCard: FC<Props> = ({
             href='#'
             onClick={(e) => {
               e.preventDefault()
-              exitPlan?.onViewPlan?.()
+              exitPlan.onViewPlan?.()
             }}
             className='text-[#89b4fa] hover:underline'
           >
@@ -86,13 +136,22 @@ export const ToolPermissionCard: FC<Props> = ({
         </pre>
       )}
 
+      <RadioWithInput
+        options={options}
+        inputTriggerValue={DENY_VALUE}
+        value={isActive ? selection : historicalValue}
+        inputValue={isActive ? denyReason : undefined}
+        disabled={!isActive}
+        inputPlaceholder={isExitPlan ? '输入放弃原因...' : '输入拒绝原因...'}
+        onChange={setSelection}
+        onInputChange={setDenyReason}
+        onInputKeyDown={handleKeyDown}
+      />
+
       {isActive && (
-        <div className='flex justify-end gap-2'>
-          <Button size='small' icon={<CloseOutlined />} onClick={onDeny}>
-            {isExitPlan ? '放弃' : '拒绝'}
-          </Button>
-          <Button type='primary' size='small' icon={<CheckOutlined />} onClick={onAllow}>
-            {isExitPlan ? '确认' : '允许'}
+        <div className='flex justify-end'>
+          <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
+            发送
           </Button>
         </div>
       )}

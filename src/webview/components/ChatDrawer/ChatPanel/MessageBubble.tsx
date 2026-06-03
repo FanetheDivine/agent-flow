@@ -552,8 +552,9 @@ function renderItemToBubble(
         return toolUseItem
       }
 
-      // ExitPlanMode：复用 ToolPermissionCard 但展示"计划已生成"样式（=== 改 .includes 修复 latent bug）
+      // ExitPlanMode：pending 时移至底部卡片；历史态仍内联展示
       if (item.toolName.includes('ExitPlanMode')) {
+        if (isPending) return null
         const planFilePath = (item.input as { planFilePath?: string })?.planFilePath ?? ''
         return {
           key: item.key + '-exit-plan',
@@ -562,10 +563,8 @@ function renderItemToBubble(
             <ToolPermissionCard
               toolName='ExitPlanMode'
               input={item.input}
-              mode={isPending ? 'active' : 'historical'}
+              mode='historical'
               answered={answered ? { allow: answered.allow } : undefined}
-              onAllow={() => ctx!.onToolPermissionAllow?.(item.toolUseId)}
-              onDeny={() => ctx!.onToolPermissionDeny?.(item.toolUseId)}
               exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
             />
           ),
@@ -574,6 +573,8 @@ function renderItemToBubble(
 
       // 通用工具权限(must_confirm 等)：pending 显示授权卡片;answered 显示历史授权卡片 + 工具详情;
       // 未触发权限(普通工具)只显示工具详情。
+      // 通用工具权限(must_confirm 等)：pending 时移至底部卡片；历史态内联展示授权结果 + 工具详情
+      if (isPending) return null
       const permItem: RenderedBubble = {
         key: item.key + '-perm',
         role: 'system',
@@ -581,10 +582,8 @@ function renderItemToBubble(
           <ToolPermissionCard
             toolName={item.toolName}
             input={item.input}
-            mode={isPending ? 'active' : 'historical'}
+            mode='historical'
             answered={answered ? { allow: answered.allow } : undefined}
-            onAllow={() => ctx!.onToolPermissionAllow?.(item.toolUseId)}
-            onDeny={() => ctx!.onToolPermissionDeny?.(item.toolUseId)}
           />
         ),
       }
@@ -595,7 +594,6 @@ function renderItemToBubble(
           <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
         ),
       }
-      if (isPending) return permItem
       if (answered) return [permItem, toolUseItem]
       return toolUseItem
     }
