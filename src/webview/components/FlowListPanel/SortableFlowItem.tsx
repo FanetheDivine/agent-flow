@@ -23,7 +23,7 @@ const PHASE_CONFIG: Record<
 
 function getToolPermLabel(toolName: string | undefined): string {
   if (toolName?.includes('AskUserQuestion')) return '需要回答'
-  if (toolName?.includes('CompleteTask')) return '等待确认'
+  if (toolName?.includes('CompleteTask')) return '任务完成，等待确认'
   if (toolName?.includes('ExitPlanMode')) return '计划等待确认'
   return '请求授权'
 }
@@ -57,7 +57,10 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
   const statusConfig =
     phase && phase !== 'idle'
       ? phase === 'awaiting-tool-permission'
-        ? { ...PHASE_CONFIG['awaiting-tool-permission'], label: getToolPermLabel(firstPendingToolName) }
+        ? {
+            ...PHASE_CONFIG['awaiting-tool-permission'],
+            label: getToolPermLabel(firstPendingToolName),
+          }
         : PHASE_CONFIG[phase]
       : undefined
 
