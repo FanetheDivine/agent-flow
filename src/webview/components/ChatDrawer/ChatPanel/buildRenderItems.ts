@@ -14,7 +14,8 @@ export type ToolResult = { isError: boolean; text: string }
 /**
  * fork icon 显隐相关字段：
  * - `messageUuid` 是 fork 切片的 SDK 消息 UUID（user 用上一条 SDK 消息的 uuid;
- *   text/thinking 用所属 assistant 消息的 uuid;turn_end 用本回合最后一条带 uuid
+ *   text/thinking 用所属 assistant 消息的 uuid;tool_use 同样回退到所属 assistant
+ *   消息的 uuid —— tool_use 本身不能作 fork 终点;turn_end 用本回合最后一条带 uuid
  *   的 SDK 消息 uuid —— 因为 SDK 不把 result 写进 transcript,result.uuid 在
  *   forkSession 里查不到）；缺失时 UI 不显示 fork icon
  */
@@ -46,6 +47,8 @@ export type RenderItem =
       toolName: string
       input: unknown
       result?: ToolResult
+      /** 所属 SDKAssistantMessage 的 uuid —— tool_use 不能作 fork 终点,fork 回退到此 */
+      messageUuid?: string
     }
   | {
       kind: 'ask_user_question'
@@ -427,13 +430,15 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
       }
       blocks.forEach((block, bIdx: number) => {
         const key = `${mIdx}-${bIdx}`
+        // messageUuid 仅挂最后一个 block —— 同一条 assistant 消息只在该 block 显示 fork icon
+        const blockMessageUuid = bIdx === blocks.length - 1 ? messageUuid : undefined
         if (block.type === 'text' && typeof block.text === 'string') {
           items.push({
             kind: 'text',
             key,
             text: block.text,
             streaming: false,
-            messageUuid,
+            messageUuid: blockMessageUuid,
           })
           return
         }
@@ -443,7 +448,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             key,
             text: block.thinking,
             streaming: false,
-            messageUuid,
+            messageUuid: blockMessageUuid,
           })
           return
         }
@@ -460,7 +465,14 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
           ) {
             // 创建 render item 让 MessageBubble 可挂 CompleteTaskConfirmCard；
             // pendingCompleteTaskId 非空时 user 消息放行以便处理 tool_result（拒绝 vs 接受）。
-            items.push({ kind: 'tool_use', key, toolUseId: block.id, toolName, input: block.input })
+            items.push({
+              kind: 'tool_use',
+              key,
+              toolUseId: block.id,
+              toolName,
+              input: block.input,
+              messageUuid: blockMessageUuid,
+            })
             pendingTooluse[block.id] = items.length - 1
             return
           }
@@ -477,6 +489,7 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
             toolUseId: block.id,
             toolName,
             input: block.input,
+            messageUuid: blockMessageUuid,
           })
           pendingTooluse[block.id] = items.length - 1
           return

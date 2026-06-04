@@ -562,20 +562,31 @@ function renderItemToBubble(
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[item.toolUseId]
 
+      // tool_use 不能作 fork 终点,messageUuid 回退到所属 assistant 消息的 uuid(同 text/thinking)。
+      // 与其它分支一致:runId && messageUuid 都存在才渲染 fork icon。
+      const fork =
+        runId && item.messageUuid
+          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          : undefined
+
       // CompleteTask：完成前确认。pending 时在工具详情下方挂确认卡片;历史只显示工具详情
       // (成功完成由 agent_complete 卡片体现,拒绝则带 isError result)。
       if (item.toolName.includes('CompleteTask')) {
         const completeInput = item.input as Record<string, any> | undefined
+        // CompleteTask 仅在被拒绝(带 isError result)时可作 fork 起点;成功完成 / pending 不挂 fork。
+        const completeFork = item.result?.isError ? fork : undefined
         const toolUseItem: RenderedBubble = {
           key: item.key,
           role: 'ai',
           content: (
-            <ToolUseDetails
-              toolName={item.toolName}
-              input={item.input}
-              result={item.result}
-              treatNoResultAsSuccess={sessionCompleted}
-            />
+            <Copyable text={item.result?.text ?? ''} extra={completeFork}>
+              <ToolUseDetails
+                toolName={item.toolName}
+                input={item.input}
+                result={item.result}
+                treatNoResultAsSuccess={sessionCompleted}
+              />
+            </Copyable>
           ),
         }
         if (isPending && ctx) {
@@ -642,7 +653,9 @@ function renderItemToBubble(
         key: item.key,
         role: 'ai',
         content: (
-          <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
+          <Copyable text={item.result?.text ?? ''} extra={fork}>
+            <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
+          </Copyable>
         ),
       }
       if (answered) return [permItem, toolUseItem]
