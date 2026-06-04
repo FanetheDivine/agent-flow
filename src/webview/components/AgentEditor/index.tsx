@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import type { FC } from 'react'
 import {
   Drawer,
@@ -9,7 +9,6 @@ import {
   AutoComplete,
   Button,
   Flex,
-  App,
   Checkbox,
   Tooltip,
 } from 'antd'
@@ -23,6 +22,7 @@ import {
 import type { Agent, Code } from '@/common'
 import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, MODELS, buildAgentSystemPrompt } from '@/common'
 import { useFlowStore } from '@/webview/store/flow'
+import { useSilentTaskModeNotification } from '@/webview/hooks/useSilentTaskModeNotification'
 import { cn } from '@/webview/utils'
 import { CodeEditor } from '../CodeEditor'
 import { Md } from '../text-components'
@@ -44,7 +44,6 @@ const TOOL_OPTIONS = [
 ]
 
 export const AgentEditor: FC = () => {
-  const { modal } = App.useApp()
   const editingAgent = useFlowStore((s) => s.editingAgent)
   const flows = useFlowStore((s) => s.flows)
   const save = useFlowStore((s) => s.save)
@@ -65,8 +64,7 @@ export const AgentEditor: FC = () => {
   const [form] = Form.useForm()
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('preview')
 
-  // 首次切到 silent_task 时弹一次警告;Agent 本身已是静默模式则不再提示
-  const silentWarnedRef = useRef(false)
+  const notifySilentMode = useSilentTaskModeNotification()
 
   const watchedValues = Form.useWatch([], form)
 
@@ -74,7 +72,6 @@ export const AgentEditor: FC = () => {
     if (open && agent) {
       form.resetFields()
       form.setFieldsValue(agent)
-      silentWarnedRef.current = agent.node_type !== 'code' && agent.work_mode === 'silent_task'
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewMode('preview')
@@ -126,17 +123,8 @@ export const AgentEditor: FC = () => {
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
         onValuesChange={(changed: Partial<AgentFormValue>) => {
-          if (
-            'work_mode' in changed &&
-            changed.work_mode === 'silent_task' &&
-            !silentWarnedRef.current
-          ) {
-            silentWarnedRef.current = true
-            modal.warning({
-              title: '谨慎使用静默模式',
-              content:
-                '静默模式下，AI提问、计划生成与结束生成时会被自动应答，直到 Agent 自行完成任务。请谨慎选择模型、effort，并确保输入和提示词的完整。',
-            })
+          if ('work_mode' in changed && changed.work_mode === 'silent_task') {
+            notifySilentMode()
           }
         }}
         onFinish={(val: AgentFormValue) => {

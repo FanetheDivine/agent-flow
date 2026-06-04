@@ -15,6 +15,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { match } from 'ts-pattern'
 import { type Agent, type Code, MODELS } from '@/common'
 import { useStartFlow } from '@/webview/hooks/useStartFlow'
+import { useSilentTaskModeNotification } from '@/webview/hooks/useSilentTaskModeNotification'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { CopyButton } from '../../text-components'
@@ -34,6 +35,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
   const flow = useFlowStore((s) => s.flows.find((f) => f.id === flowId))
   const agent: Agent | Code | undefined = flow?.agents?.find((a) => a.id === agentId)
   const startFlow = useStartFlow()
+  const notifySilentMode = useSilentTaskModeNotification()
 
   // 用户当前关注的 agent —— runs 末位 agent。
   // completed 且已流转到下一个 agent 时,reducer 已立刻把新 run 追加到末位,
@@ -239,6 +241,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                           if (!a || a.node_type !== 'agent') return
                           if (a.work_mode === 'task') {
                             a.work_mode = 'silent_task'
+                            notifySilentMode()
                           } else if (a.work_mode === 'silent_task') {
                             a.work_mode = 'task'
                           }
