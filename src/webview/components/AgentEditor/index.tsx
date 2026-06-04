@@ -397,6 +397,7 @@ export const AgentEditor: FC = () => {
                             {...restField}
                             name={[name, 'require_confirm']}
                             valuePropName='checked'
+                            hidden={agent?.node_type === 'code'}
                             noStyle
                           >
                             <Checkbox>
