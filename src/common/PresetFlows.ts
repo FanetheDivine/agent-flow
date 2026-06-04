@@ -222,6 +222,7 @@ export const PresetFlows: Flow[] = [
           '### 执行步骤',
           '#### 1. 转化JSON',
           '根据tasks的语义，生成JSON字符串数组。数组中的每一项与子任务一一对应。',
+          '**保留task的完整内容，禁止修改，禁止执行。**',
           '#### 2. 完成任务',
           '调用 mcp__AgentControllerMcp__CompleteTask，content为子任务列表JSON。注意，content必须是**合法的JSON字符串**，必须是**字符串数组**。',
         ].join('\n'),
