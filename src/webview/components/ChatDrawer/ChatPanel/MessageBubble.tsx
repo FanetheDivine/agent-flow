@@ -6,7 +6,7 @@ import type { ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
-import { Copyable, Md } from '../../text-components'
+import { CopyButton, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 import { ToolUseDetails } from './ToolUseDetails'
@@ -16,6 +16,7 @@ import {
   clearBuildCacheForRuns,
   getContextUsage,
   type RenderItem,
+  type ToolResult,
 } from './buildRenderItems'
 
 type Props = {
@@ -271,7 +272,7 @@ function ContextUsageBar({ used, total }: { used: number; total: number }) {
   )
 }
 
-/** fork 触发按钮 —— inline 元素,作为 Copyable.extra 与 CopyButton 同列垂直堆叠 */
+/** fork 触发按钮 */
 function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   return (
     <Tooltip title='从此处 fork 出新工作流'>
@@ -283,6 +284,77 @@ function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
         className='text-xs text-[#6c7086] transition-colors hover:text-[#cdd6f4]'
       />
     </Tooltip>
+  )
+}
+
+/** 思考块气泡内容 —— 收起时 fork+CopyButton 横向排列，展开时保持原有竖排列 */
+const ThinkingContent: FC<{ text: string; itemKey: string; fork?: ReactNode }> = ({
+  text,
+  itemKey,
+  fork,
+}) => {
+  const [expanded, setExpanded] = useState(false)
+  const think = (
+    <Think title='思考中' key={itemKey} expanded={expanded} onExpand={setExpanded}>
+      <Md content={text} />
+    </Think>
+  )
+  if (expanded) {
+    return (
+      <div className='flex'>
+        {think}
+        <div className='ml-1 flex flex-col items-center gap-1'>
+          {fork}
+          <CopyButton text={text} />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className='flex items-center gap-1'>
+      {think}
+      {fork}
+      <CopyButton text={text} />
+    </div>
+  )
+}
+
+/** 工具调用气泡内容 —— 收起时 fork+CopyButton 横向排列，展开时保持原有竖排列 */
+const ToolUseBubbleContent: FC<{
+  toolName: string
+  input: unknown
+  result?: ToolResult
+  treatNoResultAsSuccess?: boolean
+  copyText: string
+  fork?: ReactNode
+}> = ({ toolName, input, result, treatNoResultAsSuccess, copyText, fork }) => {
+  const [expanded, setExpanded] = useState(false)
+  const details = (
+    <ToolUseDetails
+      toolName={toolName}
+      input={input}
+      result={result}
+      treatNoResultAsSuccess={treatNoResultAsSuccess}
+      onOpenChange={setExpanded}
+    />
+  )
+  if (expanded) {
+    return (
+      <div className='flex'>
+        {details}
+        <div className='ml-1 flex flex-col items-center gap-1'>
+          {fork}
+          <CopyButton text={copyText} />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className='flex items-center gap-1'>
+      {details}
+      {fork}
+      <CopyButton text={copyText} />
+    </div>
   )
 }
 
@@ -446,8 +518,7 @@ function renderItemToBubble(
   injectedTitle = '注入数据',
 ): RenderedBubble | RenderedBubble[] | null {
   /**
-   * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素,作为 Copyable.extra 注入。
-   * fork icon 与 CopyButton 同列垂直堆叠（见 Copyable 组件实现）,不再用 absolute 定位。
+   * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素。
    */
   const buildForkIcon = (target: {
     kind: 'message'
@@ -474,14 +545,18 @@ function renderItemToBubble(
         key: item.key,
         role: 'user',
         content: (
-          <Copyable text={copyText} extra={fork}>
+          <div className='flex'>
             <div className='flex flex-col gap-1'>
               {node}
               {hasInjected && (
                 <InjectedShareValuesSection values={injectedShareValues} title={injectedTitle} />
               )}
             </div>
-          </Copyable>
+            <div className='ml-1 flex flex-col items-center gap-1'>
+              {fork}
+              <CopyButton text={copyText} />
+            </div>
+          </div>
         ),
       }
     }
@@ -498,24 +573,27 @@ function renderItemToBubble(
         key: item.key,
         role: 'ai',
         content: (
-          <Copyable text={item.text} extra={fork}>
+          <div className='flex'>
             {md}
-          </Copyable>
+            <div className='ml-1 flex flex-col items-center gap-1'>
+              {fork}
+              <CopyButton text={item.text} />
+            </div>
+          </div>
         ),
       }
     }
     case 'thinking': {
-      const inner = (
-        <Think
-          title='思考中'
-          key={item.key + (item.streaming ? 'streaming' : 'completed')}
-          defaultExpanded={item.streaming}
-        >
-          <Md content={item.text} />
-        </Think>
-      )
       if (item.streaming) {
-        return { key: item.key, role: 'ai', content: inner }
+        return {
+          key: item.key,
+          role: 'ai',
+          content: (
+            <Think title='思考中' key={item.key + 'streaming'} defaultExpanded>
+              <Md content={item.text} />
+            </Think>
+          ),
+        }
       }
       // 与 user 对齐:只要 messageUuid 存在即放行 fork。同 text 分支说明。
       const fork =
@@ -525,11 +603,7 @@ function renderItemToBubble(
       return {
         key: item.key,
         role: 'ai',
-        content: (
-          <Copyable text={item.text} extra={fork}>
-            {inner}
-          </Copyable>
-        ),
+        content: <ThinkingContent text={item.text} itemKey={item.key} fork={fork} />,
       }
     }
     case 'ask_user_question': {
@@ -579,14 +653,14 @@ function renderItemToBubble(
           key: item.key,
           role: 'ai',
           content: (
-            <Copyable text={item.result?.text ?? ''} extra={completeFork}>
-              <ToolUseDetails
-                toolName={item.toolName}
-                input={item.input}
-                result={item.result}
-                treatNoResultAsSuccess={sessionCompleted}
-              />
-            </Copyable>
+            <ToolUseBubbleContent
+              toolName={item.toolName}
+              input={item.input}
+              result={item.result}
+              treatNoResultAsSuccess={sessionCompleted}
+              copyText={item.result?.text ?? ''}
+              fork={completeFork}
+            />
           ),
         }
         if (isPending && ctx) {
@@ -653,9 +727,13 @@ function renderItemToBubble(
         key: item.key,
         role: 'ai',
         content: (
-          <Copyable text={item.result?.text ?? ''} extra={fork}>
-            <ToolUseDetails toolName={item.toolName} input={item.input} result={item.result} />
-          </Copyable>
+          <ToolUseBubbleContent
+            toolName={item.toolName}
+            input={item.input}
+            result={item.result}
+            copyText={item.result?.text ?? ''}
+            fork={fork}
+          />
         ),
       }
       if (answered) return [permItem, toolUseItem]
@@ -705,7 +783,7 @@ function renderItemToBubble(
         key: item.key,
         role: 'ai',
         content: (
-          <Copyable text={completionText}>
+          <div className='flex'>
             <div>
               <CompleteTaskBody
                 outputName={item.outputName}
@@ -734,7 +812,10 @@ function renderItemToBubble(
                 </div>
               )}
             </div>
-          </Copyable>
+            <div className='ml-1 flex flex-col items-center gap-1'>
+              <CopyButton text={completionText} />
+            </div>
+          </div>
         ),
       }
     }

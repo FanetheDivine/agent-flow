@@ -338,6 +338,7 @@ type Props = {
   result?: ToolResult
   /** 无 result 时是否视为成功 —— 仅 CompleteTask 用 */
   treatNoResultAsSuccess?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 export const ToolUseDetails: FC<Props> = ({
@@ -345,6 +346,7 @@ export const ToolUseDetails: FC<Props> = ({
   input,
   result,
   treatNoResultAsSuccess = false,
+  onOpenChange,
 }) => {
   const { server, name } = parseToolName(toolName)
   const category = getToolCategory(toolName)
@@ -361,7 +363,10 @@ export const ToolUseDetails: FC<Props> = ({
   const inputBody = renderInputBody(toolName, input)
 
   return (
-    <details className='text-[11px] text-[#a6adc8]'>
+    <details
+      className='text-[11px] text-[#a6adc8]'
+      onToggle={(e) => onOpenChange?.((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className='cursor-pointer list-none [&::-webkit-details-marker]:hidden'>
         <div className='flex items-center gap-1.5 overflow-hidden'>
           <span className='shrink-0'>

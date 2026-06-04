@@ -15,7 +15,7 @@ export const CopyButton: FC<
 > = ({ text, className, style }) => {
   return (
     <Typography.Text
-      className={cn('m-0 p-0', className)}
+      className={cn('m-0 p-0 text-xs', className)}
       style={style}
       copyable={{ tooltips: false, text }}
     />
@@ -119,22 +119,3 @@ export const Md: FC<{ content: string } & Style> = memo(({ content, className, s
     escapeRawHtml
   />
 ))
-
-export const Copyable: FC<{
-  text: string
-  children: ReactNode
-  /**
-   * 与 CopyButton 同列垂直堆叠的额外按钮（如 fork icon）。
-   * 渲染顺序：extra 在 CopyButton 之上,共享同一个 `ml-1` 列容器,
-   * 避免与 absolute 定位的图标互相遮挡。
-   */
-  extra?: ReactNode
-}> = ({ text, children, extra }) => (
-  <div className='flex'>
-    {children}
-    <div className='ml-1 flex flex-col items-center gap-1'>
-      {extra}
-      <CopyButton text={text} />
-    </div>
-  </div>
-)

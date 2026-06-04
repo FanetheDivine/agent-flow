@@ -226,15 +226,19 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                     PLAN
                   </span>
                 </Tooltip>
-                <Tooltip title={agent?.no_output ? '无输出' : '有输出'}>
-                  <LogoutOutlined
-                    className={cn(
-                      'text-[11px] transition-colors',
-                      !agent?.no_output ? 'text-[#f9e2af]' : 'text-[#6c7086] hover:text-[#f9e2af]',
-                    )}
-                    onClick={createToggler('no_output', true)}
-                  />
-                </Tooltip>
+                {agent?.work_mode === 'task' || agent?.work_mode === 'silent_task' ? (
+                  <Tooltip title={agent?.no_output ? '无输出' : '有输出'}>
+                    <LogoutOutlined
+                      className={cn(
+                        'text-[11px] transition-colors',
+                        !agent?.no_output
+                          ? 'text-[#f9e2af]'
+                          : 'text-[#6c7086] hover:text-[#f9e2af]',
+                      )}
+                      onClick={createToggler('no_output', true)}
+                    />
+                  </Tooltip>
+                ) : null}
               </span>
             </>
           )}
