@@ -177,7 +177,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                     defaultValue={agent.model}
                     size='small'
                     style={{ fontSize: 10, width: 100, minWidth: 80 }}
-                    className='!h-[22px] [&_.ant-select-selection-search-input]:!h-[22px] [&_.ant-select-selector]:!h-[22px] [&_.ant-select-selector]:!min-h-[22px]'
+                    className='nodrag nopan !h-[22px] [&_.ant-select-selection-search-input]:!h-[22px] [&_.ant-select-selector]:!h-[22px] [&_.ant-select-selector]:!min-h-[22px]'
                     options={Array.from(MODELS).map((m) => ({ value: m, label: m }))}
                     filterOption={(input, option) =>
                       (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ??
@@ -224,10 +224,10 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
               <span className='ml-auto flex items-center gap-1'>
                 {agent?.work_mode === 'task' || agent?.work_mode === 'silent_task' ? (
                   <Tooltip title={agent?.work_mode === 'task' ? '任务模式' : '静默模式'}>
-                    <BellOutlined
+                    <span
                       className={cn(
-                        'ml-auto text-xs transition-colors',
-                        agent?.work_mode === 'task'
+                        'relative inline-flex cursor-pointer items-center',
+                        agent?.work_mode === 'silent_task'
                           ? 'text-[#f9e2af]'
                           : 'text-[#6c7086] hover:text-[#f9e2af]',
                       )}
@@ -244,7 +244,10 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                           }
                         })
                       }}
-                    />
+                    >
+                      <BellOutlined className={cn('text-xs transition-colors')} />
+                      <span className='absolute top-1/2 left-1/2 h-[0.9px] w-[1.1em] -translate-1/2 rotate-45 rounded bg-[currentColor] transition' />
+                    </span>
                   </Tooltip>
                 ) : null}
                 <Tooltip title={agent?.isolation_mode ? '隔离模式' : '开启隔离模式'}>
@@ -300,7 +303,10 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                       right: -8,
                       cursor: 'pointer',
                       pointerEvents: 'all',
-                      ...(output.require_confirm ? { background: 'red', borderColor: 'red' } : {}),
+                      borderColor: '#6366f1',
+                      ...(output.require_confirm
+                        ? { background: '#d32029', borderColor: '#d32029' }
+                        : {}),
                       ...(agent?.node_type === 'agent' && agent?.no_output
                         ? { background: 'transparent' }
                         : {}),
