@@ -98,12 +98,13 @@ function agentsToNodes(flowId: string, agents: (Agent | Code)[]): AgentNode[] {
   for (const l of links) adj.get(l.source as string)!.push(l.target as string)
 
   // 分类：entry 优先级最高（最左）、exit 最低（最右）、middle 居中；is_entry 优先于出口判定
+  // 出口判定额外条件：若某 output 指向 is_entry 节点，则该节点也被视作出口（回环到入口层）
   const categoryOf = (a: Agent | Code): Category => {
     if (a.is_entry || (inDeg.get(a.id) ?? 0) === 0) return 'entry'
     const outs = a.outputs ?? []
-    // 有 output 且所有 output 都指向存在节点 → 中间；否则（无 output 或任一分支无后继）→ 出口
     const allHaveSuccessor =
-      outs.length > 0 && outs.every((o) => o.next_agent && agentMap.has(o.next_agent))
+      outs.length > 0 &&
+      outs.every((o) => o.next_agent && agentMap.has(o.next_agent) && !agentMap.get(o.next_agent)!.is_entry)
     return allHaveSuccessor ? 'middle' : 'exit'
   }
 
