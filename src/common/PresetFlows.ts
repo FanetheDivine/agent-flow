@@ -173,8 +173,8 @@ export const PresetFlows: Flow[] = [
         effort: 'xhigh',
         agent_desc: '分析用户需求，拆分为有序子任务列表',
         model: 'opus',
-        must_confirm_tools: ['Edit'],
-        deny_tools: ['Bash(git commit)', 'Bash(git merge)', 'Bash(git push)'],
+        must_confirm_tools: ['Bash(git commit)', 'Bash(git merge)', 'Edit'],
+        deny_tools: ['Bash(git push)'],
         work_mode: 'task',
         allowed_read_values_keys: ['requirement', 'remark'],
         allowed_write_values_keys: ['tasks', 'remark', 'requirement'],
@@ -215,6 +215,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'code',
         agent_name: '初始化',
+        no_input: true,
         outputs: [
           {
             output_name: '初始化完成',
@@ -251,6 +252,7 @@ export const PresetFlows: Flow[] = [
         effort: 'high',
         work_mode: 'silent_task',
         no_input: true,
+        no_output: true,
         isolation_mode: true,
         allowed_read_values_keys: ['tasks'],
         allowed_write_values_keys: ['tasks'],
@@ -267,6 +269,7 @@ export const PresetFlows: Flow[] = [
           '### 执行步骤',
           '#### 1. 转化JSON',
           '根据tasks的语义，生成JSON字符串数组。数组中的每一项与子任务一一对应。',
+          '如果没有子任务，可以写入空数组。',
           '**保留task的完整内容，禁止修改，禁止执行，只读。**',
           '#### 2. 完成任务',
           '调用 mcp__AgentControllerMcp__CompleteTask，将子任务列表JSON写入tasks。注意，写入值必须是**合法的JSON字符串**，必须是**字符串数组**。',
