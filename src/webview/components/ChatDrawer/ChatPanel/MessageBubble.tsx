@@ -267,7 +267,7 @@ function ContextUsageBar({ used, total }: { used: number; total: number }) {
 }
 
 /** fork 触发按钮 */
-function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
+export function ForkButton({ onFork }: { onFork: () => void }): ReactNode {
   return (
     <Tooltip title='从此处 fork 出新工作流'>
       <BranchesOutlined
@@ -623,13 +623,15 @@ function renderItemToBubble(
               <AskUserQuestionCard
                 input={item.input as AskUserQuestionInput}
                 mode='historical'
+                fork={fork}
               />
             ),
           }
         }
         // 从 answeredToolPermissions.updatedInput 就地解析历史答案
-        const answersObj = (answered?.updatedInput as { answers?: Record<string, string> } | undefined)
-          ?.answers
+        const answersObj = (
+          answered?.updatedInput as { answers?: Record<string, string> } | undefined
+        )?.answers
         const answeredValues: Record<string, string[]> | undefined = answersObj
           ? Object.fromEntries(
               Object.entries(answersObj).map(([q, a]) => [
@@ -649,6 +651,7 @@ function renderItemToBubble(
               input={item.input as AskUserQuestionInput}
               mode='historical'
               answeredValues={answeredValues}
+              fork={fork}
             />
           ),
         }
@@ -713,6 +716,7 @@ function renderItemToBubble(
               mode='historical'
               answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
               exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
+              fork={fork}
             />
           ),
         }
@@ -731,6 +735,7 @@ function renderItemToBubble(
             input={item.input}
             mode='historical'
             answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
+            fork={fork}
           />
         ),
       }
@@ -743,7 +748,7 @@ function renderItemToBubble(
             input={item.input}
             result={item.result}
             copyText={item.result?.text ?? ''}
-            fork={fork}
+            fork={answered ? undefined : fork}
           />
         ),
       }
