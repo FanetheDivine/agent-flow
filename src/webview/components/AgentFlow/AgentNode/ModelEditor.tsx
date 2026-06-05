@@ -35,6 +35,7 @@ export const ModelEditor: FC<ModelEditorProps> = ({ model, flowId, agentId }) =>
       <AutoComplete
         autoFocus
         defaultOpen
+        allowClear
         defaultValue={model}
         size='small'
         style={{ fontSize: 10, width, minWidth: 80 }}
