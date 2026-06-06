@@ -748,7 +748,7 @@ function renderItemToBubble(
             input={item.input}
             result={item.result}
             copyText={item.result?.text ?? ''}
-            fork={answered ? undefined : fork}
+            fork={fork}
           />
         ),
       }
