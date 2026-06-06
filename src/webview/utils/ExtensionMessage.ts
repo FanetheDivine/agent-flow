@@ -1,4 +1,8 @@
-import type { ExtensionToWebviewMessage, ExtensionFromWebviewMessage } from '@/common'
+import type {
+  ExtensionToWebviewMessage,
+  ExtensionFromWebviewMessage,
+  ExtensionToWebviewSingleMessage,
+} from '@/common'
 
 // ── vscode api ────────────────────────────────────────────────────────
 
@@ -26,10 +30,15 @@ export function postMessageToExtension(msg: ExtensionFromWebviewMessage): void {
  * @returns 取消订阅的函数
  */
 export function subscribeExtensionMessage(
-  handler: (msg: ExtensionToWebviewMessage) => void,
+  handler: (msg: ExtensionToWebviewSingleMessage) => void,
 ): () => void {
   const listener = (e: MessageEvent) => {
-    handler(e.data as ExtensionToWebviewMessage)
+    const msg = e.data as ExtensionToWebviewMessage
+    if (msg.type === 'batchMessages') {
+      msg.data.forEach(handler)
+    } else {
+      handler(msg)
+    }
   }
   window.addEventListener('message', listener)
   return () => window.removeEventListener('message', listener)

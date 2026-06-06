@@ -1,4 +1,5 @@
 import { forkSession, getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
+import { throttle } from 'lodash-es'
 import * as path from 'path'
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
@@ -78,13 +79,8 @@ export function activate(context: vscode.ExtensionContext) {
   let currentPanel: vscode.WebviewPanel | undefined
   /** webview 是否已就绪：以收到 load command 为准。dispose 时重置为 false */
   let webviewReady = false
-  /** webview 未就绪时排队的指令型消息（load / insertSelection / focusFlow 等需要 UI 响应的） */
-  const pendingMessages: ExtensionToWebviewMessage[] = []
-  /**
-   * panel 存在但不可见时缓冲的 signal 消息（已 applySignal 过镜像）。
-   * panel 变可见时逐条 flush 到 webview；panel dispose 时清空避免脏数据进入新 panel。
-   */
-  const hiddenMessageQueue: ExtensionToWebviewMessage[] = []
+  /** webview load前的消息/缓存的ai消息 */
+  let pendingMessages: ExtensionToWebviewMessage[] = []
 
   // 把 runner / 持久化 / 状态镜像 提到 activate 作用域：webview 关闭后这些对象继续存活，
   // 等下次开 panel 重连。
@@ -93,53 +89,47 @@ export function activate(context: vscode.ExtensionContext) {
   let currentFlows: PersistedData = { flows: [] }
 
   const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
+    if (msg.type === 'batchMessages') {
+      // 拆分为普通消息 否则flushMessages发送的批量消息会包含批量消息
+      msg.data.forEach(postMessageToWebview)
+      return
+    }
+    log('[Extension → Webview]', msg.type, summarizeLogPayload(msg.type, msg.data))
+    if (msg.type === 'load') {
+      webviewReady = true
+      // load必须在最前面
+      pendingMessages.unshift(msg)
+    } else {
+      pendingMessages.push(msg)
+    }
     // signal 进入前先喂给状态镜像，确保 webview 不在时 extension 这边状态依然完整
     if (msg.type.startsWith('flow.signal.')) {
       flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
     }
-    log('[Extension → Webview]', msg.type, summarizeLogPayload(msg.type, msg.data))
-    // panel 存在但不可见时缓冲消息（applySignal 已在上方执行，flush 时只 postMessage 不重复 apply）
-    if (currentPanel && !currentPanel.visible) {
-      hiddenMessageQueue.push(msg)
+    if (msg.type === 'flow.signal.aiMessage') {
+      flushMessages()
       return
     }
-    currentPanel?.webview.postMessage(msg)
+    // aiMessage之外的消息更重要  直接发送
+    flushMessages(true)
+    flushMessages.flush()
   }
-
-  /**
-   * 把"指令型"消息可靠地送达 webview：
-   * - panel 已存在且 webview 已就绪 → 立即发送
-   * - 否则推入 pending 队列。若 panel 不存在还会触发 openPanel，
-   *   webview 启动并发出 load 后由 flushPending 一次性发送。
-   * 用于 insertSelection、focusFlow 等 UI 引导信号 ——
-   * 普通 flow.signal.* 走 postMessageToWebview 即可（webview 重开后会通过 load 拿到状态快照）。
-   */
-  const postMessageWhenReady = (msg: ExtensionToWebviewMessage) => {
-    if (currentPanel && webviewReady) {
-      // signal 也要让镜像消费一次，保持与 postMessageToWebview 行为一致
-      if (msg.type.startsWith('flow.signal.')) {
-        flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
+  const flushMessages = throttle(
+    (force?: boolean) => {
+      if (
+        currentPanel &&
+        pendingMessages.length > 0 &&
+        (force || (webviewReady && currentPanel.visible))
+      ) {
+        currentPanel.webview.postMessage({ type: 'batchMessages', data: pendingMessages })
+        pendingMessages = []
       }
-      log('[Extension → Webview]', msg.type, summarizeLogPayload(msg.type, msg.data))
-      currentPanel.webview.postMessage(msg)
-      return
-    }
-    pendingMessages.push(msg)
-    if (!currentPanel) {
-      void vscode.commands.executeCommand('agent-flow.openPanel')
-    }
-  }
-
-  const flushPendingMessages = () => {
-    while (pendingMessages.length > 0) {
-      const m = pendingMessages.shift()!
-      if (m.type.startsWith('flow.signal.')) {
-        flowRunStateManager.applySignal(m as ExtensionFlowSignalMessage)
-      }
-      log('[Extension → Webview]', m.type, summarizeLogPayload(m.type, m.data))
-      currentPanel?.webview.postMessage(m)
-    }
-  }
+    },
+    300,
+    {
+      leading: true,
+    },
+  )
 
   // notifyUser webPanel不存在或不可见 弹 VSCode 通知。
   // notifyUser: 当 panel 不存在或不可见时弹 VSCode 通知。
@@ -164,10 +154,11 @@ export function activate(context: vscode.ExtensionContext) {
       .exhaustive()
     vscode.window.showInformationMessage(msg, '查看').then((choice) => {
       if (choice !== '查看') return
-      postMessageWhenReady({
+      postMessageToWebview({
         type: 'focusFlow',
         data: { flowId },
       })
+      vscode.commands.executeCommand('agent-flow.openPanel')
       currentPanel?.reveal(undefined, true)
     })
   })
@@ -374,15 +365,6 @@ export function activate(context: vscode.ExtensionContext) {
     panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg')
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri)
 
-    // 初始化 panel 可见性：变可见时把隐藏期间缓冲的 signal 逐条 flush 到 webview
-    panel.onDidChangeViewState(() => {
-      if (panel.visible) {
-        while (hiddenMessageQueue.length > 0) {
-          panel.webview.postMessage(hiddenMessageQueue.shift()!)
-        }
-      }
-    })
-
     panel.webview.onDidReceiveMessage(async (e: ExtensionFromWebviewMessage) => {
       log('[Webview → Extension]', e.type, summarizeLogPayload(e.type, e.data))
       match(e)
@@ -415,9 +397,6 @@ export function activate(context: vscode.ExtensionContext) {
               flowRunStates: flowRunStateManager.getFlowRunStates(),
             },
           })
-          // load 抵达即视为 webview 已就绪：把之前排队的消息一次性发出
-          webviewReady = true
-          flushPendingMessages()
         })
         .with({ type: 'save' }, async ({ data }) => {
           const storeData: PersistedData = { flows: data }
@@ -496,8 +475,7 @@ export function activate(context: vscode.ExtensionContext) {
     panel.onDidDispose(() => {
       currentPanel = undefined
       webviewReady = false
-      // panel 关闭后重开走 load 全量同步，缓冲作废，避免脏数据 flush 到新 webview
-      hiddenMessageQueue.length = 0
+      pendingMessages = []
       // 故意不 disposeAll：runner 与 flowStateManager 在 webview 关闭后继续工作，
       // 下次重新打开 panel 时通过 load 把当前状态发回 webview。
     })
@@ -529,7 +507,8 @@ export function activate(context: vscode.ExtensionContext) {
             },
           }
       // panel 不存在时 postMessageWhenReady 会触发 openPanel 并把消息排队等 webview 就绪
-      postMessageWhenReady(insertMsg)
+      postMessageToWebview(insertMsg)
+      vscode.commands.executeCommand('agent-flow.openPanel')
       currentPanel?.reveal(undefined, true)
     },
   )

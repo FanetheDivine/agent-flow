@@ -72,6 +72,8 @@ export type ExtensionToWebviewEvents = {
   }
   /** 从 VSCode 通知栏点击后，聚焦到指定 Flow（纯 UI 导航信号，不涉及具体 run） */
   focusFlow: { flowId: string }
+  /** 批量消息 */
+  batchMessages: ExtensionFlowSignalMessage[]
 } & ExtensionFlowSignalEvents
 
 /** extension接受 webview发出的消息 */
@@ -79,7 +81,10 @@ export type ExtensionFromWebviewMessage = EventMessageType<ExtensionFromWebviewE
 
 /** extension发出 webview接受的消息 */
 export type ExtensionToWebviewMessage = EventMessageType<ExtensionToWebviewEvents>
-
+/** extension发出 webview接受的消息 不包括批量消息 */
+export type ExtensionToWebviewSingleMessage = EventMessageType<
+  Omit<ExtensionToWebviewEvents, 'batchMessages'>
+>
 /**
  * Flow 事件
  *

@@ -13,13 +13,12 @@ import {
   PendingToolPermission,
   MessageEffect,
   UserMessageType,
-  ExtensionToWebviewMessage,
   updateFlowRunState,
   agentChatInputState,
   flowCanBeKilled,
   getFlowPhase,
 } from '@/common'
-import type { Agent, Code } from '@/common'
+import type { Agent, Code, ExtensionToWebviewSingleMessage } from '@/common'
 import { clearBuildCacheForRuns } from '../components/ChatDrawer/ChatPanel/buildRenderItems'
 import { postMessageToExtension, subscribeExtensionMessage } from '../utils/ExtensionMessage'
 
@@ -241,7 +240,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
 
     init: (app) => {
       notificationApi = app.notification
-      const onMessage = (msg: ExtensionToWebviewMessage) => {
+      const onMessage = (msg: ExtensionToWebviewSingleMessage) => {
         // 全局事件（非 flow.signal.*）不进入 updateFlowRunState：直接落到 store
         if (msg.type === 'load') {
           immerSet((draft) => {
