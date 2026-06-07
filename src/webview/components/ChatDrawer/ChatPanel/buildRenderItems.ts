@@ -103,6 +103,12 @@ type CacheEntry = {
    * 让"session 总结"卡片能展示最后一个 turn 的窗口占用。
    */
   lastTurnContextUsage?: { used: number; total: number }
+  /**
+   * 已扫描部分中"非 stream_event" 消息的累计数。
+   * reducer stripStreamEvents 删光已扫描的 stream_event 后,该值正好等于 strip 后
+   * msgs 已扫描区的长度 → 截断恢复时用作新 nextScanStart,避免全量重扫。
+   */
+  lastNonStreamScanned: number
 }
 
 // ── 缓存 ─────────────────────────────────────────────────────────────────
@@ -286,6 +292,13 @@ function scanIncremental(msgs: ExtensionToWebviewMessage[], cached: CacheEntry):
   for (let i = nextScanStart; i < msgs.length; i++) {
     const mIdx = i
     const msg = msgs[i]
+    // 维护 lastNonStreamScanned:每条非 stream_event 消息都计数(覆盖所有 continue 路径 ——
+    // system/init、synthetic user、tool_result user、agentComplete、agentError、error、result)。
+    // 判别条件与 reducer stripStreamEvents (src/common/flowRunState.ts:347-350) 保持一致。
+    const isStreamEvent =
+      msg.type === 'flow.signal.aiMessage' &&
+      (msg.data.message as { type?: string }).type === 'stream_event'
+    if (!isStreamEvent) cached.lastNonStreamScanned += 1
 
     if (msg.type === 'flow.signal.agentComplete') {
       const data = msg.data
@@ -561,6 +574,7 @@ function scanLight(msgs: ExtensionToWebviewMessage[]): RenderItem[] {
     prevModelUsage: {},
     lastTotalCost: 0,
     contextUsageByItemKey: new Map(),
+    lastNonStreamScanned: 0,
   }
   const data = lastMsg.data
   if (data.result) applyResultToCache(data.result, tmpCached)
@@ -605,10 +619,30 @@ export function buildRenderItems(
         prevModelUsage: {},
         lastTotalCost: 0,
         contextUsageByItemKey: new Map(),
+        lastNonStreamScanned: 0,
       })
       return cache.get(sessionId)!
     })
     .exhaustive()
+
+  // reducer 清理已固化 stream_event 后 msgs 变短,缓存的 nextScanStart > msgs.length。
+  // 已合并的 items(user / 完整 assistant blocks / tool_use / turn_end / agent_complete /
+  // error)是稳定的,无需重建;只有上一波 stream_event 累加出的尾部 streaming text/thinking
+  // 占位项随 stream_event 一起作废,弹掉即可。pendingTooluse / prevModelUsage / lastTotalCost
+  // / contextUsageByItemKey / mainModel / lastTurnContextUsage 全部保留(均基于已稳定的非
+  // stream_event 消息)。新 nextScanStart = lastNonStreamScanned —— strip 删光已扫描的
+  // stream_event 后,该值正好等于 strip 后 msgs 已扫描区的长度。
+  if (cached.nextScanStart > msgs.length) {
+    while (cached.items.length > 0) {
+      const last = cached.items[cached.items.length - 1]
+      if ((last.kind === 'text' || last.kind === 'thinking') && last.streaming) {
+        cached.items.pop()
+      } else {
+        break
+      }
+    }
+    cached.nextScanStart = cached.lastNonStreamScanned
+  }
 
   // 消息未增长 → 直接返回缓存
   if (cached.nextScanStart === msgs.length) {

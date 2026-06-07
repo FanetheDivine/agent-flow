@@ -339,6 +339,17 @@ export function updateFlowRunState(
     const clearPendings = () => {
       draft.pendingToolPermissions = []
     }
+    // 删除该 run 已固化的流式片段:打字机用的 stream_event 被完整 assistant/result 取代后
+    // 永久冗余,不清理会无限堆积撑爆 extension/webview 两端内存。filter 重新赋值(immer draft 支持)。
+    const stripStreamEvents = (r: AgentRun) => {
+      r.messages = r.messages.filter(
+        (x) =>
+          !(
+            x.type === 'flow.signal.aiMessage' &&
+            (x.data.message as { type?: string }).type === 'stream_event'
+          ),
+      )
+    }
 
     // ── command.killFlow:任何状态下强制终止(包括终态,幂等) ──────────
     if (msg.type === 'flow.command.killFlow') {
@@ -376,6 +387,11 @@ export function updateFlowRunState(
       .with({ type: 'flow.signal.flowStart' }, () => {})
       .with({ type: 'flow.signal.aiMessage' }, (m) => {
         const { message } = m.data
+        // 完整 assistant / result 到达 → 该 run 的流式 stream_event 已被取代,永久冗余,立即清理
+        // (峰值最低)。流式中 message 仍是 stream_event,不进入此条件,片段照常留存供打字机消费。
+        if (message.type === 'assistant' || message.type === 'result') {
+          stripStreamEvents(run)
+        }
         if (message.type === 'result') {
           // 本 run 仍有未回答的工具权限请求时,不触发"生成完毕"——等用户处理。
           // AskUserQuestion 不再从 assistant 消息抽取入队,而是由 canUseTool 挂起时
@@ -391,6 +407,8 @@ export function updateFlowRunState(
           draft.shareValues = { ...draft.shareValues, ...data.values }
         }
         run.completed = true
+        // run 结束兜底:清掉可能残留的 stream_event(正常已在 assistant/result 分支清过)
+        stripStreamEvents(run)
         run.outputName = data.output?.name
         clearPendings()
         const flow = findFlow(flowId)
