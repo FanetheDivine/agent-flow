@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.0.54
+
+- 修复编辑逻辑
+
 ## v0.0.53
 
 - 原地修改agentName
