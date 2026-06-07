@@ -1,6 +1,10 @@
 # Changelog
 
-## v0.0.21
+## v0.0.52
+
+- 原地修改agentName
+
+## v0.0.51
 
 - 解决删除stream-event导致的key重复问题 它会导致虚拟列表显式异常
 
