@@ -364,7 +364,7 @@ export const ToolUseDetails: FC<Props> = ({
 
   return (
     <details
-      className='flex flex-1 overflow-hidden text-[11px] text-[#a6adc8]'
+      className='flex flex-1 flex-col overflow-hidden text-[11px] text-[#a6adc8]'
       onToggle={(e) => onOpenChange?.((e.currentTarget as HTMLDetailsElement).open)}
     >
       <summary className='flex flex-1 cursor-pointer list-none items-center gap-1.5 overflow-hidden [&::-webkit-details-marker]:hidden'>
