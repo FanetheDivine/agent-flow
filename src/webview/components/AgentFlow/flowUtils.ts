@@ -38,7 +38,7 @@ const COLUMN_GAP = NODE_WIDTH + 30
 // 入口节点同列最多个数：超过则向右再开一列竖排
 const COLUMN_SIZE = 3
 // 同列节点垂直最小间距（dagre nodesep / 入口列竖排间距）
-const NODE_GAP = 10
+const NODE_GAP = 35
 
 function estimateNodeHeight(agent: Agent | Code): number {
   let h = HEADER_H

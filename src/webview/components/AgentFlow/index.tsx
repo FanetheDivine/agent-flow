@@ -344,7 +344,9 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
         panOnDrag={[1, 2]}
         multiSelectionKeyCode={['Meta', 'Control']}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        maxZoom={3}
+        minZoom={0.3}
+        fitViewOptions={{ padding: 0.15 }}
         deleteKeyCode={hidden ? null : 'Delete'}
         proOptions={{ hideAttribution: true }}
         style={{ background: '#11111b' }}
