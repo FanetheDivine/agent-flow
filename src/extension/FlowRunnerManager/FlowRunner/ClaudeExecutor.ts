@@ -392,6 +392,21 @@ export class ClaudeExecutor {
       (matchTool(toolName, must_confirm_tools, toolInput) ||
         matchToolAnySubCommand(toolName, must_confirm_tools, toolInput))
     ) {
+      // silent_task 无人值守，must_confirm 无法获得人工确认，自动拒绝
+      if (this.agent.work_mode === 'silent_task') {
+        const matchedPatterns = must_confirm_tools.filter(
+          (p) =>
+            matchTool(toolName, [p], toolInput) || matchToolAnySubCommand(toolName, [p], toolInput),
+        )
+        const denyDesc =
+          matchedPatterns.length > 0
+            ? matchedPatterns.reduce((a, b) => (a.length <= b.length ? a : b))
+            : toolName
+        return Promise.resolve({
+          behavior: 'deny',
+          message: `禁止使用 ${denyDesc}`,
+        })
+      }
       return this.requestToolPermission(toolUseID, toolName, toolInput)
     }
     return Promise.resolve({ behavior: 'allow', updatedInput: toolInput })
