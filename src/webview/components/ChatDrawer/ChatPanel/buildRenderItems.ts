@@ -25,6 +25,8 @@ export type RenderItem =
       key: string
       rawContent: unknown
       messageUuid?: string
+      /** 是否来自SubAgent */
+      fromSubAgent?: boolean
     }
   | {
       kind: 'text'
@@ -32,6 +34,10 @@ export type RenderItem =
       text: string
       streaming: boolean
       messageUuid?: string
+      /** 是否来自SubAgent */
+      fromSubAgent?: boolean
+      /** 触发该 SubAgent 的父 tool_use id（= message.parent_tool_use_id）,用于归组到父气泡下 */
+      parentToolUseId?: string
     }
   | {
       kind: 'thinking'
@@ -39,6 +45,10 @@ export type RenderItem =
       text: string
       streaming: boolean
       messageUuid?: string
+      /** 是否来自SubAgent */
+      fromSubAgent?: boolean
+      /** 触发该 SubAgent 的父 tool_use id（= message.parent_tool_use_id）,用于归组到父气泡下 */
+      parentToolUseId?: string
     }
   | {
       kind: 'tool_use'
@@ -49,6 +59,10 @@ export type RenderItem =
       result?: ToolResult
       /** 所属 SDKAssistantMessage 的 uuid —— tool_use 不能作 fork 终点,fork 回退到此 */
       messageUuid?: string
+      /** 是否来自SubAgent */
+      fromSubAgent?: boolean
+      /** 触发该 SubAgent 的父 tool_use id（= message.parent_tool_use_id）,用于归组到父气泡下 */
+      parentToolUseId?: string
     }
   | {
       kind: 'turn_end'
@@ -366,7 +380,6 @@ function scanIncremental(
     if (msg.type !== 'flow.signal.aiMessage') continue
     const { message } = msg.data
     const messageUuid = message.uuid
-    const fromSubAgent = message.type === 'assistant' && message.parent_tool_use_id
     // 新session 重置缓存信息
     if (message.type === 'system' && message.subtype === 'init') {
       cached.mainModel = message.model
@@ -377,6 +390,8 @@ function scanIncremental(
     }
 
     if (message.type === 'user') {
+      const fromSubAgent = !!message.parent_tool_use_id
+      const parentToolUseId = message.parent_tool_use_id ?? undefined
       const rawContent = message.message.content
       if (
         Array.isArray(rawContent) &&
@@ -395,8 +410,9 @@ function scanIncremental(
                 isError: !!block.is_error,
                 text: extractToolResultText(block.content),
               },
-              // 来自subAgent的不能fork
-              messageUuid: message.parent_tool_use_id ? undefined : messageUuid,
+              fromSubAgent,
+              parentToolUseId,
+              messageUuid,
             }
           }
           delete pendingTooluse[block.tool_use_id]
@@ -404,8 +420,8 @@ function scanIncremental(
         continue
       }
       if (message.isSynthetic) continue
-      // 来自subAgent的prompt不展示
-      if (message.parent_tool_use_id) continue
+      // 注入subAgent的prompt 不展示
+      if (fromSubAgent) continue
       // user fork 语义：fork 上一条消息 = 让用户重新说一次。messageUuid 取
       // 上一条 SDK 消息的 uuid（不是 user 自己的 uuid,因为 SDKUserMessage.uuid
       // 经常缺失）。第一条 user 没有上一条,messageUuid undefined → UI 不显示 fork icon。
@@ -419,6 +435,8 @@ function scanIncremental(
     }
     // 累加流式消息
     if (message.type === 'stream_event') {
+      const fromSubAgent = !!message.parent_tool_use_id
+      const parentToolUseId = message.parent_tool_use_id ?? undefined
       const event = message.event as any
       if (event?.type !== 'content_block_delta') continue
       const delta = event.delta
@@ -442,12 +460,16 @@ function scanIncremental(
           key: blockType === 'text' ? 'streaming-text' : 'streaming-thinking',
           text: deltaText,
           streaming: true,
+          fromSubAgent,
+          parentToolUseId,
         })
       }
       continue
     }
 
     if (message.type === 'assistant') {
+      const fromSubAgent = !!message.parent_tool_use_id
+      const parentToolUseId = message.parent_tool_use_id ?? undefined
       const blocks = message.message.content
       if (!Array.isArray(blocks)) continue
       // 完整消息到达 移除尾部所有 streaming text/thinking 占位项 后续直接添加完整数据
@@ -473,6 +495,8 @@ function scanIncremental(
             text: block.text,
             streaming: false,
             messageUuid: blockMessageUuid,
+            fromSubAgent,
+            parentToolUseId,
           })
           return
         }
@@ -483,6 +507,8 @@ function scanIncremental(
             text: block.thinking,
             streaming: false,
             messageUuid: blockMessageUuid,
+            fromSubAgent,
+            parentToolUseId,
           })
           return
         }
@@ -506,6 +532,8 @@ function scanIncremental(
               toolName,
               input: block.input,
               messageUuid: blockMessageUuid,
+              fromSubAgent,
+              parentToolUseId,
             })
             pendingTooluse[block.id] = items.length - 1
             return
@@ -517,6 +545,8 @@ function scanIncremental(
             toolName,
             input: block.input,
             messageUuid: blockMessageUuid,
+            fromSubAgent,
+            parentToolUseId,
           })
           pendingTooluse[block.id] = items.length - 1
           return
@@ -532,6 +562,8 @@ function scanIncremental(
                 isError: !!block.is_error,
                 text: extractToolResultText(block.content),
               },
+              fromSubAgent,
+              parentToolUseId,
             }
           }
           delete pendingTooluse[block.tool_use_id]
@@ -615,24 +647,24 @@ function scanLight(msgs: ExtensionToWebviewMessage[]): RenderItem[] {
 }
 
 /**
- * 按 sessionId 缓存的渲染项构建器。
+ * 按 runId 缓存的渲染项构建器。
  *
  * - `'full'` 模式（默认）：首次全量扫描 + 缓存，后续增量扫描。
  * - `'light'` 模式：直接取首尾两条消息，不写缓存、不增量。
  *    最后一条非 agentComplete 则返回 []（run 未正常完成不展示折叠摘要）。
  */
 export function buildRenderItems(
-  sessionId: string,
+  runId: string,
   msgs: ExtensionToWebviewMessage[],
   mode: BuildMode = 'full',
 ): RenderItem[] {
   // light 模式:无缓存一次性扫描,折叠态 run 专用
   if (mode === 'light') return scanLight(msgs)
 
-  const cached = match(cache.has(sessionId))
-    .with(true, () => cache.get(sessionId)!)
+  const cached = match(cache.has(runId))
+    .with(true, () => cache.get(runId)!)
     .with(false, () => {
-      cache.set(sessionId, {
+      cache.set(runId, {
         items: [],
         pendingTooluse: {},
         prevModelUsage: {},
@@ -641,7 +673,7 @@ export function buildRenderItems(
         lastNonStreamScanned: 0,
         seq: 0,
       })
-      return cache.get(sessionId)!
+      return cache.get(runId)!
     })
     .exhaustive()
 

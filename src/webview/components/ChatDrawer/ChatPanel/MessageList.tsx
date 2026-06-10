@@ -135,10 +135,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
    * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
    */
   const onForkRequest = useCallback(
-    (
-      target: { kind: 'message'; runId: string; messageUuid: string },
-      sessionCompleted: boolean,
-    ) => {
+    (target: { runId: string; messageUuid: string }, sessionCompleted: boolean) => {
       const doFork = () => forkFlow(flowId, target)
       if (!sessionCompleted) {
         doFork()

@@ -47,16 +47,15 @@ export type BubbleCtx = {
    * 第二个参数 sessionCompleted 由 ChatPanel 在每个 session 上下文中注入，
    * 用于让 fork 触发方决定是否弹 modal 提示「shareValues 一致性不保证」。
    */
-  onFork?: (
-    target: { kind: 'message'; runId: string; messageUuid: string },
-    sessionCompleted: boolean,
-  ) => void
+  onFork?: (target: { runId: string; messageUuid: string }, sessionCompleted: boolean) => void
 }
 
 type RenderedBubble = {
   key: string
   role: 'user' | 'ai' | 'system' | 'divider'
   content: ReactNode
+  /** 附加到 Bubble 根元素的 className —— subAgent 气泡用 'ml-4' 缩进表达从属关系 */
+  className?: string
 }
 
 // ChatInput 把代码片段 / 文件引用 / 附件序列化为下列 XML：
@@ -514,11 +513,7 @@ function renderItemToBubble(
   /**
    * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素。
    */
-  const buildForkIcon = (target: {
-    kind: 'message'
-    runId: string
-    messageUuid: string
-  }): ReactNode | undefined => {
+  const buildForkIcon = (target: { runId: string; messageUuid: string }): ReactNode | undefined => {
     if (!ctx?.onFork) return undefined
     return <ForkButton onFork={() => ctx.onFork!(target, sessionCompleted)} />
   }
@@ -530,8 +525,8 @@ function renderItemToBubble(
       // 不依赖 turn 是否闭环（thinking/text fork 后切片末端 user / agent running 中
       // 的当前 user 都属于 turn 未闭环但 fork 合法的场景）。
       const fork =
-        runId && item.messageUuid
-          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+        runId && item.messageUuid && !item.fromSubAgent
+          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
           : undefined
       // 注入快照仅附加在 run 首条 user 气泡内；空对象时不展示
       const hasInjected = injectedShareValues && Object.keys(injectedShareValues).length > 0
@@ -560,8 +555,8 @@ function renderItemToBubble(
         return { key: item.key, role: 'ai', content: md }
       }
       const fork =
-        runId && item.messageUuid
-          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+        runId && item.messageUuid && !item.fromSubAgent
+          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
           : undefined
       return {
         key: item.key,
@@ -591,8 +586,8 @@ function renderItemToBubble(
       }
       // 与 user 对齐:只要 messageUuid 存在即放行 fork。同 text 分支说明。
       const fork =
-        runId && item.messageUuid
-          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+        runId && item.messageUuid && !item.fromSubAgent
+          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
           : undefined
       return {
         key: item.key,
@@ -607,8 +602,8 @@ function renderItemToBubble(
       // tool_use 不能作 fork 终点,messageUuid 回退到所属 assistant 消息的 uuid(同 text/thinking)。
       // 与其它分支一致:runId && messageUuid 都存在才渲染 fork icon。
       const fork =
-        runId && item.messageUuid
-          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+        runId && item.messageUuid && !item.fromSubAgent
+          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
           : undefined
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
@@ -759,7 +754,7 @@ function renderItemToBubble(
       const modelUsages = item.modelUsages ?? []
       const fork =
         runId && item.messageUuid
-          ? buildForkIcon({ kind: 'message', runId, messageUuid: item.messageUuid })
+          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
           : undefined
       // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
       // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
@@ -853,7 +848,7 @@ function renderItemToBubble(
 }
 
 export function toBubbleItems(
-  sessionId: string,
+  runId: string,
   msgs: ExtensionToWebviewMessage[],
   ctx?: BubbleCtx,
   sessionCompleted = false,
@@ -861,11 +856,11 @@ export function toBubbleItems(
   mode?: import('./buildRenderItems').BuildMode,
   injectedTitle?: string,
 ): RenderedBubble[] {
-  const renderItems = buildRenderItems(sessionId, msgs, mode)
+  const renderItems = buildRenderItems(runId, msgs, mode)
   const out: RenderedBubble[] = []
   let firstUserPassed = false
   for (const item of renderItems) {
-    const cu = getContextUsage(sessionId, item.key)
+    const cu = getContextUsage(runId, item.key)
     // sessionId 在 MessageList 调用点传的是 run.runId(buildRenderItems 的 cache key 历史命名),
     // 这里把它作为 runId 透传给 buildForkIcon 拼 fork target
     // 注入快照仅透传给首个 user 项，其余项不传
@@ -879,7 +874,7 @@ export function toBubbleItems(
       ctx,
       sessionCompleted,
       cu,
-      sessionId,
+      runId,
       injected,
       injectedTitle,
     )

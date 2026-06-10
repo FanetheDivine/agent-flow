@@ -235,7 +235,7 @@ type FlowCommandPayload = {
    * user/text/thinking/turn_end。
    */
   fork: {
-    target: { kind: 'message'; runId: string; messageUuid: string }
+    target: { runId: string; messageUuid: string }
   }
 }
 
