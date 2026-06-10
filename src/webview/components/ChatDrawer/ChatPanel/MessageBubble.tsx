@@ -54,8 +54,6 @@ type RenderedBubble = {
   key: string
   role: 'user' | 'ai' | 'system' | 'divider'
   content: ReactNode
-  /** 附加到 Bubble 根元素的 className —— subAgent 气泡用 'ml-4' 缩进表达从属关系 */
-  className?: string
 }
 
 // ChatInput 把代码片段 / 文件引用 / 附件序列化为下列 XML：
@@ -847,6 +845,69 @@ function renderItemToBubble(
   }
 }
 
+/**
+ * 把 subAgent 的 text/thinking/tool_use 项归置到触发它的父「Agent tool_use」气泡之后
+ * （并行多 subAgent 时各归各父），只重排顺序、不改 key。
+ *
+ * - 子项的 `parentToolUseId`（= SDK message.parent_tool_use_id）等于父 tool_use 的 `toolUseId`。
+ * - 早退：无任何带 parentToolUseId 的项时返回原引用 + 空集，零开销（无 subAgent 的回归路径）。
+ * - 孤儿（parentToolUseId 未命中任何 tool_use，父尚未到达等）：原序保留、不缩进、不丢。
+ * - 返回 subItemKeys 供调用方对子项气泡加 ml-4 缩进。
+ */
+function regroupSubAgentItems(items: RenderItem[]): {
+  ordered: RenderItem[]
+  subItemKeys: Set<string>
+} {
+  const hasSub = items.some(
+    (it) =>
+      (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') &&
+      !!it.parentToolUseId,
+  )
+  if (!hasSub) return { ordered: items, subItemKeys: new Set() }
+
+  // 趟1：按 parentToolUseId 分桶（保持原序），并收集所有 tool_use 的 toolUseId
+  const buckets = new Map<string, RenderItem[]>()
+  const validParents = new Set<string>()
+  for (const it of items) {
+    if (it.kind === 'tool_use') validParents.add(it.toolUseId)
+    if (
+      (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') &&
+      it.parentToolUseId
+    ) {
+      const arr = buckets.get(it.parentToolUseId)
+      if (arr) arr.push(it)
+      else buckets.set(it.parentToolUseId, [it])
+    }
+  }
+
+  // 趟2：线性输出。父尚未到达的子项（孤儿）原序保留；命中父则跳过、由父带出整桶
+  const ordered: RenderItem[] = []
+  const subItemKeys = new Set<string>()
+  for (const it of items) {
+    const parentId =
+      it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use'
+        ? it.parentToolUseId
+        : undefined
+    if (parentId && validParents.has(parentId)) continue // 由父带出
+    ordered.push(it)
+    if (it.kind === 'tool_use') {
+      const bucket = buckets.get(it.toolUseId)
+      if (bucket) {
+        for (const sub of bucket) {
+          ordered.push(sub)
+          subItemKeys.add(sub.key)
+        }
+      }
+    }
+  }
+  return { ordered, subItemKeys }
+}
+
+/** 给子项气泡内容包一层 ml-4 缩进，表达从属于父 Agent tool_use */
+function indentBubble(b: RenderedBubble): RenderedBubble {
+  return { ...b, content: <div className='from-sub-agent'>{b.content}</div> }
+}
+
 export function toBubbleItems(
   runId: string,
   msgs: ExtensionToWebviewMessage[],
@@ -857,9 +918,10 @@ export function toBubbleItems(
   injectedTitle?: string,
 ): RenderedBubble[] {
   const renderItems = buildRenderItems(runId, msgs, mode)
+  const { ordered, subItemKeys } = regroupSubAgentItems(renderItems)
   const out: RenderedBubble[] = []
   let firstUserPassed = false
-  for (const item of renderItems) {
+  for (const item of ordered) {
     const cu = getContextUsage(runId, item.key)
     // sessionId 在 MessageList 调用点传的是 run.runId(buildRenderItems 的 cache key 历史命名),
     // 这里把它作为 runId 透传给 buildForkIcon 拼 fork target
@@ -879,8 +941,9 @@ export function toBubbleItems(
       injectedTitle,
     )
     if (!bubble) continue
-    if (Array.isArray(bubble)) out.push(...bubble)
-    else out.push(bubble)
+    const isSub = subItemKeys.has(item.key)
+    if (Array.isArray(bubble)) out.push(...(isSub ? bubble.map(indentBubble) : bubble))
+    else out.push(isSub ? indentBubble(bubble) : bubble)
   }
   return out
 }

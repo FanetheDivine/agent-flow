@@ -333,7 +333,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
               key={vi.key}
               data-index={vi.index}
               ref={virtualizer.measureElement}
-              className='absolute top-0 left-0 w-full px-3'
+              className='absolute top-0 left-0 w-full px-3 [&:has(.from-sub-agent)]:ml-4'
               style={{ transform: `translateY(${vi.start}px)` }}
             >
               {renderItem(item)}
