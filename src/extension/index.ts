@@ -106,21 +106,15 @@ export function activate(context: vscode.ExtensionContext) {
     if (msg.type.startsWith('flow.signal.')) {
       flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
     }
-    if (msg.type === 'flow.signal.aiMessage') {
-      flushMessages()
-      return
+    flushMessages()
+    if (msg.type !== 'flow.signal.aiMessage' || msg.data.message.type !== 'stream_event') {
+      // 非流式消息直接发送
+      flushMessages.flush()
     }
-    // aiMessage之外的消息更重要  直接发送
-    flushMessages(true)
-    flushMessages.flush()
   }
   const flushMessages = throttle(
-    (force?: boolean) => {
-      if (
-        currentPanel &&
-        pendingMessages.length > 0 &&
-        (force || (webviewReady && currentPanel.visible))
-      ) {
+    () => {
+      if (currentPanel && pendingMessages.length > 0 && webviewReady) {
         currentPanel.webview.postMessage({ type: 'batchMessages', data: pendingMessages })
         pendingMessages = []
       }
@@ -506,7 +500,6 @@ export function activate(context: vscode.ExtensionContext) {
               filename: vscode.workspace.asRelativePath(document.uri),
             },
           }
-      // panel 不存在时 postMessageWhenReady 会触发 openPanel 并把消息排队等 webview 就绪
       postMessageToWebview(insertMsg)
       vscode.commands.executeCommand('agent-flow.openPanel')
       currentPanel?.reveal(undefined, true)
