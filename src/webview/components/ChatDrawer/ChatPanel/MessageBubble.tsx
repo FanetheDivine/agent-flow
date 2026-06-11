@@ -606,24 +606,10 @@ function renderItemToBubble(
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
       if (item.toolName.includes('AskUserQuestion')) {
-        if (isPending) return null
-        // 无 ctx（单气泡调试场景）：降级为静态历史卡片
-        if (!ctx) {
-          return {
-            key: item.key,
-            role: 'system',
-            content: (
-              <AskUserQuestionCard
-                input={item.input as AskUserQuestionInput}
-                mode='historical'
-                fork={fork}
-              />
-            ),
-          }
-        }
+        if (!answered) return null
         // 从 answeredToolPermissions.updatedInput 就地解析历史答案
         const answersObj = (
-          answered?.updatedInput as { answers?: Record<string, string> } | undefined
+          answered.updatedInput as { answers?: Record<string, string> } | undefined
         )?.answers
         const answeredValues: Record<string, string[]> | undefined = answersObj
           ? Object.fromEntries(
