@@ -799,63 +799,6 @@ export function chatMessageToBubble(
   }
 }
 
-/**
- * 把 subAgent 的 text/thinking/tool_use 项归置到触发它的父「Agent tool_use」气泡之后
- * （并行多 subAgent 时各归各父），只重排顺序、不改 id。
- *
- * - 子项的 `parentToolUseId`（= SDK message.parent_tool_use_id）等于父 tool_use 的 `toolUseId`。
- * - 早退：无任何带 parentToolUseId 的项时返回原引用 + 空集，零开销（无 subAgent 的回归路径）。
- * - 孤儿（parentToolUseId 未命中任何 tool_use，父尚未到达等）：原序保留、不缩进、不丢。
- * - 返回 subItemKeys（item.id 集合）供调用方对子项气泡加 ml-4 缩进。
- */
-export function regroupSubAgentItems(items: ChatMessage[]): {
-  ordered: ChatMessage[]
-  subItemKeys: Set<string>
-} {
-  const hasSub = items.some(
-    (it) =>
-      (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') &&
-      !!it.parentToolUseId,
-  )
-  if (!hasSub) return { ordered: items, subItemKeys: new Set() }
-
-  // 趟1：按 parentToolUseId 分桶（保持原序），并收集所有 tool_use 的 toolUseId
-  const buckets = new Map<string, ChatMessage[]>()
-  const validParents = new Set<string>()
-  for (const it of items) {
-    if (it.kind === 'tool_use') validParents.add(it.toolUseId)
-    if (
-      (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') &&
-      it.parentToolUseId
-    ) {
-      const arr = buckets.get(it.parentToolUseId)
-      if (arr) arr.push(it)
-      else buckets.set(it.parentToolUseId, [it])
-    }
-  }
-
-  // 趟2：线性输出。父尚未到达的子项（孤儿）原序保留；命中父则跳过、由父带出整桶
-  const ordered: ChatMessage[] = []
-  const subItemKeys = new Set<string>()
-  for (const it of items) {
-    const parentId =
-      it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use'
-        ? it.parentToolUseId
-        : undefined
-    if (parentId && validParents.has(parentId)) continue // 由父带出
-    ordered.push(it)
-    if (it.kind === 'tool_use') {
-      const bucket = buckets.get(it.toolUseId)
-      if (bucket) {
-        for (const sub of bucket) {
-          ordered.push(sub)
-          subItemKeys.add(sub.id)
-        }
-      }
-    }
-  }
-  return { ordered, subItemKeys }
-}
 
 /** 给子项气泡内容包一层 ml-4 缩进，表达从属于父 Agent tool_use */
 export function indentBubble(b: RenderedBubble): RenderedBubble {
