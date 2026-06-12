@@ -567,15 +567,18 @@ function appendSdkMessage(run: AgentRun, sdkMsg: AIMessageType): void {
       const blocks = m.message.content
       const prefix = `${parent ?? ''}#`
       // text/thinking 只会出现于 stream_event（delta 累加），assistant 到达时只需
-      // 把流式占位转 done + 回填 uuid；tool 相关块走 finalizeTool / mergeToolResult
+      // 把流式占位转 done；uuid 仅赋给最后一个 text/thinking 块（同一 assistant
+      // 消息共享一个 uuid，只暴露一个 fork 入口）
+      let lastTextOrThinking: ChatMessage | undefined
       for (const k of Object.keys(run.acc.activeBlocks)) {
         if (!k.startsWith(prefix)) continue
         const it = run.messages[run.acc.activeBlocks[k]]
         if (it && (it.kind === 'text' || it.kind === 'thinking') && it.status === 'streaming') {
           it.status = 'done'
-          it.uuid = uuid
+          lastTextOrThinking = it
         }
       }
+      if (lastTextOrThinking) lastTextOrThinking.uuid = uuid
       blocks.forEach((block) => {
         match(block)
           .with({ type: 'tool_use' }, (b) => finalizeTool(run, b.id, b.name, b.input, parent, uuid))
