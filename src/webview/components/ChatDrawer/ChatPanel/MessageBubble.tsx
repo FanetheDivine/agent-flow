@@ -2,6 +2,7 @@ import { useState, type FC, type ReactNode } from 'react'
 import { Button, Input, Radio, Tag, Tooltip } from 'antd'
 import { BranchesOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { Think } from '@ant-design/x'
+import { match, P } from 'ts-pattern'
 import type { AskUserQuestionInput, ChatMessage, ModelTokenUsage, ToolResult } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
@@ -525,15 +526,20 @@ function renderItemToBubble(
 ): RenderedBubble | RenderedBubble[] | null {
   const fromSubAgent = !!item.parentToolUseId
   /** 构造 fork icon —— 仅当 ctx.onFork 与 forkUuid 都存在时返回按钮元素。 */
-  const buildForkIcon = (): ReactNode | undefined => {
+  const buildForkIcon = (): ReactNode | null => {
     if (!ctx?.onFork || !runId || !forkUuid) return undefined
-    return <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
+    if (fromSubAgent) return null
+    const forkBtn = (
+      <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
+    )
+    return match(item)
+      .with({ kind: P.union('thinking', 'text'), status: 'done' }, () => forkBtn)
+      .with({ kind: 'tool_use', status: 'done' }, () => forkBtn)
+      .otherwise(() => null)
   }
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
-      // user fork 语义 = 「让用户重新说一次」= 切到上一条 SDK 消息为止。
-      const fork = !fromSubAgent ? buildForkIcon() : undefined
       // 注入快照仅附加在 run 首条 user 气泡内；空对象时不展示
       const hasInjected = injectedShareValues && Object.keys(injectedShareValues).length > 0
       return {
@@ -547,10 +553,7 @@ function renderItemToBubble(
                 <InjectedShareValuesSection values={injectedShareValues} title={injectedTitle} />
               )}
             </div>
-            <div className='ml-1 flex flex-col items-center gap-1'>
-              {fork}
-              <CopyButton text={copyText} />
-            </div>
+            <CopyButton className='ml-1' text={copyText} />
           </div>
         ),
       }
@@ -560,7 +563,7 @@ function renderItemToBubble(
       if (item.status === 'streaming') {
         return { key: item.id, role: 'ai', content: md }
       }
-      const fork = !fromSubAgent ? buildForkIcon() : undefined
+      const fork = buildForkIcon()
       return {
         key: item.id,
         role: 'ai',
@@ -576,7 +579,7 @@ function renderItemToBubble(
       }
     }
     case 'thinking': {
-      if (item.status === 'streaming') {
+      if (item.status === 'streaming' || item.status === 'interrupted') {
         return {
           key: item.id,
           role: 'ai',
@@ -587,7 +590,7 @@ function renderItemToBubble(
           ),
         }
       }
-      const fork = !fromSubAgent ? buildForkIcon() : undefined
+      const fork = buildForkIcon()
       return {
         key: item.id,
         role: 'ai',
@@ -597,9 +600,7 @@ function renderItemToBubble(
     case 'tool_use': {
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[item.toolUseId]
-
-      // tool_use 不能作 fork 终点,forkUuid 回退到所属 assistant 消息的 uuid;subAgent 不渲染 fork。
-      const fork = !fromSubAgent ? buildForkIcon() : undefined
+      const fork = buildForkIcon()
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
       if (item.toolName.includes('AskUserQuestion')) {
@@ -732,7 +733,6 @@ function renderItemToBubble(
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
       const itemContextUsage = item.contextUsage
-      const fork = buildForkIcon()
       // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
       // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
       // 在 divider 容器层级也会失效。所以 fork icon 必须 inline 渲染在 content 内。
@@ -750,7 +750,6 @@ function renderItemToBubble(
               <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
             </span>
           </span>
-          {fork && <span className='shrink-0'>{fork}</span>}
         </div>
       )
       return {
@@ -920,7 +919,9 @@ export function toBubbleItems(
   for (const item of ordered) {
     // 注入快照仅透传给首个 user 项，其余项不传
     const injected =
-      !firstUserPassed && item.kind === 'user' && injectedShareValues ? injectedShareValues : undefined
+      !firstUserPassed && item.kind === 'user' && injectedShareValues
+        ? injectedShareValues
+        : undefined
     if (item.kind === 'user') firstUserPassed = true
     const bubble = renderItemToBubble(
       item,
