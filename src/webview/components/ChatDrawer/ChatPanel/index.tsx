@@ -291,35 +291,34 @@ export const ChatPanel: FC<Props> = ({
               {totalCost > 0 ? ` · ${formatTokenCost(totalCost)}` : ''}
             </Tag>
           )}
+          {canKillFlow && (
+            <Tooltip title='停止工作流，允许基于当前状态开启新会话'>
+              <Button
+                size='small'
+                type='text'
+                icon={<PauseCircleOutlined />}
+                onClick={() => killFlow(flowId)}
+              />
+            </Tooltip>
+          )}
+          {flowPhase !== 'idle' && (
+            <Tooltip title='清空工作流，删除一切消息和共享数据，回到初始状态'>
+              <Button
+                size='small'
+                danger
+                type='text'
+                icon={<StopOutlined />}
+                onClick={() =>
+                  modal.confirm({
+                    title: '确认清空',
+                    content: '将清除当前工作流的全部对话记录和 ShareValues',
+                    onOk: () => clearFlow(flowId),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
         </div>
-        {canKillFlow && (
-          <Tooltip title='停止工作流，不清空shareValues'>
-            <Button
-              size='small'
-              type='text'
-              icon={<PauseCircleOutlined />}
-              onClick={() => killFlow(flowId)}
-              style={{ color: '#6c7086' }}
-            />
-          </Tooltip>
-        )}
-        {flowPhase !== 'idle' && (
-          <Tooltip title='清空工作流对话记录和 ShareValues'>
-            <Button
-              size='small'
-              danger
-              type='text'
-              icon={<StopOutlined />}
-              onClick={() =>
-                modal.confirm({
-                  title: '确认清空',
-                  content: '将清除当前工作流的全部对话记录和 ShareValues',
-                  onOk: () => clearFlow(flowId),
-                })
-              }
-            />
-          </Tooltip>
-        )}
         <Button
           size='small'
           type='text'
