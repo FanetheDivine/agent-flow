@@ -488,28 +488,8 @@ const InjectedShareValuesSection: FC<{ values: Record<string, string | null>; ti
   )
 }
 
-/**
- * 派生 fork 锚点 uuid（移植自原 buildRenderItems.findPrevUuid 语义）：
- * - text/thinking/tool_use → 自身（= 所属 assistant 消息）uuid;tool_use 不能作 fork 终点,
- *   回退到 assistant uuid。流式未定稿项 uuid 未定义 → 回溯不会命中。
- * - user → 回溯找上一条带 uuid 的项的 uuid（user 自身 uuid 常缺,语义=切到上一条）。
- * - turn_end → 回溯找本回合最后一条带 uuid 的项的 uuid（result 无 uuid）。
- * 必须在时间序数组上按原 index 调用（不受 regroupSubAgentItems 重排影响）。
- */
-export function deriveForkUuid(items: ChatMessage[], index: number): string | undefined {
-  const it = items[index]
-  if (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') return it.uuid
-  if (it.kind === 'user' || it.kind === 'turn_end') {
-    for (let j = index - 1; j >= 0; j--) {
-      const u = items[j].uuid
-      if (u) return u
-    }
-  }
-  return undefined
-}
-
-export function renderItemToBubble(
-  item: ChatMessage,
+export function chatMessageToBubble(
+  message: ChatMessage,
   ctx: BubbleCtx | undefined,
   sessionCompleted: boolean,
   runId: string | undefined,
@@ -517,7 +497,7 @@ export function renderItemToBubble(
   injectedShareValues?: Record<string, string | null>,
   injectedTitle = '注入数据',
 ): RenderedBubble | RenderedBubble[] | null {
-  const fromSubAgent = !!item.parentToolUseId
+  const fromSubAgent = !!message.parentToolUseId
   /** 构造 fork icon —— 仅当 ctx.onFork 与 forkUuid 都存在时返回按钮元素。 */
   const buildForkIcon = (): ReactNode | null => {
     if (!ctx?.onFork || !runId || !forkUuid) return undefined
@@ -525,18 +505,18 @@ export function renderItemToBubble(
     const forkBtn = (
       <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
     )
-    return match(item)
+    return match(message)
       .with({ kind: P.union('thinking', 'text'), status: 'done' }, () => forkBtn)
       .with({ kind: 'tool_use', status: 'done' }, () => forkBtn)
       .otherwise(() => null)
   }
-  switch (item.kind) {
+  switch (message.kind) {
     case 'user': {
-      const { copyText, node } = renderUserContent(item.rawContent)
+      const { copyText, node } = renderUserContent(message.rawContent)
       // 注入快照仅附加在 run 首条 user 气泡内；空对象时不展示
       const hasInjected = injectedShareValues && Object.keys(injectedShareValues).length > 0
       return {
-        key: item.id,
+        key: message.id,
         role: 'user',
         content: (
           <div className='flex'>
@@ -552,51 +532,51 @@ export function renderItemToBubble(
       }
     }
     case 'text': {
-      const md = <Md content={item.text} />
-      if (item.status === 'streaming') {
-        return { key: item.id, role: 'ai', content: md }
+      const md = <Md content={message.text} />
+      if (message.status === 'streaming') {
+        return { key: message.id, role: 'ai', content: md }
       }
       const fork = buildForkIcon()
       return {
-        key: item.id,
+        key: message.id,
         role: 'ai',
         content: (
           <div className='flex'>
             {md}
             <div className='ml-1 flex flex-col items-center gap-1'>
               {fork}
-              <CopyButton text={item.text} />
+              <CopyButton text={message.text} />
             </div>
           </div>
         ),
       }
     }
     case 'thinking': {
-      if (item.status === 'streaming' || item.status === 'interrupted') {
+      if (message.status === 'streaming' || message.status === 'interrupted') {
         return {
-          key: item.id,
+          key: message.id,
           role: 'ai',
           content: (
-            <Think title='思考中' key={item.id + 'streaming'} defaultExpanded>
-              <Md content={item.text} />
+            <Think title='思考中' key={message.id + 'streaming'} defaultExpanded>
+              <Md content={message.text} />
             </Think>
           ),
         }
       }
       const fork = buildForkIcon()
       return {
-        key: item.id,
+        key: message.id,
         role: 'ai',
-        content: <ThinkingContent text={item.text} itemKey={item.id} fork={fork} />,
+        content: <ThinkingContent text={message.text} itemKey={message.id} fork={fork} />,
       }
     }
     case 'tool_use': {
-      const isPending = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
-      const answered = ctx?.answeredToolPermissions?.[item.toolUseId]
+      const isPending = ctx?.pendingToolPermissionToolUseIds?.has(message.toolUseId) ?? false
+      const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
-      if (item.toolName.includes('AskUserQuestion')) {
+      if (message.toolName.includes('AskUserQuestion')) {
         if (!answered || isPending) return null
         // 从 answeredToolPermissions.updatedInput 就地解析历史答案
         const answersObj = (
@@ -614,11 +594,11 @@ export function renderItemToBubble(
             )
           : undefined
         return {
-          key: item.id,
+          key: message.id,
           role: 'system',
           content: (
             <AskUserQuestionCard
-              input={item.input as AskUserQuestionInput}
+              input={message.input as AskUserQuestionInput}
               mode='historical'
               answeredValues={answeredValues}
               fork={fork}
@@ -629,27 +609,27 @@ export function renderItemToBubble(
 
       // CompleteTask：完成前确认。pending 时在工具详情下方挂确认卡片;历史只显示工具详情
       // (成功完成由 agent_complete 卡片体现,拒绝则带 isError result)。
-      if (item.toolName.includes('CompleteTask')) {
-        const completeInput = item.input as Record<string, any> | undefined
+      if (message.toolName.includes('CompleteTask')) {
+        const completeInput = message.input as Record<string, any> | undefined
         // CompleteTask 仅在被拒绝(带 isError result)时可作 fork 起点;成功完成 / pending 不挂 fork。
-        const completeFork = item.result?.isError ? fork : undefined
+        const completeFork = message.result?.isError ? fork : undefined
         const toolUseItem: RenderedBubble = {
-          key: item.id,
+          key: message.id,
           role: 'ai',
           content: (
             <ToolUseBubbleContent
-              toolName={item.toolName}
-              input={item.input}
-              result={item.result}
+              toolName={message.toolName}
+              input={message.input}
+              result={message.result}
               treatNoResultAsSuccess={sessionCompleted}
-              copyText={item.result?.text ?? ''}
+              copyText={message.result?.text ?? ''}
               fork={completeFork}
             />
           ),
         }
         if (isPending && ctx) {
           const confirmItem: RenderedBubble = {
-            key: item.id + '-confirm',
+            key: message.id + '-confirm',
             role: 'ai',
             content: (
               <CompleteTaskConfirmCard
@@ -662,8 +642,8 @@ export function renderItemToBubble(
                     ? completeInput.values
                     : undefined
                 }
-                onAccept={() => ctx.onToolPermissionAllow?.(item.toolUseId)}
-                onDeny={(reason) => ctx.onToolPermissionDeny?.(item.toolUseId, reason)}
+                onAccept={() => ctx.onToolPermissionAllow?.(message.toolUseId)}
+                onDeny={(reason) => ctx.onToolPermissionDeny?.(message.toolUseId, reason)}
               />
             ),
           }
@@ -673,16 +653,16 @@ export function renderItemToBubble(
       }
 
       // ExitPlanMode：pending 时移至底部卡片；历史态仍内联展示
-      if (item.toolName.includes('ExitPlanMode')) {
+      if (message.toolName.includes('ExitPlanMode')) {
         if (isPending) return null
-        const planFilePath = (item.input as { planFilePath?: string })?.planFilePath ?? ''
+        const planFilePath = (message.input as { planFilePath?: string })?.planFilePath ?? ''
         return {
-          key: item.id + '-exit-plan',
+          key: message.id + '-exit-plan',
           role: 'system' as const,
           content: (
             <ToolPermissionCard
               toolName='ExitPlanMode'
-              input={item.input}
+              input={message.input}
               mode='historical'
               answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
               exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
@@ -695,12 +675,12 @@ export function renderItemToBubble(
       // 通用工具权限(must_confirm 等)：pending 时移至底部卡片；历史态内联展示授权结果 + 工具详情
       if (isPending) return null
       const permItem: RenderedBubble = {
-        key: item.id + '-perm',
+        key: message.id + '-perm',
         role: 'system',
         content: (
           <ToolPermissionCard
-            toolName={item.toolName}
-            input={item.input}
+            toolName={message.toolName}
+            input={message.input}
             mode='historical'
             answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
             fork={fork}
@@ -708,14 +688,14 @@ export function renderItemToBubble(
         ),
       }
       const toolUseItem: RenderedBubble = {
-        key: item.id,
+        key: message.id,
         role: 'ai',
         content: (
           <ToolUseBubbleContent
-            toolName={item.toolName}
-            input={item.input}
-            result={item.result}
-            copyText={item.result?.text ?? ''}
+            toolName={message.toolName}
+            input={message.input}
+            result={message.result}
+            copyText={message.result?.text ?? ''}
             fork={fork}
           />
         ),
@@ -724,8 +704,8 @@ export function renderItemToBubble(
       return toolUseItem
     }
     case 'turn_end': {
-      const modelUsages = item.modelUsages ?? []
-      const itemContextUsage = item.contextUsage
+      const modelUsages = message.modelUsages ?? []
+      const itemContextUsage = message.contextUsage
       // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
       // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
       // 在 divider 容器层级也会失效。所以 fork icon 必须 inline 渲染在 content 内。
@@ -739,39 +719,41 @@ export function renderItemToBubble(
               <ContextUsageBar used={itemContextUsage.used} total={itemContextUsage.total} />
             )}
             <span className='text-[10px] text-[#6c7086]'>
-              <CheckCircleOutlined className={item.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'} />
-              <span className='ml-1'>{item.isError ? '执行出错' : '回合结束'}</span>
+              <CheckCircleOutlined
+                className={message.isError ? 'text-[#f38ba8]' : 'text-[#a6e3a1]'}
+              />
+              <span className='ml-1'>{message.isError ? '执行出错' : '回合结束'}</span>
             </span>
           </span>
         </div>
       )
       return {
-        key: item.id,
+        key: message.id,
         role: 'divider',
         content: inner,
       }
     }
     case 'agent_complete': {
       const completionText = [
-        item.outputName ? `完成 → ${item.outputName}` : '完成',
-        item.displayContent,
+        message.outputName ? `完成 → ${message.outputName}` : '完成',
+        message.displayContent,
       ]
         .filter(Boolean)
         .join('\n')
-      const breakdown = item.modelBreakdown ?? []
-      const itemContextUsage = item.contextUsage
+      const breakdown = message.modelBreakdown ?? []
+      const itemContextUsage = message.contextUsage
       return {
-        key: `${item.id}-complete`,
+        key: `${message.id}-complete`,
         role: 'ai',
         content: (
           <div className='flex'>
             <div>
               <CompleteTaskBody
-                outputName={item.outputName}
-                content={item.displayContent}
-                values={item.values}
+                outputName={message.outputName}
+                content={message.displayContent}
+                values={message.values}
               />
-              {(breakdown.length > 0 || item.totalCost !== undefined || itemContextUsage) && (
+              {(breakdown.length > 0 || message.totalCost !== undefined || itemContextUsage) && (
                 <div className='mt-2 border-t border-[#45475a] pt-2'>
                   <div className='mb-1 text-[10px] text-[#a6adc8]'>session 累计</div>
                   {breakdown.map((b) => (
@@ -785,9 +767,9 @@ export function renderItemToBubble(
                       />
                     </div>
                   )}
-                  {item.totalCost !== undefined && item.totalCost > 0 && (
+                  {message.totalCost !== undefined && message.totalCost > 0 && (
                     <div className='mt-1 text-[10px] text-[#a6adc8]'>
-                      合计 {formatTokenCost(item.totalCost)}
+                      合计 {formatTokenCost(message.totalCost)}
                     </div>
                   )}
                 </div>
@@ -802,14 +784,14 @@ export function renderItemToBubble(
     }
     case 'error': {
       return {
-        key: item.id,
+        key: message.id,
         role: 'ai',
         content: (
           <div className='flex min-w-20 flex-col gap-2'>
             <Tag color={'error'} className='self-start'>
               错误信息
             </Tag>
-            <div className='break-all whitespace-pre-wrap'>{item.message}</div>
+            <div className='break-all whitespace-pre-wrap'>{message.message}</div>
           </div>
         ),
       }
