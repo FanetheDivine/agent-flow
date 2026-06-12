@@ -384,7 +384,6 @@ function insertAfterParent(
   item: ChatMessage,
   parentToolUseId: string | undefined,
 ): number {
-  console.log(item)
   if (!parentToolUseId) {
     run.messages.push(item)
     return run.messages.length - 1

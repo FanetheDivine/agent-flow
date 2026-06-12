@@ -311,7 +311,7 @@ export const ChatPanel: FC<Props> = ({
                 onClick={() =>
                   modal.confirm({
                     title: '确认清空',
-                    content: '将清除当前工作流的全部对话记录和 ShareValues',
+                    content: '将清除当前工作流的全部对话记录和共享数据',
                     onOk: () => clearFlow(flowId),
                   })
                 }
