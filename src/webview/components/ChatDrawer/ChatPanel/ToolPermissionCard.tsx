@@ -193,27 +193,29 @@ export const ToolPermissionCard: FC<Props> = ({
         </pre>
       )}
 
-      <>
-        <RadioWithInput
-            options={options}
-            inputTriggerValue={DENY_WITH_REASON_VALUE}
-            value={isActive ? selection : historicalValue}
-            inputValue={isActive ? denyReason : answered?.reason}
-            disabled={!isActive}
-            inputPlaceholder={'输入原因...'}
-            onChange={handleSelectionChange}
-            onInputChange={setDenyReason}
-            onInputKeyDown={handleKeyDown}
-          />
+      {!isEditDiff && (
+        <>
+          <RadioWithInput
+              options={options}
+              inputTriggerValue={DENY_WITH_REASON_VALUE}
+              value={isActive ? selection : historicalValue}
+              inputValue={isActive ? denyReason : answered?.reason}
+              disabled={!isActive}
+              inputPlaceholder={'输入原因...'}
+              onChange={handleSelectionChange}
+              onInputChange={setDenyReason}
+              onInputKeyDown={handleKeyDown}
+            />
 
-          {isActive && (
-            <div className='flex justify-end'>
-              <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
-                发送
-              </Button>
-            </div>
-          )}
-        </>
+            {isActive && (
+              <div className='flex justify-end'>
+                <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
+                  发送
+                </Button>
+              </div>
+            )}
+          </>
+      )}
     </div>
   )
 }
