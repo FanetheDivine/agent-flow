@@ -98,6 +98,8 @@ export function activate(context: vscode.ExtensionContext) {
   }
   const flowRunStateManager = new FlowRunStateManager()
   let currentFlows: PersistedData = { flows: [] }
+  /** 全局文件 workspaceRunStates 的内存缓存（key = workspaceRoot） */
+  let cachedWorkspaceRunStates: Record<string, Record<string, FlowRunState>> = {}
 
   const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
     if (msg.type === 'batchMessages') {
@@ -130,8 +132,8 @@ export function activate(context: vscode.ExtensionContext) {
         currentPanel.webview.postMessage({ type: 'batchMessages', data: pendingMessages })
         pendingMessages = []
       }
-      // 同一节流周期内写入项目 flowRunStates：先重置标志，防止 save 期间到来的新 signal 丢失
-      if (pendingProjectStatePersist && projectStore) {
+      // 同一节流周期内写入项目运行态：先重置标志，防止 save 期间到来的新 signal 丢失
+      if (pendingProjectStatePersist && workspaceRoot) {
         pendingProjectStatePersist = false
         const projectFlows = currentFlows.flows.filter((f) => f.project)
         const strippedProject = projectFlows.map(stripFlowRuntimeFields)
@@ -141,12 +143,26 @@ export function activate(context: vscode.ExtensionContext) {
         for (const id of projectFlowIds) {
           if (allStates[id]) projectRunStates[id] = allStates[id]
         }
-        projectStore
+        // 项目文件只保存 flows（flowRunStates 已迁移至全局文件 workspaceRunStates）
+        if (projectStore) {
+          projectStore
+            .save({ flows: strippedProject })
+            .catch((err) => logError('[flushMessages] projectStore.save failed', err))
+        }
+        // 运行态写入全局文件（按 workspaceRoot 分组）
+        cachedWorkspaceRunStates[workspaceRoot] = projectRunStates
+        const globalFlows = currentFlows.flows.filter((f) => !f.project).map(stripFlowRuntimeFields)
+        globalStore
           .save({
-            flows: strippedProject,
-            flowRunStates: Object.keys(projectRunStates).length > 0 ? projectRunStates : undefined,
+            flows: globalFlows,
+            workspaceRunStates:
+              Object.keys(cachedWorkspaceRunStates).length > 0
+                ? cachedWorkspaceRunStates
+                : undefined,
           })
-          .catch((err) => logError('[flushMessages] projectStore.save failed', err))
+          .catch((err) =>
+            logError('[flushMessages] globalStore.save workspaceRunStates failed', err),
+          )
       }
     },
     300,
@@ -425,7 +441,9 @@ export function activate(context: vscode.ExtensionContext) {
           const projectFlows = projectData.flows.map((f) => ({ ...f, project: true as const }))
           // 仅当全局与项目 flows 同时为空，才使用 defaultStore.flows 作为全局 flows 初始值
           const rawGlobalFlows =
-            globalData.flows.length === 0 ? defaultStore.flows : globalData.flows
+            globalData.flows.length === 0 && projectData.flows.length === 0
+              ? defaultStore.flows
+              : globalData.flows
           const globalFlows = rawGlobalFlows.map((f) => {
             const { project: _, ...rest } = f
             return rest
@@ -454,10 +472,19 @@ export function activate(context: vscode.ExtensionContext) {
             runnerManager.disposeRunner(flowId),
           )
 
-          // 恢复项目 flowRunStates（崩溃恢复）
-          if (projectData.flowRunStates) {
+          // 初始化全局 workspaceRunStates 缓存
+          cachedWorkspaceRunStates = globalData.workspaceRunStates ?? {}
+
+          // 确定本次 workspace 的运行态来源：
+          //   优先用全局文件 workspaceRunStates[workspaceRoot]
+          //   若不存在，检查旧项目文件 flowRunStates（一次性迁移写入缓存）
+          const restoredRunStates: Record<string, FlowRunState> = workspaceRoot
+            ? (cachedWorkspaceRunStates[workspaceRoot] ?? {})
+            : {}
+
+          if (Object.keys(restoredRunStates).length > 0) {
             const allStates = flowRunStateManager.getFlowRunStates()
-            for (const [flowId, state] of Object.entries(projectData.flowRunStates)) {
+            for (const [flowId, state] of Object.entries(restoredRunStates)) {
               if (mergedFlows.some((f) => f.id === flowId) && !allStates[flowId]) {
                 const normalized = normalizeRestoredFlowRunState(state)
                 flowRunStateManager.setRunState(flowId, normalized)
@@ -507,21 +534,29 @@ export function activate(context: vscode.ExtensionContext) {
             runnerManager.disposeRunner(flowId),
           )
 
-          // 分别写入全局和项目存储
-          await globalStore.save({ flows: strippedGlobal })
-          if (projectStore) {
-            // 项目文件附带 flowRunStates（崩溃恢复）
+          // 合并/更新当前 workspace 的项目运行态快照，确保 save 写盘时不丢失最新 flowRunStates
+          if (workspaceRoot) {
             const projectFlowIds = new Set(projectFlows.map((f) => f.id))
             const allStates = flowRunStateManager.getFlowRunStates()
             const projectRunStates: Record<string, FlowRunState> = {}
             for (const id of projectFlowIds) {
               if (allStates[id]) projectRunStates[id] = allStates[id]
             }
-            await projectStore.save({
-              flows: strippedProject,
-              flowRunStates:
-                Object.keys(projectRunStates).length > 0 ? projectRunStates : undefined,
-            })
+            cachedWorkspaceRunStates[workspaceRoot] = projectRunStates
+          }
+
+          // 分别写入全局和项目存储
+          // 全局文件：flows + 缓存的 workspaceRunStates（运行态由 flushMessages 实时维护）
+          await globalStore.save({
+            flows: strippedGlobal,
+            workspaceRunStates:
+              Object.keys(cachedWorkspaceRunStates).length > 0
+                ? cachedWorkspaceRunStates
+                : undefined,
+          })
+          // 项目文件：只保存 flows（flowRunStates 已迁移至全局文件 workspaceRunStates）
+          if (projectStore) {
+            await projectStore.save({ flows: strippedProject })
           }
         })
         .with({ type: 'previewAttachment' }, async ({ data }) => {

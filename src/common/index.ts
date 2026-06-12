@@ -193,7 +193,8 @@ export type AskUserQuestionOutput = {
 /** 持久化到本地的 flows */
 export const PersistedDataSchema = z.object({
   flows: z.array(FlowSchema),
-  flowRunStates: z.record(z.string(), FlowRunStateSchema).optional(),
+  /** 全局文件使用：按 workspaceRoot 字符串 key 映射到该 workspace 的项目运行态 */
+  workspaceRunStates: z.record(z.string(), z.record(z.string(), FlowRunStateSchema)).optional(),
 })
 
 /** @see {@link PersistedDataSchema} */
