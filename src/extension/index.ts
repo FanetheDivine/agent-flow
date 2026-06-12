@@ -3,21 +3,23 @@ import { throttle } from 'lodash-es'
 import * as path from 'path'
 import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
-import type {
-  AgentRun,
-  ExtensionFlowCommandEvents,
-  ExtensionFlowCommandMessage,
-  ExtensionFlowSignalMessage,
-  ExtensionFromWebviewMessage,
-  ExtensionToWebviewMessage,
-  Flow,
-  FlowRunState,
-  PersistedData,
+import {
+  type AgentRun,
+  type ExtensionFlowCommandEvents,
+  type ExtensionFlowCommandMessage,
+  type ExtensionFlowSignalMessage,
+  type ExtensionFromWebviewMessage,
+  type ExtensionToWebviewMessage,
+  type Flow,
+  type FlowRunState,
+  type PersistedData,
+  stripFlowRuntimeFields,
 } from '@/common'
-import { markInterrupted } from '@/common'
+import { markInterrupted, normalizeRestoredFlowRunState } from '@/common'
 import { FlowRunStateManager } from './FlowRunStateManager'
 import { FlowRunnerManager } from './FlowRunnerManager'
 import { PersistedDataController } from './PersistedDataController'
+import { defaultStore } from './PersistedDataController/defaultStore'
 import { initLogger, log, logError, summarizeLogPayload } from './logger'
 
 /** 扩展名 → VSCode languageId（仅覆盖常见语言，未命中时保持 plaintext） */
@@ -83,10 +85,17 @@ export function activate(context: vscode.ExtensionContext) {
   let webviewReady = false
   /** webview load前的消息/缓存的ai消息 */
   let pendingMessages: ExtensionToWebviewMessage[] = []
+  /** 当前节流周期内是否有 flow.signal.* 被处理，触发项目 flowRunStates 写盘 */
+  let pendingProjectStatePersist = false
 
   // 把 runner / 持久化 / 状态镜像 提到 activate 作用域：webview 关闭后这些对象继续存活，
   // 等下次开 panel 重连。
-  const flowStore = new PersistedDataController()
+  const globalStore = PersistedDataController.globalStore()
+  let projectStore: PersistedDataController | undefined
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  if (workspaceRoot) {
+    projectStore = PersistedDataController.projectStore(workspaceRoot)
+  }
   const flowRunStateManager = new FlowRunStateManager()
   let currentFlows: PersistedData = { flows: [] }
 
@@ -107,6 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
     // signal 进入前先喂给状态镜像，确保 webview 不在时 extension 这边状态依然完整
     if (msg.type.startsWith('flow.signal.')) {
       flowRunStateManager.applySignal(msg as ExtensionFlowSignalMessage)
+      pendingProjectStatePersist = true
     }
     flushMessages()
     if (msg.type !== 'flow.signal.aiMessage' || msg.data.message.type !== 'stream_event') {
@@ -119,6 +129,24 @@ export function activate(context: vscode.ExtensionContext) {
       if (currentPanel && pendingMessages.length > 0 && webviewReady) {
         currentPanel.webview.postMessage({ type: 'batchMessages', data: pendingMessages })
         pendingMessages = []
+      }
+      // 同一节流周期内写入项目 flowRunStates：先重置标志，防止 save 期间到来的新 signal 丢失
+      if (pendingProjectStatePersist && projectStore) {
+        pendingProjectStatePersist = false
+        const projectFlows = currentFlows.flows.filter((f) => f.project)
+        const strippedProject = projectFlows.map(stripFlowRuntimeFields)
+        const projectFlowIds = new Set(projectFlows.map((f) => f.id))
+        const allStates = flowRunStateManager.getFlowRunStates()
+        const projectRunStates: Record<string, FlowRunState> = {}
+        for (const id of projectFlowIds) {
+          if (allStates[id]) projectRunStates[id] = allStates[id]
+        }
+        projectStore
+          .save({
+            flows: strippedProject,
+            flowRunStates: Object.keys(projectRunStates).length > 0 ? projectRunStates : undefined,
+          })
+          .catch((err) => logError('[flushMessages] projectStore.save failed', err))
       }
     },
     300,
@@ -387,17 +415,34 @@ export function activate(context: vscode.ExtensionContext) {
       log('[Webview → Extension]', e.type, summarizeLogPayload(e.type, e.data))
       match(e)
         .with({ type: 'load' }, async () => {
-          const diskFlows = await flowStore.load()
+          // 并行加载全局 + 项目存储
+          const [globalData, projectData] = await Promise.all([
+            globalStore.load(),
+            projectStore?.load() ?? Promise.resolve({ flows: [] } as PersistedData),
+          ])
+
+          // 项目 flows 标 project: true，全局保持原样
+          const projectFlows = projectData.flows.map((f) => ({ ...f, project: true as const }))
+          // 仅当全局与项目 flows 同时为空，才使用 defaultStore.flows 作为全局 flows 初始值
+          const rawGlobalFlows =
+            globalData.flows.length === 0 ? defaultStore.flows : globalData.flows
+          const globalFlows = rawGlobalFlows.map((f) => {
+            const { project: _, ...rest } = f
+            return rest
+          })
+
+          // 合并：全局 flows 在前 + 项目 flows
+          const allFlows = [...globalFlows, ...projectFlows]
+
+          // 保留内存中有消息但磁盘不存在的 flow
           const memoryFlows = currentFlows.flows
           const memoryRunStates = flowRunStateManager.getFlowRunStates()
           const hasMessages = (flowId: string) => {
             const state = memoryRunStates[flowId]
             return state?.runs?.some((r) => r.messages?.length > 0) ?? false
           }
-          // 合并时磁盘 flow 为基准
-          const mergedFlows = diskFlows.flows
-          // 追加磁盘不存在且内存有消息的flow
-          const diskFlowIds = new Set(diskFlows.flows.map((f) => f.id))
+          const diskFlowIds = new Set(allFlows.map((f) => f.id))
+          const mergedFlows = [...allFlows]
           for (const memFlow of memoryFlows) {
             if (!diskFlowIds.has(memFlow.id) && hasMessages(memFlow.id)) {
               mergedFlows.push(memFlow)
@@ -408,6 +453,37 @@ export function activate(context: vscode.ExtensionContext) {
           flowRunStateManager.applyFlows(currentFlows.flows, (flowId) =>
             runnerManager.disposeRunner(flowId),
           )
+
+          // 恢复项目 flowRunStates（崩溃恢复）
+          if (projectData.flowRunStates) {
+            const allStates = flowRunStateManager.getFlowRunStates()
+            for (const [flowId, state] of Object.entries(projectData.flowRunStates)) {
+              if (mergedFlows.some((f) => f.id === flowId) && !allStates[flowId]) {
+                const normalized = normalizeRestoredFlowRunState(state)
+                flowRunStateManager.setRunState(flowId, normalized)
+                // 为最后一个可继续的 agent run 注册 lazy runner
+                const flow = mergedFlows.find((f) => f.id === flowId)
+                if (flow) {
+                  for (let i = normalized.runs.length - 1; i >= 0; i--) {
+                    const run = normalized.runs[i]
+                    if (run.interrupted && run.sessionId) {
+                      const agent = flow.agents?.find((a) => a.id === run.agentId)
+                      if (agent && agent.node_type === 'agent') {
+                        runnerManager.spawnForRestore({
+                          flowId,
+                          runId: run.runId,
+                          agentId: run.agentId,
+                          resumeSessionId: run.sessionId,
+                        })
+                        break
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           postMessageToWebview({
             type: 'load',
             data: {
@@ -417,12 +493,36 @@ export function activate(context: vscode.ExtensionContext) {
           })
         })
         .with({ type: 'save' }, async ({ data }) => {
-          const storeData: PersistedData = { flows: data }
-          currentFlows = storeData
+          // 按 project 标记分区
+          const projectFlows = data.filter((f) => f.project)
+          const globalFlows = data.filter((f) => !f.project)
+
+          // 剥除运行时标记后持久化
+          const strippedProject = projectFlows.map(stripFlowRuntimeFields)
+          const strippedGlobal = globalFlows.map(stripFlowRuntimeFields)
+
+          // 内存保留完整数据（含 project 标记，UI 需要）
+          currentFlows = { flows: data }
           flowRunStateManager.applyFlows(currentFlows.flows, (flowId) =>
             runnerManager.disposeRunner(flowId),
           )
-          await flowStore.save(storeData)
+
+          // 分别写入全局和项目存储
+          await globalStore.save({ flows: strippedGlobal })
+          if (projectStore) {
+            // 项目文件附带 flowRunStates（崩溃恢复）
+            const projectFlowIds = new Set(projectFlows.map((f) => f.id))
+            const allStates = flowRunStateManager.getFlowRunStates()
+            const projectRunStates: Record<string, FlowRunState> = {}
+            for (const id of projectFlowIds) {
+              if (allStates[id]) projectRunStates[id] = allStates[id]
+            }
+            await projectStore.save({
+              flows: strippedProject,
+              flowRunStates:
+                Object.keys(projectRunStates).length > 0 ? projectRunStates : undefined,
+            })
+          }
         })
         .with({ type: 'previewAttachment' }, async ({ data }) => {
           const { name, content } = data
@@ -530,7 +630,14 @@ export function activate(context: vscode.ExtensionContext) {
     },
   )
 
-  context.subscriptions.push(openPanel, addSelectionToInput)
+  context.subscriptions.push(
+    openPanel,
+    addSelectionToInput,
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      const newRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      projectStore = newRoot ? PersistedDataController.projectStore(newRoot) : undefined
+    }),
+  )
 }
 
 export function deactivate() {}
