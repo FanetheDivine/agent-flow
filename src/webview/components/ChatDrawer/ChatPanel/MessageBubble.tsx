@@ -578,7 +578,7 @@ export function chatMessageToBubble(
       const effectiveAnswered = answered
         ? { allow: answered.allow, reason: answered.message }
         : message.status === 'done'
-          ? { allow: true }
+          ? { allow: !message.result?.isError }
           : message.status === 'interrupted'
             ? { allow: false }
             : undefined
@@ -586,7 +586,11 @@ export function chatMessageToBubble(
       // Edit 工具：走 ToolPermissionCard editDiff 变体；pending 时移至底部活动卡片，历史态内联展示
       if (message.toolName === 'Edit') {
         if (isPending) return null
-        const input = message.input as { file_path?: string; old_string?: string; new_string?: string }
+        const input = message.input as {
+          file_path?: string
+          old_string?: string
+          new_string?: string
+        }
         return {
           key: message.id + '-edit-diff',
           role: 'system' as const,
