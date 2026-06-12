@@ -532,7 +532,7 @@ export function chatMessageToBubble(
       }
     }
     case 'text': {
-      const md = <Md content={message.text} />
+      const md = <Md content={message.text} className='flex-1 overflow-hidden' />
       if (message.status === 'streaming') {
         return { key: message.id, role: 'ai', content: md }
       }
@@ -798,7 +798,6 @@ export function chatMessageToBubble(
     }
   }
 }
-
 
 /** 给子项气泡内容包一层 ml-4 缩进，表达从属于父 Agent tool_use */
 export function indentBubble(b: RenderedBubble): RenderedBubble {
