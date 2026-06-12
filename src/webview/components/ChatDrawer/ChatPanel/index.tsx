@@ -1,6 +1,12 @@
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type FC } from 'react'
-import { Button, Skeleton, Tag, Tooltip } from 'antd'
-import { CloseOutlined, RobotOutlined, SendOutlined, StopOutlined } from '@ant-design/icons'
+import { App, Button, Skeleton, Tag, Tooltip } from 'antd'
+import {
+  CloseOutlined,
+  PauseCircleOutlined,
+  RobotOutlined,
+  SendOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 import { Welcome } from '@ant-design/x'
 import { AnimatePresence, motion } from 'motion/react'
 import { match, P } from 'ts-pattern'
@@ -56,7 +62,9 @@ export const ChatPanel: FC<Props> = ({
   ref,
 }) => {
   const killFlow = useFlowStore((s) => s.killFlow)
+  const clearFlow = useFlowStore((s) => s.clearFlow)
   const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
+  const { modal } = App.useApp()
 
   const agentName = useFlowStore(
     (s) =>
@@ -284,25 +292,43 @@ export const ChatPanel: FC<Props> = ({
             </Tag>
           )}
         </div>
-        {canKillFlow && (
-          <Tooltip title='停止工作流，不清空shareValues'>
-            <Button
-              size='small'
-              danger
-              type='text'
-              icon={<StopOutlined />}
-              onClick={() => killFlow(flowId)}
-            />
-          </Tooltip>
-        )}
-        <Button
-          size='small'
-          type='text'
-          icon={<CloseOutlined />}
-          onClick={onClose}
-          className='ml-auto'
-          style={{ color: '#6c7086' }}
-        />
+        <div className='flex items-center'>
+          {canKillFlow && (
+            <Tooltip title='停止工作流，不清空shareValues'>
+              <Button
+                size='small'
+                danger
+                type='text'
+                icon={<PauseCircleOutlined />}
+                onClick={() => killFlow(flowId)}
+              />
+            </Tooltip>
+          )}
+          {flowPhase !== 'idle' && (
+            <Tooltip title='清空工作流对话记录和 ShareValues'>
+              <Button
+                size='small'
+                danger
+                type='text'
+                icon={<StopOutlined />}
+                onClick={() =>
+                  modal.confirm({
+                    title: '确认清空',
+                    content: '将清除当前工作流的全部对话记录和 ShareValues',
+                    onOk: () => clearFlow(flowId),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
+          <Button
+            size='small'
+            type='text'
+            icon={<CloseOutlined />}
+            onClick={onClose}
+            style={{ color: '#6c7086' }}
+          />
+        </div>
       </div>
       {/* Messages */}
       {match({
