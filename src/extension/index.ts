@@ -478,20 +478,18 @@ export function activate(context: vscode.ExtensionContext) {
             ? vscode.Uri.file(file_path)
             : vscode.Uri.joinPath(folders?.[0]?.uri ?? vscode.Uri.file(''), file_path)
           const title = `Diff: ${file_path}`
+          const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+          const virtualUri = vscode.Uri.parse(`${DIFF_SCHEME}://diff/${key}.${ext}`)
           try {
-            const raw = await vscode.workspace.fs.readFile(fileUri)
-            const fileContent = Buffer.from(raw).toString('utf-8')
-            const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-            const virtualUri = vscode.Uri.parse(`${DIFF_SCHEME}://diff/${key}.${ext}`)
             if (status === 'success') {
-              diffVirtualDocs.set(virtualUri.toString(), fileContent.replace(new_string, old_string))
+              diffVirtualDocs.set(virtualUri.toString(), old_string)
               await vscode.commands.executeCommand('vscode.diff', virtualUri, fileUri, title)
             } else {
-              diffVirtualDocs.set(virtualUri.toString(), fileContent.replace(old_string, new_string))
+              diffVirtualDocs.set(virtualUri.toString(), new_string)
               await vscode.commands.executeCommand('vscode.diff', fileUri, virtualUri, title)
             }
           } catch {
-            // 文件不存在时静默忽略
+            // diff 编辑器打开失败时静默忽略
           }
         })
         .with({ type: P.string.startsWith('flow.command.') }, async (e) => {

@@ -1,8 +1,9 @@
 import { ReactNode, useLayoutEffect, useRef, useState, type FC } from 'react'
 import { Button, Tag } from 'antd'
-import { CheckOutlined, SafetyOutlined, ScheduleOutlined, StopOutlined } from '@ant-design/icons'
+import { CheckOutlined, EditOutlined, SafetyOutlined, ScheduleOutlined, StopOutlined } from '@ant-design/icons'
 import { match, P } from 'ts-pattern'
 import { RadioWithInput } from './RadioWithInput'
+import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
 
 const ALLOW_VALUE = 'allow'
 const DENY_VALUE = 'deny'
@@ -27,6 +28,13 @@ type Props = {
     planFilePath: string
     onViewPlan?: () => void
   }
+  /** Edit 工具专属：显示"文件变更"样式 */
+  editDiff?: {
+    filePath: string
+    oldString: string
+    newString: string
+    status: 'pending' | 'success' | 'error'
+  }
   onChangeHeight?: (height: number) => void
   fork?: ReactNode
 }
@@ -47,11 +55,13 @@ export const ToolPermissionCard: FC<Props> = ({
   onAllow,
   onDeny,
   exitPlan,
+  editDiff,
   fork,
   onChangeHeight,
 }) => {
   const isActive = mode === 'active'
   const isExitPlan = !!exitPlan
+  const isEditDiff = !!editDiff
   const [selection, setSelection] = useState<string | undefined>(undefined)
   const [denyReason, setDenyReason] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
@@ -103,21 +113,23 @@ export const ToolPermissionCard: FC<Props> = ({
       className='flex flex-col gap-2 overflow-x-hidden rounded-md border border-[#45475a] bg-[#181825] px-3 py-2'
     >
       <div className='flex items-center gap-2'>
-        {isExitPlan ? (
+        {isEditDiff ? (
+          <EditOutlined className='text-[#89b4fa]' />
+        ) : isExitPlan ? (
           <ScheduleOutlined className='text-[#89b4fa]' />
         ) : (
           <SafetyOutlined className='text-[#f9e2af]' />
         )}
         <span className='font-semibold text-[#cdd6f4]'>
-          {isExitPlan ? '计划已生成' : '请求使用工具'}
+          {isEditDiff ? '文件变更' : isExitPlan ? '计划已生成' : '请求使用工具'}
         </span>
         {fork}
-        {!isExitPlan && (
+        {!isExitPlan && !isEditDiff && (
           <Tag color='warning' className='m-0 text-xs'>
             {toolName}
           </Tag>
         )}
-        {mode === 'historical' && answered && (
+        {!isEditDiff && mode === 'historical' && answered && (
           <Tag
             color={answered.allow ? 'success' : 'error'}
             className='m-0 ml-auto text-[10px]'
@@ -132,9 +144,48 @@ export const ToolPermissionCard: FC<Props> = ({
                 : '已拒绝'}
           </Tag>
         )}
+        {isEditDiff && editDiff && match(editDiff.status)
+          .with('success', () => (
+            <Tag color='success' className='m-0 ml-auto text-[10px]'>
+              已应用
+            </Tag>
+          ))
+          .with('error', () => (
+            <Tag color='error' className='m-0 ml-auto text-[10px]'>
+              已中断
+            </Tag>
+          ))
+          .with('pending', () => (
+            <Tag color='processing' className='m-0 ml-auto text-[10px]'>
+              执行中
+            </Tag>
+          ))
+          .exhaustive()}
       </div>
 
-      {isExitPlan ? (
+      {isEditDiff && editDiff ? (
+        <span className='text-[#cdd6f4]'>
+          {editDiff.filePath}，
+          <a
+            href='#'
+            onClick={(e) => {
+              e.preventDefault()
+              postMessageToExtension({
+                type: 'openDiff',
+                data: {
+                  file_path: editDiff.filePath,
+                  old_string: editDiff.oldString,
+                  new_string: editDiff.newString,
+                  status: editDiff.status,
+                },
+              })
+            }}
+            className='text-[#89b4fa] hover:underline'
+          >
+            点击查看差异
+          </a>
+        </span>
+      ) : isExitPlan ? (
         <span className='text-[#cdd6f4]'>
           计划已生成，
           <a
@@ -154,24 +205,28 @@ export const ToolPermissionCard: FC<Props> = ({
         </pre>
       )}
 
-      <RadioWithInput
-        options={options}
-        inputTriggerValue={DENY_WITH_REASON_VALUE}
-        value={isActive ? selection : historicalValue}
-        inputValue={isActive ? denyReason : answered?.reason}
-        disabled={!isActive}
-        inputPlaceholder={'输入原因...'}
-        onChange={handleSelectionChange}
-        onInputChange={setDenyReason}
-        onInputKeyDown={handleKeyDown}
-      />
+      {!isEditDiff && (
+        <>
+          <RadioWithInput
+            options={options}
+            inputTriggerValue={DENY_WITH_REASON_VALUE}
+            value={isActive ? selection : historicalValue}
+            inputValue={isActive ? denyReason : answered?.reason}
+            disabled={!isActive}
+            inputPlaceholder={'输入原因...'}
+            onChange={handleSelectionChange}
+            onInputChange={setDenyReason}
+            onInputKeyDown={handleKeyDown}
+          />
 
-      {isActive && (
-        <div className='flex justify-end'>
-          <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
-            发送
-          </Button>
-        </div>
+          {isActive && (
+            <div className='flex justify-end'>
+              <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
+                发送
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

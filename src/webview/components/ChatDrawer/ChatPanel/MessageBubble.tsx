@@ -10,7 +10,6 @@ import { FileRefChip } from '@/webview/components/FileRefChip'
 import { CopyButton, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
-import { EditDiffCard } from './EditDiffCard'
 import { ToolUseDetails } from './ToolUseDetails'
 
 export type BubbleCtx = {
@@ -576,7 +575,7 @@ export function chatMessageToBubble(
       const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
 
-      // Edit 工具：专用 EditDiffCard，不走 ToolUseDetails
+      // Edit 工具：走 ToolPermissionCard editDiff 变体，不走 ToolUseDetails
       if (message.toolName === 'Edit') {
         const input = message.input as { file_path?: string; old_string?: string; new_string?: string }
         const status = match(message.status)
@@ -588,11 +587,16 @@ export function chatMessageToBubble(
           key: message.id + '-edit-diff',
           role: 'system' as const,
           content: (
-            <EditDiffCard
-              filePath={input.file_path ?? ''}
-              oldString={input.old_string ?? ''}
-              newString={input.new_string ?? ''}
-              status={status}
+            <ToolPermissionCard
+              toolName='Edit'
+              input={message.input}
+              mode='historical'
+              editDiff={{
+                filePath: input.file_path ?? '',
+                oldString: input.old_string ?? '',
+                newString: input.new_string ?? '',
+                status,
+              }}
               fork={fork}
             />
           ),
