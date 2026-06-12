@@ -189,10 +189,22 @@ export function activate(context: vscode.ExtensionContext) {
     const runIdx = state.runs.findIndex((r) => r.runId === target.runId)
     if (runIdx < 0) return undefined
     const run = state.runs[runIdx]
+    let messageToolUseId: string | undefined
     let messageIdx = -1
     for (let j = 0; j < run.messages.length; j++) {
-      if (run.messages[j].uuid === target.messageUuid) messageIdx = j
+      const curMessage = run.messages[j]
+      if (run.messages[j].uuid === target.messageUuid) {
+        messageIdx = j
+        if (curMessage.kind === 'tool_use') {
+          messageToolUseId = curMessage.toolUseId
+        }
+      }
+      // 需要包含所有子消息
+      if (curMessage.parentToolUseId === messageToolUseId) {
+        messageIdx = j
+      }
     }
+
     if (messageIdx < 0) return undefined
     return {
       runIdx,
@@ -255,7 +267,6 @@ export function activate(context: vscode.ExtensionContext) {
     const slicedMessages = targetRun.messages
       .slice(0, messageIdx + 1)
       .map((m) => structuredClone(m))
-
     // 用双 transcript（源 session + 新 session）建 srcUuid→newUuid 映射，
     // 据此替换切片中所有带 uuid 的 ChatMessage（累加态模型 uuid 在项顶层）。
     // forkSession 的新 session transcript 是源 session 的保序前缀切片，按位置严格对应，
