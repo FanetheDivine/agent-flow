@@ -133,15 +133,8 @@ export const formatTokenCost = (cost: number): string => {
 }
 
 // ── SDK 类型派生（indexed access + Extract，零额外依赖） ───────────────────────
-//
-// claude-agent-sdk 未 re-export Beta 命名,顶层消息类型已携带,用 indexed access
-// 派生内容块 / 流式事件 / delta 子类型,Extract 取具体判别分支。
-
-type BetaMessage = SDKAssistantMessage['message']
-type ContentBlock = BetaMessage['content'][number]
 type StreamEvent = SDKPartialAssistantMessage['event']
 type UserContent = SDKUserMessage['message']['content']
-type ContentBlockOf<T extends ContentBlock['type']> = Extract<ContentBlock, { type: T }>
 type StreamEventOf<T extends StreamEvent['type']> = Extract<StreamEvent, { type: T }>
 type DeltaOf<T extends StreamEventOf<'content_block_delta'>['delta']['type']> = Extract<
   StreamEventOf<'content_block_delta'>['delta'],
@@ -198,7 +191,12 @@ export type ToolUseMessage = Base & {
   /** tool_result 合并后填充 */
   result?: ToolResult
 }
-export type UserMessage = Base & { kind: 'user'; rawContent: UserContent }
+export type UserMessage = Base & {
+  kind: 'user'
+  rawContent: UserContent
+  /** 首条用户消息注入的共享存储 */
+  injectedShareValues?: Record<string, string | null>
+}
 /** 普通回合结束 —— 替代原始 SDK result 信号,携带本回合 token 增量与窗口占用 */
 export type TurnEndMessage = Base & {
   kind: 'turn_end'
@@ -285,11 +283,6 @@ export type AgentRun = {
   messages: ChatMessage[]
   completed: boolean
   outputName?: string
-  /**
-   * run 启动时点注入 system prompt 的 shareValues 快照:
-   * agent 节点按 allowed_read_values_keys 过滤,code 节点为全量 shareValues。仅展示用。
-   */
-  injectedShareValues?: Record<string, string | null>
   /** agentError / error 分支写入 → phase=error */
   error?: string
   /** agentInterrupted→true;下一条 aiMessage 累加时清 false */
@@ -571,7 +564,11 @@ const isToolResultBlock = (b: unknown): boolean =>
  * result 不在此处理 —— 普通回合 result 由 reducer 显式 push turn_end。
  * userMessage&tool_use_id 为tooluse设置uuid;流式消息不设置uuid；assisant为最后一个thinking/text块设置uuid
  */
-function appendSdkMessage(run: AgentRun, sdkMsg: AIMessageType): void {
+function appendSdkMessage(
+  run: AgentRun,
+  sdkMsg: AIMessageType,
+  injectedShareValues?: Record<string, string | null>,
+): void {
   match(sdkMsg)
     // ── 流式事件 ──────────────────────────────────────────────
     .with({ type: 'stream_event' }, (m: SDKPartialAssistantMessage) => {
@@ -663,6 +660,7 @@ function appendSdkMessage(run: AgentRun, sdkMsg: AIMessageType): void {
         rawContent: content,
         parentToolUseId: parent,
         uuid: m.uuid,
+        injectedShareValues,
       })
     })
     // ── system/init:捕获主模型,重置 token 累计中间态（不建展示项） ──
@@ -811,11 +809,10 @@ export function updateFlowRunState(
       sessionId: undefined,
       messages: [],
       completed: false,
-      injectedShareValues,
       acc: emptyAcc(),
     }
     // 把 initMessage 累加为首条 user 项（替代直接塞 raw signal）
-    appendSdkMessage(firstRun, msg.data.initMessage)
+    appendSdkMessage(firstRun, msg.data.initMessage, injectedShareValues)
     const fresh: FlowRunState = {
       killed: false,
       runs: [firstRun],
@@ -977,16 +974,19 @@ export function updateFlowRunState(
             sessionId: undefined,
             messages: [],
             completed: false,
-            injectedShareValues:
-              nextAgent.node_type === 'code'
-                ? { ...draft.shareValues }
-                : pickInjectedShareValues(
-                    nextAgent.allowed_read_values_keys ?? [],
-                    draft.shareValues,
-                  ),
+
             acc: emptyAcc(),
           }
-          appendSdkMessage(newRun, nextInitMessage)
+          appendSdkMessage(
+            newRun,
+            nextInitMessage,
+            nextAgent.node_type === 'code'
+              ? { ...draft.shareValues }
+              : pickInjectedShareValues(
+                  nextAgent.allowed_read_values_keys ?? [],
+                  draft.shareValues,
+                ),
+          )
           draft.runs.push(newRun)
         } else {
           // Flow 走到末端:全部 run 完成,清空 shareValues 防污染下次启动
