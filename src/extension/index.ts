@@ -478,11 +478,12 @@ export function activate(context: vscode.ExtensionContext) {
             ? vscode.Uri.file(file_path)
             : vscode.Uri.joinPath(folders?.[0]?.uri ?? vscode.Uri.file(''), file_path)
           const title = `Diff: ${file_path}`
-          const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+          const key = crypto.randomUUID()
           const virtualUri = vscode.Uri.parse(`${DIFF_SCHEME}://diff/${key}.${ext}`)
           try {
             const rawBytes = await vscode.workspace.fs.readFile(fileUri)
-            const fileText = Buffer.from(rawBytes).toString('utf-8')
+            // 统一为 \n —— 磁盘文件可能带 \r\n（Windows），SDK 的 old_string/new_string 始终用 \n，不统一会导致 replace 静默失败
+            const fileText = Buffer.from(rawBytes).toString('utf-8').replace(/\r\n/g, '\n')
             if (status === 'success') {
               diffVirtualDocs.set(virtualUri.toString(), fileText.replace(new_string, old_string))
               await vscode.commands.executeCommand('vscode.diff', virtualUri, fileUri, title)
