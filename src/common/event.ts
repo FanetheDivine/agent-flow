@@ -55,6 +55,8 @@ export type ExtensionFromWebviewEvents = {
   openFile: { filename: string; line?: [number, number]; placement?: 'active' | 'beside' }
   /** 在 VSCode 中预览一段外部粘入的文本附件（非文件系统文件） */
   previewAttachment: { name: string; content: string }
+  /** 打开 VSCode diff 编辑器展示文件变更 */
+  openDiff: { file_path: string; old_string: string; new_string: string; status: 'pending' | 'success' | 'error' }
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的消息 */
@@ -236,6 +238,14 @@ type FlowCommandPayload = {
    */
   fork: {
     target: { runId: string; messageUuid: string }
+  }
+  /** 清空 Flow：销毁 FlowRunner，清除全部对话记录和 shareValues，仅需 flowId */
+  clearFlow: object
+  /** 在已有 state 基础上追加新 AgentRun，保留 shareValues 和 answeredToolPermissions */
+  continueFlow: {
+    runId: string
+    agentId: string
+    initMessage: UserMessageType
   }
 }
 

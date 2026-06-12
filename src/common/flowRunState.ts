@@ -390,7 +390,6 @@ function insertAfterParent(
   item: ChatMessage,
   parentToolUseId: string | undefined,
 ): number {
-  console.log(item)
   if (!parentToolUseId) {
     run.messages.push(item)
     return run.messages.length - 1
@@ -449,27 +448,6 @@ function pushStreamItem(
   return idx
 }
 
-/** 新建 pending tool_use 占位项,登记 activeBlocks + toolUseIndex */
-function startTool(
-  run: AgentRun,
-  blockKey: string,
-  toolUseId: string,
-  toolName: string,
-  parentToolUseId: string | undefined,
-): void {
-  const item: ToolUseMessage = {
-    id: nextId(run),
-    kind: 'tool_use',
-    status: 'pending',
-    toolUseId,
-    toolName,
-    input: {},
-    parentToolUseId,
-  }
-  const idx = insertAfterParent(run, item, parentToolUseId)
-  run.acc.activeBlocks[blockKey] = idx
-  run.acc.toolUseIndex[toolUseId] = idx
-}
 
 /** content_block_delta:按 blockKey 取项累加;项不存在则 lazy-create */
 function applyDelta(
@@ -501,7 +479,7 @@ function applyDelta(
     .otherwise(() => {})
 }
 
-/** assistant 定稿 tool_use:补完整 input/toolName,不写 status（防 result 先到的 done 回退）;无占位则新建 pending */
+/** assistant 定稿 tool_use:新建 pending 项并登记 toolUseIndex */
 function finalizeTool(
   run: AgentRun,
   toolUseId: string,
@@ -510,16 +488,6 @@ function finalizeTool(
   parentToolUseId: string | undefined,
   uuid: string | undefined,
 ): void {
-  const idx = run.acc.toolUseIndex[toolUseId]
-  if (idx !== undefined) {
-    const it = run.messages[idx]
-    if (it && it.kind === 'tool_use') {
-      it.input = input
-      it.toolName = toolName
-      it.uuid = uuid
-      return
-    }
-  }
   const item: ToolUseMessage = {
     id: nextId(run),
     kind: 'tool_use',
@@ -585,10 +553,8 @@ function appendSdkMessage(
           match(e.content_block)
             .with({ type: 'text' }, () => pushStreamItem(run, blockKey, 'text', parent))
             .with({ type: 'thinking' }, () => pushStreamItem(run, blockKey, 'thinking', parent))
-            .with({ type: 'tool_use' }, (b) => startTool(run, blockKey, b.id, b.name, parent))
-            .with({ type: 'mcp_tool_use' }, (b) =>
-              startTool(run, blockKey, b.id, `${b.server_name}::${b.name}`, parent),
-            )
+            .with({ type: 'tool_use' }, () => {})
+            .with({ type: 'mcp_tool_use' }, () => {})
             .otherwise(() => {})
         })
         .with({ type: 'content_block_delta' }, (e: StreamEventOf<'content_block_delta'>) => {
@@ -838,6 +804,40 @@ export function updateFlowRunState(
       shareValues: msg.data.values,
     }
     return { state: base, effects }
+  }
+
+  if (msg.type === 'flow.command.clearFlow') {
+    return { state: undefined, effects }
+  }
+
+  if (msg.type === 'flow.command.continueFlow') {
+    const baseValues = state?.shareValues ?? {}
+    const startAgent = flows
+      .find((f) => f.id === msg.data.flowId)
+      ?.agents?.find((a) => a.id === msg.data.agentId)
+    const injectedShareValues =
+      startAgent?.node_type === 'code'
+        ? { ...baseValues }
+        : startAgent
+          ? pickInjectedShareValues(startAgent.allowed_read_values_keys ?? [], baseValues)
+          : undefined
+    const newRun: AgentRun = {
+      runId: msg.data.runId,
+      agentId: msg.data.agentId,
+      sessionId: undefined,
+      messages: [],
+      completed: false,
+      acc: emptyAcc(),
+    }
+    appendSdkMessage(newRun, msg.data.initMessage, injectedShareValues)
+    const continued: FlowRunState = {
+      killed: false,
+      runs: [...(state?.runs ?? []), newRun],
+      answeredToolPermissions: state?.answeredToolPermissions ?? {},
+      pendingToolPermissions: [],
+      shareValues: baseValues,
+    }
+    return { state: continued, effects }
   }
 
   if (!state) return { state: undefined, effects }

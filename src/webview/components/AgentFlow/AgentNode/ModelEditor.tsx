@@ -62,12 +62,7 @@ export const ModelEditor: FC<ModelEditorProps> = ({ model, flowId, agentId }) =>
   }
 
   return (
-    <Tag
-      ref={tagRef}
-      color='blue'
-      style={{ fontSize: 10, height: 22, lineHeight: '20px', cursor: 'pointer' }}
-      onClick={enterEdit}
-    >
+    <Tag ref={tagRef} color='blue' className='cursor-pointer' onClick={enterEdit}>
       {model}
     </Tag>
   )
