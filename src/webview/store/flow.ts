@@ -397,9 +397,20 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       })
     },
     save: (updateFn) => {
+      let removedIds: string[] = []
       immerSet((draft) => {
         updateFn(draft.flows)
+        // 清理已删除 flow 的运行态，与 extension 端 applyFlows 对齐
+        const validIds = new Set(draft.flows.map((f) => f.id))
+        removedIds = Object.keys(draft.flowRunStates).filter((id) => !validIds.has(id))
+        for (const flowId of removedIds) {
+          delete draft.flowRunStates[flowId]
+        }
       })
+      // 同步销毁已删除 flow 的通知卡片
+      for (const flowId of removedIds) {
+        destroyFlowNotifications(flowId)
+      }
       postMessageToExtension({ type: 'save', data: get().flows })
     },
     sendUserMessage: (flowId, runId, content) => {
