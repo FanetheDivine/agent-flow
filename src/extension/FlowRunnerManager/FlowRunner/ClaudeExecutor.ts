@@ -313,7 +313,14 @@ export class ClaudeExecutor {
     return true
   }
 
-  private canUseTool: CanUseTool = (toolName, input, { toolUseID }) => {
+  private canUseTool: CanUseTool = (toolName, input, { toolUseID, agentID }) => {
+    // subagent 不可调用 AgentControllerMcp 工具
+    if (agentID && toolName.includes('AgentControllerMcp')) {
+      return Promise.resolve({
+        behavior: 'deny',
+        message: '禁止使用AgentControllerMcp',
+      })
+    }
     // 每次工具调用实时取最新 agent / events,运行中改 agent 配置(work_mode /
     // must_confirm_tools / deny_tools / outputs)立即生效,不依赖缓存快照。
     const { agent, events } = this.getOptions()
