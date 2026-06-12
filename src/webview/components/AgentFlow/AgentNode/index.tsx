@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
 import type { CSSProperties, FC, MouseEvent } from 'react'
-import { Badge, Checkbox, Input, Tag, Tooltip, Typography } from 'antd'
+import { Badge, Input, Tag, Tooltip, Typography } from 'antd'
 import {
   BellOutlined,
   CodeOutlined,
@@ -265,13 +265,13 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
                             if (!a || a.node_type !== 'agent') return
                             match(a.work_mode)
                               .with('task', () => {
-                                a.work_mode = 'chat'
-                              })
-                              .with('chat', () => {
                                 a.work_mode = 'silent_task'
                                 notifySilentMode()
                               })
                               .with('silent_task', () => {
+                                a.work_mode = 'chat'
+                              })
+                              .with('chat', () => {
                                 a.work_mode = 'task'
                               })
                               .exhaustive()
