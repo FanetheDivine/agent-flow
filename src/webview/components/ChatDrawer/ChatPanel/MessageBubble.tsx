@@ -604,7 +604,7 @@ function renderItemToBubble(
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
       if (item.toolName.includes('AskUserQuestion')) {
-        if (!answered) return null
+        if (!answered || isPending) return null
         // 从 answeredToolPermissions.updatedInput 就地解析历史答案
         const answersObj = (
           answered.updatedInput as { answers?: Record<string, string> } | undefined
