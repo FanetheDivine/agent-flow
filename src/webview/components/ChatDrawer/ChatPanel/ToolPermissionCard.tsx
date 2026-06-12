@@ -1,9 +1,15 @@
 import { ReactNode, useLayoutEffect, useRef, useState, type FC } from 'react'
 import { Button, Tag } from 'antd'
-import { CheckOutlined, EditOutlined, SafetyOutlined, ScheduleOutlined, StopOutlined } from '@ant-design/icons'
+import {
+  CheckOutlined,
+  EditOutlined,
+  SafetyOutlined,
+  ScheduleOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 import { match, P } from 'ts-pattern'
-import { RadioWithInput } from './RadioWithInput'
 import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
+import { RadioWithInput } from './RadioWithInput'
 
 const ALLOW_VALUE = 'allow'
 const DENY_VALUE = 'deny'
@@ -192,29 +198,24 @@ export const ToolPermissionCard: FC<Props> = ({
           {formatInput(input)}
         </pre>
       )}
+      <RadioWithInput
+        options={options}
+        inputTriggerValue={DENY_WITH_REASON_VALUE}
+        value={isActive ? selection : historicalValue}
+        inputValue={isActive ? denyReason : answered?.reason}
+        disabled={!isActive}
+        inputPlaceholder={'输入原因...'}
+        onChange={handleSelectionChange}
+        onInputChange={setDenyReason}
+        onInputKeyDown={handleKeyDown}
+      />
 
-      {!isEditDiff && (
-        <>
-          <RadioWithInput
-              options={options}
-              inputTriggerValue={DENY_WITH_REASON_VALUE}
-              value={isActive ? selection : historicalValue}
-              inputValue={isActive ? denyReason : answered?.reason}
-              disabled={!isActive}
-              inputPlaceholder={'输入原因...'}
-              onChange={handleSelectionChange}
-              onInputChange={setDenyReason}
-              onInputKeyDown={handleKeyDown}
-            />
-
-            {isActive && (
-              <div className='flex justify-end'>
-                <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
-                  发送
-                </Button>
-              </div>
-            )}
-          </>
+      {isActive && (
+        <div className='flex justify-end'>
+          <Button type='primary' size='small' disabled={!selection} onClick={handleSubmit}>
+            发送
+          </Button>
+        </div>
       )}
     </div>
   )
