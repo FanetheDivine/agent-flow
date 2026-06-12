@@ -33,7 +33,6 @@ type Props = {
     filePath: string
     oldString: string
     newString: string
-    status: 'pending' | 'success' | 'error'
   }
   onChangeHeight?: (height: number) => void
   fork?: ReactNode
@@ -129,7 +128,7 @@ export const ToolPermissionCard: FC<Props> = ({
             {toolName}
           </Tag>
         )}
-        {!isEditDiff && mode === 'historical' && answered && (
+        {mode === 'historical' && answered && (
           <Tag
             color={answered.allow ? 'success' : 'error'}
             className='m-0 ml-auto text-[10px]'
@@ -139,28 +138,15 @@ export const ToolPermissionCard: FC<Props> = ({
               ? answered.allow
                 ? '已确认'
                 : '已拒绝'
-              : answered.allow
-                ? '已允许'
-                : '已拒绝'}
+              : isEditDiff
+                ? answered.allow
+                  ? '已应用'
+                  : '已拒绝'
+                : answered.allow
+                  ? '已允许'
+                  : '已拒绝'}
           </Tag>
         )}
-        {isEditDiff && editDiff && match(editDiff.status)
-          .with('success', () => (
-            <Tag color='success' className='m-0 ml-auto text-[10px]'>
-              已应用
-            </Tag>
-          ))
-          .with('error', () => (
-            <Tag color='error' className='m-0 ml-auto text-[10px]'>
-              已中断
-            </Tag>
-          ))
-          .with('pending', () => (
-            <Tag color='processing' className='m-0 ml-auto text-[10px]'>
-              执行中
-            </Tag>
-          ))
-          .exhaustive()}
       </div>
 
       {isEditDiff && editDiff ? (
@@ -170,13 +156,15 @@ export const ToolPermissionCard: FC<Props> = ({
             href='#'
             onClick={(e) => {
               e.preventDefault()
+              const diffStatus =
+                mode === 'active' || !answered ? 'pending' : answered.allow ? 'success' : 'error'
               postMessageToExtension({
                 type: 'openDiff',
                 data: {
                   file_path: editDiff.filePath,
                   old_string: editDiff.oldString,
                   new_string: editDiff.newString,
-                  status: editDiff.status,
+                  status: diffStatus,
                 },
               })
             }}
@@ -205,9 +193,8 @@ export const ToolPermissionCard: FC<Props> = ({
         </pre>
       )}
 
-      {!isEditDiff && (
-        <>
-          <RadioWithInput
+      <>
+        <RadioWithInput
             options={options}
             inputTriggerValue={DENY_WITH_REASON_VALUE}
             value={isActive ? selection : historicalValue}
@@ -227,7 +214,6 @@ export const ToolPermissionCard: FC<Props> = ({
             </div>
           )}
         </>
-      )}
     </div>
   )
 }

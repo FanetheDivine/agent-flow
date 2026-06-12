@@ -481,15 +481,17 @@ export function activate(context: vscode.ExtensionContext) {
           const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`
           const virtualUri = vscode.Uri.parse(`${DIFF_SCHEME}://diff/${key}.${ext}`)
           try {
+            const rawBytes = await vscode.workspace.fs.readFile(fileUri)
+            const fileText = Buffer.from(rawBytes).toString('utf-8')
             if (status === 'success') {
-              diffVirtualDocs.set(virtualUri.toString(), old_string)
+              diffVirtualDocs.set(virtualUri.toString(), fileText.replace(new_string, old_string))
               await vscode.commands.executeCommand('vscode.diff', virtualUri, fileUri, title)
             } else {
-              diffVirtualDocs.set(virtualUri.toString(), new_string)
+              diffVirtualDocs.set(virtualUri.toString(), fileText.replace(old_string, new_string))
               await vscode.commands.executeCommand('vscode.diff', fileUri, virtualUri, title)
             }
           } catch {
-            // diff 编辑器打开失败时静默忽略
+            // 文件不存在或 diff 编辑器打开失败时静默忽略
           }
         })
         .with({ type: P.string.startsWith('flow.command.') }, async (e) => {

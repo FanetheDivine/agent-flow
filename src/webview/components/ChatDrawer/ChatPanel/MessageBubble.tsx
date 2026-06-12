@@ -575,14 +575,10 @@ export function chatMessageToBubble(
       const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
 
-      // Edit 工具：走 ToolPermissionCard editDiff 变体，不走 ToolUseDetails
+      // Edit 工具：走 ToolPermissionCard editDiff 变体；pending 时移至底部活动卡片，历史态内联展示
       if (message.toolName === 'Edit') {
+        if (isPending) return null
         const input = message.input as { file_path?: string; old_string?: string; new_string?: string }
-        const status = match(message.status)
-          .with('done', () => 'success' as const)
-          .with('pending', () => 'pending' as const)
-          .with('interrupted', () => 'error' as const)
-          .exhaustive()
         return {
           key: message.id + '-edit-diff',
           role: 'system' as const,
@@ -591,11 +587,11 @@ export function chatMessageToBubble(
               toolName='Edit'
               input={message.input}
               mode='historical'
+              answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
               editDiff={{
                 filePath: input.file_path ?? '',
                 oldString: input.old_string ?? '',
                 newString: input.new_string ?? '',
-                status,
               }}
               fork={fork}
             />
