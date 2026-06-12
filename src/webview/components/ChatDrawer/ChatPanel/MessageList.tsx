@@ -10,23 +10,46 @@ import {
 } from 'react'
 import { App, Button, Divider } from 'antd'
 import { Bubble } from '@ant-design/x'
-import type { BubbleItemType } from '@ant-design/x/es/bubble/interface'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useMemoizedFn } from 'ahooks'
 import { match } from 'ts-pattern'
-import type { PendingToolPermission } from '@/common'
+import type { ChatMessage, PendingToolPermission } from '@/common'
 import { getAnsweredToolPermissions, getPendingToolPermissionsFor } from '@/common'
 import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
 import { postMessageToExtension } from '@/webview/utils'
-import { toBubbleItems, type BubbleCtx } from './MessageBubble'
+import {
+  type BubbleCtx,
+  type RenderedBubble,
+  deriveForkUuid,
+  indentBubble,
+  regroupSubAgentItems,
+  renderItemToBubble,
+} from './MessageBubble'
 
-type Item = BubbleItemType
+// ── 特殊列表项 ────────────────────────────────────────────────────────────────
+type LoadingItem = { kind: 'loading' }
+type DividerItem = { kind: 'divider'; runId: string; runIndex: number }
+type ShowMoreItem = { kind: 'show-more'; runId: string; hiddenCount: number }
+type ListItem = ChatMessage | LoadingItem | DividerItem | ShowMoreItem
+
+/** 渲染一条 ChatMessage 时需要的 per-run 上下文（不含 ctx，避免 ctx 变化触发 items 重建） */
+type MessageMeta = {
+  runId: string
+  sessionCompleted: boolean
+  forkUuid: string | undefined
+  /** 仅首条 user 消息携带 injectedShareValues，其余为 undefined */
+  injectedShareValues: Record<string, string | null> | undefined
+  isSubAgent: boolean
+}
 
 // 模块级常量 —— useMemo / selector 在「无内容」时返回稳定空引用,
 // 避免 useSyncExternalStore 因为新 [] / new Set() 误判快照变化触发死循环重渲染。
 const EMPTY_RUNS: AgentRun[] = []
 const EMPTY_PENDING_TOOL_PERMS: PendingToolPermission[] = []
+const EMPTY_ITEMS: ListItem[] = []
+const EMPTY_KEYS: string[] = []
+const EMPTY_META = new Map<string, MessageMeta>()
 
 /**
  * 暴露给 ChatPanel 的命令式 API。
@@ -54,6 +77,16 @@ const roleStyles = {
   },
   ai: { placement: 'start' as const, variant: 'filled' as const },
   system: { placement: 'start' as const, variant: 'borderless' as const },
+}
+
+/** 折叠态轻量选取:首条 non-subAgent user + agent_complete */
+function pickLightMessages(msgs: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = []
+  const firstUser = msgs.find((m) => m.kind === 'user' && !m.parentToolUseId)
+  if (firstUser) result.push(firstUser)
+  const complete = msgs.find((m) => m.kind === 'agent_complete')
+  if (complete) result.push(complete)
+  return result
 }
 
 function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
@@ -166,119 +199,121 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
   const lastRunId = runs.at(-1)?.runId
   const effectiveExpanded = expandedRunId ?? lastRunId
 
-  // ── 渲染项 ─────────────────────────────────────────────────────────────────
-  const items = useMemo<Item[]>(() => {
-    const result: Item[] = []
+  // ── 列表项构建 —— ctx 不在 deps 中，工具权限变化不触发 items 重建 ────────────
+  const {
+    items,
+    keys,
+    metaMap,
+  } = useMemo<{ items: ListItem[]; keys: string[]; metaMap: Map<string, MessageMeta> }>(() => {
+    if (runs.length === 0) return { items: EMPTY_ITEMS, keys: EMPTY_KEYS, metaMap: EMPTY_META }
+
+    const items: ListItem[] = []
+    const keys: string[] = []
+    const metaMap = new Map<string, MessageMeta>()
+
+    const push = (item: ListItem, key: string) => {
+      items.push(item)
+      keys.push(key)
+    }
+
     runs.forEach((run, idx) => {
       if (idx > 0) {
-        result.push({
-          key: `divider-${run.runId}`,
-          role: 'divider',
-          content: (
-            <Divider className='my-1 text-[10px]! text-[#6c7086]!'>第 {idx + 1} 次执行</Divider>
-          ),
-        })
+        const div: DividerItem = { kind: 'divider', runId: run.runId, runIndex: idx }
+        push(div, `divider-${run.runId}`)
       }
-      // 折叠 run 传 'light':取首条 user 项 + agent_complete 项,不展开中间消息
+
       const isExpanded = run.runId === effectiveExpanded
-      const bubbles = toBubbleItems(
-        run.runId,
-        run.messages,
-        ctx,
-        run.completed,
-        run.injectedShareValues,
-        isExpanded ? 'full' : 'light',
-        injectedTitle,
-      )
-      if (isExpanded) {
-        bubbles.forEach((item) => {
-          result.push({
-            key: `${run.runId}-${item.key}`,
-            role: item.role,
-            content: item.content,
-          })
-        })
-      } else {
-        // 收起态：首条 user + 「显示消息」按钮 + agent_complete（若存在）
-        const firstUserIdx = bubbles.findIndex((b) => b.role === 'user')
-        const completeItem = bubbles.find((b) => b.key.endsWith('-complete'))
-        // light 模式只返回 user + agentComplete 两条，用原始消息数推算中间信号数
+
+      if (!isExpanded) {
+        // 折叠态：首条 user + showMore + agent_complete
+        const lightMsgs = pickLightMessages(run.messages)
+        const firstUser = lightMsgs.find((m) => m.kind === 'user')
+        const complete = lightMsgs.find((m) => m.kind === 'agent_complete')
+        // hidden = 原始消息数 - firstUser 数 - complete 数
         const hiddenCount =
-          run.messages.length - (firstUserIdx >= 0 ? 1 : 0) - (completeItem ? 1 : 0)
-        if (firstUserIdx >= 0) {
-          const firstUser = bubbles[firstUserIdx]
-          result.push({
-            key: `${run.runId}-${firstUser.key}`,
-            role: firstUser.role,
-            content: firstUser.content,
+          run.messages.length - (firstUser ? 1 : 0) - (complete ? 1 : 0)
+
+        if (firstUser) {
+          push(firstUser, `${run.runId}-${firstUser.id}`)
+          metaMap.set(firstUser.id, {
+            runId: run.runId,
+            sessionCompleted: run.completed,
+            forkUuid: deriveForkUuid(run.messages, run.messages.indexOf(firstUser)),
+            injectedShareValues: run.injectedShareValues,
+            isSubAgent: false,
           })
         }
         if (hiddenCount > 0) {
-          result.push({
-            key: `${run.runId}-show-more`,
-            role: 'system',
-            content: (
-              <div className='flex justify-center'>
-                <Button
-                  size='small'
-                  type='text'
-                  className='text-[11px]! text-[#6c7086]!'
-                  onClick={() => setExpandedRunId(run.runId)}
-                >
-                  显示折叠消息
-                </Button>
-              </div>
-            ),
+          const showMore: ShowMoreItem = { kind: 'show-more', runId: run.runId, hiddenCount }
+          push(showMore, `${run.runId}-show-more`)
+        }
+        if (complete) {
+          push(complete, `${run.runId}-${complete.id}`)
+          metaMap.set(complete.id, {
+            runId: run.runId,
+            sessionCompleted: run.completed,
+            forkUuid: deriveForkUuid(run.messages, run.messages.indexOf(complete)),
+            injectedShareValues: undefined,
+            isSubAgent: false,
           })
         }
-        if (completeItem) {
-          result.push({
-            key: `${run.runId}-${completeItem.key}`,
-            role: completeItem.role,
-            content: completeItem.content,
-          })
-        }
+        return
+      }
+
+      // 展开态：按时间序计算 forkUuid，然后 regroup，逐条压入
+      const forkUuidById = new Map<string, string | undefined>()
+      run.messages.forEach((msg, i) => forkUuidById.set(msg.id, deriveForkUuid(run.messages, i)))
+
+      const { ordered, subItemKeys } = regroupSubAgentItems(run.messages)
+
+      let firstUserPassed = false
+      for (const msg of ordered) {
+        push(msg, `${run.runId}-${msg.id}`)
+        const isFirstUser = !firstUserPassed && msg.kind === 'user' && !msg.parentToolUseId
+        if (isFirstUser) firstUserPassed = true
+        metaMap.set(msg.id, {
+          runId: run.runId,
+          sessionCompleted: run.completed,
+          forkUuid: forkUuidById.get(msg.id),
+          injectedShareValues: isFirstUser ? run.injectedShareValues : undefined,
+          isSubAgent: subItemKeys.has(msg.id),
+        })
       }
     })
-    return result
-  }, [runs, ctx, effectiveExpanded, injectedTitle])
+
+    return { items, keys, metaMap }
+  }, [runs, effectiveExpanded])
 
   const lastRunCompleted = runs.at(-1)?.completed
-  const finalItems = useMemo<Item[]>(() => {
-    if (!loading || lastRunCompleted) return items
-    return [
-      ...items,
-      {
-        key: '__loading__',
-        role: 'ai',
-        content: null,
-        loading: true,
-      },
-    ]
-  }, [items, loading, lastRunCompleted])
+  const { finalItems, finalKeys } = useMemo<{ finalItems: ListItem[]; finalKeys: string[] }>(() => {
+    if (!loading || lastRunCompleted) return { finalItems: items, finalKeys: keys }
+    return {
+      finalItems: [...items, { kind: 'loading' } as LoadingItem],
+      finalKeys: [...keys, '__loading__'],
+    }
+  }, [items, keys, loading, lastRunCompleted])
 
   // 诊断:气泡重叠根因排查 —— 检测喂给 virtualizer 的重复 key。
   // 重复 key 会让 react-virtual 复用同一 measurement、React 复用同一 DOM,导致气泡重叠且持久不消失。
   // 正常会话不触发;命中时把冲突的两个完整 item 打印出来,据此定位产源(是 streaming-* 占位还是别的)。
   useEffect(() => {
-    const seen = new Map<string, Item>()
-    for (const item of finalItems) {
-      const key = String(item.key)
-      const existing = seen.get(key)
-      if (existing) {
+    const seen = new Map<string, string>()
+    for (let i = 0; i < finalKeys.length; i++) {
+      const key = finalKeys[i]
+      if (seen.has(key)) {
         console.warn('[MessageList] 重复 RenderItem key', {
           key,
           flowId,
           agentId,
           runId,
-          existing,
-          duplicate: item,
+          existingItem: finalItems[seen.get(key) as unknown as number],
+          duplicateItem: finalItems[i],
         })
       } else {
-        seen.set(key, item)
+        seen.set(key, String(i))
       }
     }
-  }, [finalItems, flowId, agentId, runId])
+  }, [finalKeys, finalItems, flowId, agentId, runId])
 
   const scrollerElRef = useRef<HTMLDivElement | null>(null)
   // 是否粘底:用户向上滚则置 false,滚回底部 32px 内置 true
@@ -291,7 +326,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     estimateSize: () => 50,
     // 视口上下预渲染窗口
     overscan: 30,
-    getItemKey: (idx) => String(finalItems[idx].key),
+    getItemKey: (idx) => finalKeys[idx],
   })
 
   const virtualItems = virtualizer.getVirtualItems()
@@ -339,6 +374,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
       <div className='relative w-full max-w-full overflow-hidden' style={{ height: totalSize }}>
         {virtualItems.map((vi) => {
           const item = finalItems[vi.index]
+          const meta = 'id' in item ? metaMap.get((item as ChatMessage).id) : undefined
           return (
             <div
               key={vi.key}
@@ -347,7 +383,13 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
               className='absolute top-0 left-0 w-full px-3 [&:has(.from-sub-agent)]:ml-4'
               style={{ transform: `translateY(${vi.start}px)` }}
             >
-              {renderItem(item)}
+              <MessageItem
+                item={item}
+                ctx={ctx}
+                meta={meta}
+                injectedTitle={injectedTitle}
+                setExpandedRunId={setExpandedRunId}
+              />
             </div>
           )
         })}
@@ -360,14 +402,70 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
 // 几个稳定字段;store 变化由组件内部的 selector 自行订阅,不再因父级重渲染连带刷新。
 export const MessageList = memo(MessageListInner)
 
-function renderItem(item: Item) {
-  // key 必须从 spread 中剥离 —— React 19 禁止把 key 通过 props 对象间接传入 JSX
-  const { key, ...rest } = item
-  return match(item.role)
-    .with('divider', () => <Bubble.Divider key={key} {...rest} />)
-    .with('system', () => <Bubble.System key={key} {...rest} />)
-    .otherwise((role) => {
-      const cfg = roleStyles[role as keyof typeof roleStyles] ?? {}
-      return <Bubble key={key} {...cfg} {...rest} />
-    })
-}
+// ── MessageItem —— 单条列表项渲染，memo 确保 item/ctx 未变时跳过重渲染 ───────────
+const MessageItem = memo(function MessageItem({
+  item,
+  ctx,
+  meta,
+  injectedTitle,
+  setExpandedRunId,
+}: {
+  item: ListItem
+  ctx: BubbleCtx
+  meta: MessageMeta | undefined
+  injectedTitle: string
+  setExpandedRunId: (runId: string) => void
+}) {
+  if (item.kind === 'divider') {
+    return (
+      <Divider className='my-1 text-[10px]! text-[#6c7086]!'>
+        第 {item.runIndex + 1} 次执行
+      </Divider>
+    )
+  }
+  if (item.kind === 'show-more') {
+    return (
+      <div className='flex justify-center'>
+        <Button
+          size='small'
+          type='text'
+          className='text-[11px]! text-[#6c7086]!'
+          onClick={() => setExpandedRunId(item.runId)}
+        >
+          显示折叠消息
+        </Button>
+      </div>
+    )
+  }
+  if (item.kind === 'loading') {
+    return <Bubble placement='start' variant='filled' content={null} loading />
+  }
+
+  // ChatMessage
+  const raw = renderItemToBubble(
+    item,
+    ctx,
+    meta?.sessionCompleted ?? false,
+    meta?.runId,
+    meta?.forkUuid,
+    meta?.injectedShareValues,
+    injectedTitle,
+  )
+  if (!raw) return null
+  const bubbles: RenderedBubble[] = Array.isArray(raw) ? raw : [raw]
+  const applied = meta?.isSubAgent ? bubbles.map(indentBubble) : bubbles
+  return (
+    <>
+      {applied.map((b) => {
+        const { key, ...rest } = b
+        return match(b.role)
+          .with('divider', () => <Bubble.Divider key={key} {...rest} />)
+          .with('system', () => <Bubble.System key={key} {...rest} />)
+          .otherwise((role) => {
+            const cfg = roleStyles[role as keyof typeof roleStyles] ?? {}
+            return <Bubble key={key} {...cfg} {...rest} />
+          })
+      })}
+    </>
+  )
+})

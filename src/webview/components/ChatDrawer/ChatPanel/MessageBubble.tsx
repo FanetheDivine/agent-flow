@@ -12,13 +12,6 @@ import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 import { ToolUseDetails } from './ToolUseDetails'
 
-/**
- * 折叠态构建模式:
- * - `full`（默认）：映射全部 ChatMessage。
- * - `light`：仅取首条 user 项 + agent_complete 项（折叠态 run 摘要）。
- */
-export type BuildMode = 'full' | 'light'
-
 export type BubbleCtx = {
   /**
    * 当前挂起的工具权限请求 toolUseId 集合 —— 四类挂起统一(AskUserQuestion / CompleteTask /
@@ -46,7 +39,7 @@ export type BubbleCtx = {
   onFork?: (target: { runId: string; messageUuid: string }, sessionCompleted: boolean) => void
 }
 
-type RenderedBubble = {
+export type RenderedBubble = {
   key: string
   role: 'user' | 'ai' | 'system' | 'divider'
   content: ReactNode
@@ -503,7 +496,7 @@ const InjectedShareValuesSection: FC<{ values: Record<string, string | null>; ti
  * - turn_end → 回溯找本回合最后一条带 uuid 的项的 uuid（result 无 uuid）。
  * 必须在时间序数组上按原 index 调用（不受 regroupSubAgentItems 重排影响）。
  */
-function deriveForkUuid(items: ChatMessage[], index: number): string | undefined {
+export function deriveForkUuid(items: ChatMessage[], index: number): string | undefined {
   const it = items[index]
   if (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') return it.uuid
   if (it.kind === 'user' || it.kind === 'turn_end') {
@@ -515,7 +508,7 @@ function deriveForkUuid(items: ChatMessage[], index: number): string | undefined
   return undefined
 }
 
-function renderItemToBubble(
+export function renderItemToBubble(
   item: ChatMessage,
   ctx: BubbleCtx | undefined,
   sessionCompleted: boolean,
@@ -833,7 +826,7 @@ function renderItemToBubble(
  * - 孤儿（parentToolUseId 未命中任何 tool_use，父尚未到达等）：原序保留、不缩进、不丢。
  * - 返回 subItemKeys（item.id 集合）供调用方对子项气泡加 ml-4 缩进。
  */
-function regroupSubAgentItems(items: ChatMessage[]): {
+export function regroupSubAgentItems(items: ChatMessage[]): {
   ordered: ChatMessage[]
   subItemKeys: Set<string>
 } {
@@ -883,59 +876,6 @@ function regroupSubAgentItems(items: ChatMessage[]): {
 }
 
 /** 给子项气泡内容包一层 ml-4 缩进，表达从属于父 Agent tool_use */
-function indentBubble(b: RenderedBubble): RenderedBubble {
+export function indentBubble(b: RenderedBubble): RenderedBubble {
   return { ...b, content: <div className='from-sub-agent'>{b.content}</div> }
-}
-
-/**
- * 折叠态轻量构建:首条 user 项（非 subAgent）+ agent_complete 项。
- * 最后没有 agent_complete（中断 / error / stopped）则不展示折叠摘要。
- */
-function pickLightItems(msgs: ChatMessage[]): ChatMessage[] {
-  const items: ChatMessage[] = []
-  const firstUser = msgs.find((m) => m.kind === 'user' && !m.parentToolUseId)
-  if (firstUser) items.push(firstUser)
-  const complete = msgs.find((m) => m.kind === 'agent_complete')
-  if (complete) items.push(complete)
-  return items
-}
-
-export function toBubbleItems(
-  runId: string,
-  msgs: ChatMessage[],
-  ctx?: BubbleCtx,
-  sessionCompleted = false,
-  injectedShareValues?: Record<string, string | null>,
-  mode: BuildMode = 'full',
-  injectedTitle?: string,
-): RenderedBubble[] {
-  const items = mode === 'light' ? pickLightItems(msgs) : msgs
-  // fork 锚点在时间序数组上按原 index 派生（不受 regroup 重排影响），按 id 缓存
-  const forkUuidById = new Map<string, string | undefined>()
-  items.forEach((it, i) => forkUuidById.set(it.id, deriveForkUuid(items, i)))
-  const { ordered, subItemKeys } = regroupSubAgentItems(items)
-  const out: RenderedBubble[] = []
-  let firstUserPassed = false
-  for (const item of ordered) {
-    // 注入快照仅透传给首个 user 项，其余项不传
-    const injected =
-      !firstUserPassed && item.kind === 'user' && injectedShareValues
-        ? injectedShareValues
-        : undefined
-    if (item.kind === 'user') firstUserPassed = true
-    const bubble = renderItemToBubble(
-      item,
-      ctx,
-      sessionCompleted,
-      runId,
-      forkUuidById.get(item.id),
-      injected,
-      injectedTitle,
-    )
-    if (!bubble) continue
-    const isSub = subItemKeys.has(item.id)
-    if (Array.isArray(bubble)) out.push(...(isSub ? bubble.map(indentBubble) : bubble))
-    else out.push(isSub ? indentBubble(bubble) : bubble)
-  }
-  return out
 }
