@@ -574,6 +574,14 @@ export function chatMessageToBubble(
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(message.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
+      // answered 无记录时（工具自动允许，未走 pendingToolPermissions 链路），用 message.status 补全
+      const effectiveAnswered = answered
+        ? { allow: answered.allow, reason: answered.message }
+        : message.status === 'done'
+          ? { allow: true }
+          : message.status === 'interrupted'
+            ? { allow: false }
+            : undefined
 
       // Edit 工具：走 ToolPermissionCard editDiff 变体；pending 时移至底部活动卡片，历史态内联展示
       if (message.toolName === 'Edit') {
@@ -587,7 +595,7 @@ export function chatMessageToBubble(
               toolName='Edit'
               input={message.input}
               mode='historical'
-              answered={answered ? { allow: answered.allow, reason: answered.message } : undefined}
+              answered={effectiveAnswered}
               editDiff={{
                 filePath: input.file_path ?? '',
                 oldString: input.old_string ?? '',
