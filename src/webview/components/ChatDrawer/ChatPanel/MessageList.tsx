@@ -200,11 +200,11 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
   const effectiveExpanded = expandedRunId ?? lastRunId
 
   // ── 列表项构建 —— ctx 不在 deps 中，工具权限变化不触发 items 重建 ────────────
-  const {
-    items,
-    keys,
-    metaMap,
-  } = useMemo<{ items: ListItem[]; keys: string[]; metaMap: Map<string, MessageMeta> }>(() => {
+  const { items, keys, metaMap } = useMemo<{
+    items: ListItem[]
+    keys: string[]
+    metaMap: Map<string, MessageMeta>
+  }>(() => {
     if (runs.length === 0) return { items: EMPTY_ITEMS, keys: EMPTY_KEYS, metaMap: EMPTY_META }
 
     const items: ListItem[] = []
@@ -230,8 +230,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
         const firstUser = lightMsgs.find((m) => m.kind === 'user')
         const complete = lightMsgs.find((m) => m.kind === 'agent_complete')
         // hidden = 原始消息数 - firstUser 数 - complete 数
-        const hiddenCount =
-          run.messages.length - (firstUser ? 1 : 0) - (complete ? 1 : 0)
+        const hiddenCount = run.messages.length - (firstUser ? 1 : 0) - (complete ? 1 : 0)
 
         if (firstUser) {
           push(firstUser, `${run.runId}-${firstUser.id}`)
@@ -293,9 +292,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     }
   }, [items, keys, loading, lastRunCompleted])
 
-  // 诊断:气泡重叠根因排查 —— 检测喂给 virtualizer 的重复 key。
-  // 重复 key 会让 react-virtual 复用同一 measurement、React 复用同一 DOM,导致气泡重叠且持久不消失。
-  // 正常会话不触发;命中时把冲突的两个完整 item 打印出来,据此定位产源(是 streaming-* 占位还是别的)。
+  // 诊断:气泡重叠根因排查
   useEffect(() => {
     const seen = new Map<string, string>()
     for (let i = 0; i < finalKeys.length; i++) {
@@ -418,9 +415,7 @@ const MessageItem = memo(function MessageItem({
 }) {
   if (item.kind === 'divider') {
     return (
-      <Divider className='my-1 text-[10px]! text-[#6c7086]!'>
-        第 {item.runIndex + 1} 次执行
-      </Divider>
+      <Divider className='my-1 text-[10px]! text-[#6c7086]!'>第 {item.runIndex + 1} 次执行</Divider>
     )
   }
   if (item.kind === 'show-more') {
