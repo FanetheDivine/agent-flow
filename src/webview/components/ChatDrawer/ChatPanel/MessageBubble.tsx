@@ -1,8 +1,8 @@
-import { memo, useState, type FC, type ReactNode } from 'react'
+import { useState, type FC, type ReactNode } from 'react'
 import { Button, Input, Radio, Tag, Tooltip } from 'antd'
 import { BranchesOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
-import { Bubble, Think } from '@ant-design/x'
-import type { AskUserQuestionInput, ExtensionToWebviewMessage, ModelTokenUsage } from '@/common'
+import { Think } from '@ant-design/x'
+import type { AskUserQuestionInput, ChatMessage, ModelTokenUsage, ToolResult } from '@/common'
 import { formatTokenCount, formatTokenCost } from '@/common'
 import { CodeRefChip } from '@/webview/components/CodeRefChip'
 import { FileRefChip } from '@/webview/components/FileRefChip'
@@ -10,18 +10,13 @@ import { CopyButton, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
 import { ToolUseDetails } from './ToolUseDetails'
-import {
-  buildRenderItems,
-  clearBuildCache,
-  clearBuildCacheForRuns,
-  getContextUsage,
-  type RenderItem,
-  type ToolResult,
-} from './buildRenderItems'
 
-type Props = {
-  msg: ExtensionToWebviewMessage
-}
+/**
+ * 折叠态构建模式:
+ * - `full`（默认）：映射全部 ChatMessage。
+ * - `light`：仅取首条 user 项 + agent_complete 项（折叠态 run 摘要）。
+ */
+export type BuildMode = 'full' | 'light'
 
 export type BubbleCtx = {
   /**
@@ -216,7 +211,7 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
 }
 
 // ── 渲染层 ───────────────────────────────────────────────────────────────
-// 纯把 RenderItem 转 React 节点，不再涉及消息流的语义合并。
+// 纯把 ChatMessage 转 React 节点，不再涉及消息流的语义合并。
 
 /** 单条按模型 token 用量行：模型名 + in/out/cache write/cache read + cost */
 function ModelUsageRow({ model, usage }: { model: string; usage: ModelTokenUsage }) {
@@ -499,37 +494,50 @@ const InjectedShareValuesSection: FC<{ values: Record<string, string | null>; ti
   )
 }
 
+/**
+ * 派生 fork 锚点 uuid（移植自原 buildRenderItems.findPrevUuid 语义）：
+ * - text/thinking/tool_use → 自身（= 所属 assistant 消息）uuid;tool_use 不能作 fork 终点,
+ *   回退到 assistant uuid。流式未定稿项 uuid 未定义 → 回溯不会命中。
+ * - user → 回溯找上一条带 uuid 的项的 uuid（user 自身 uuid 常缺,语义=切到上一条）。
+ * - turn_end → 回溯找本回合最后一条带 uuid 的项的 uuid（result 无 uuid）。
+ * 必须在时间序数组上按原 index 调用（不受 regroupSubAgentItems 重排影响）。
+ */
+function deriveForkUuid(items: ChatMessage[], index: number): string | undefined {
+  const it = items[index]
+  if (it.kind === 'text' || it.kind === 'thinking' || it.kind === 'tool_use') return it.uuid
+  if (it.kind === 'user' || it.kind === 'turn_end') {
+    for (let j = index - 1; j >= 0; j--) {
+      const u = items[j].uuid
+      if (u) return u
+    }
+  }
+  return undefined
+}
+
 function renderItemToBubble(
-  item: RenderItem,
-  ctx?: BubbleCtx,
-  sessionCompleted = false,
-  itemContextUsage?: { used: number; total: number },
-  runId?: string,
+  item: ChatMessage,
+  ctx: BubbleCtx | undefined,
+  sessionCompleted: boolean,
+  runId: string | undefined,
+  forkUuid: string | undefined,
   injectedShareValues?: Record<string, string | null>,
   injectedTitle = '注入数据',
 ): RenderedBubble | RenderedBubble[] | null {
-  /**
-   * 构造 fork icon —— 仅当 ctx.onFork 存在时返回按钮元素。
-   */
-  const buildForkIcon = (target: { runId: string; messageUuid: string }): ReactNode | undefined => {
-    if (!ctx?.onFork) return undefined
-    return <ForkButton onFork={() => ctx.onFork!(target, sessionCompleted)} />
+  const fromSubAgent = !!item.parentToolUseId
+  /** 构造 fork icon —— 仅当 ctx.onFork 与 forkUuid 都存在时返回按钮元素。 */
+  const buildForkIcon = (): ReactNode | undefined => {
+    if (!ctx?.onFork || !runId || !forkUuid) return undefined
+    return <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
   }
   switch (item.kind) {
     case 'user': {
       const { copyText, node } = renderUserContent(item.rawContent)
       // user fork 语义 = 「让用户重新说一次」= 切到上一条 SDK 消息为止。
-      // 只要 messageUuid（findPrevUuid 找到的上一条 SDK 消息 uuid）存在就合法,
-      // 不依赖 turn 是否闭环（thinking/text fork 后切片末端 user / agent running 中
-      // 的当前 user 都属于 turn 未闭环但 fork 合法的场景）。
-      const fork =
-        runId && item.messageUuid && !item.fromSubAgent
-          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
-          : undefined
+      const fork = !fromSubAgent ? buildForkIcon() : undefined
       // 注入快照仅附加在 run 首条 user 气泡内；空对象时不展示
       const hasInjected = injectedShareValues && Object.keys(injectedShareValues).length > 0
       return {
-        key: item.key,
+        key: item.id,
         role: 'user',
         content: (
           <div className='flex'>
@@ -549,15 +557,12 @@ function renderItemToBubble(
     }
     case 'text': {
       const md = <Md content={item.text} />
-      if (item.streaming) {
-        return { key: item.key, role: 'ai', content: md }
+      if (item.status === 'streaming') {
+        return { key: item.id, role: 'ai', content: md }
       }
-      const fork =
-        runId && item.messageUuid && !item.fromSubAgent
-          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
-          : undefined
+      const fork = !fromSubAgent ? buildForkIcon() : undefined
       return {
-        key: item.key,
+        key: item.id,
         role: 'ai',
         content: (
           <div className='flex'>
@@ -571,38 +576,30 @@ function renderItemToBubble(
       }
     }
     case 'thinking': {
-      if (item.streaming) {
+      if (item.status === 'streaming') {
         return {
-          key: item.key,
+          key: item.id,
           role: 'ai',
           content: (
-            <Think title='思考中' key={item.key + 'streaming'} defaultExpanded>
+            <Think title='思考中' key={item.id + 'streaming'} defaultExpanded>
               <Md content={item.text} />
             </Think>
           ),
         }
       }
-      // 与 user 对齐:只要 messageUuid 存在即放行 fork。同 text 分支说明。
-      const fork =
-        runId && item.messageUuid && !item.fromSubAgent
-          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
-          : undefined
+      const fork = !fromSubAgent ? buildForkIcon() : undefined
       return {
-        key: item.key,
+        key: item.id,
         role: 'ai',
-        content: <ThinkingContent text={item.text} itemKey={item.key} fork={fork} />,
+        content: <ThinkingContent text={item.text} itemKey={item.id} fork={fork} />,
       }
     }
     case 'tool_use': {
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(item.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[item.toolUseId]
 
-      // tool_use 不能作 fork 终点,messageUuid 回退到所属 assistant 消息的 uuid(同 text/thinking)。
-      // 与其它分支一致:runId && messageUuid 都存在才渲染 fork icon。
-      const fork =
-        runId && item.messageUuid && !item.fromSubAgent
-          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
-          : undefined
+      // tool_use 不能作 fork 终点,forkUuid 回退到所属 assistant 消息的 uuid;subAgent 不渲染 fork。
+      const fork = !fromSubAgent ? buildForkIcon() : undefined
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
       if (item.toolName.includes('AskUserQuestion')) {
@@ -623,7 +620,7 @@ function renderItemToBubble(
             )
           : undefined
         return {
-          key: item.key,
+          key: item.id,
           role: 'system',
           content: (
             <AskUserQuestionCard
@@ -643,7 +640,7 @@ function renderItemToBubble(
         // CompleteTask 仅在被拒绝(带 isError result)时可作 fork 起点;成功完成 / pending 不挂 fork。
         const completeFork = item.result?.isError ? fork : undefined
         const toolUseItem: RenderedBubble = {
-          key: item.key,
+          key: item.id,
           role: 'ai',
           content: (
             <ToolUseBubbleContent
@@ -658,7 +655,7 @@ function renderItemToBubble(
         }
         if (isPending && ctx) {
           const confirmItem: RenderedBubble = {
-            key: item.key + '-confirm',
+            key: item.id + '-confirm',
             role: 'ai',
             content: (
               <CompleteTaskConfirmCard
@@ -686,7 +683,7 @@ function renderItemToBubble(
         if (isPending) return null
         const planFilePath = (item.input as { planFilePath?: string })?.planFilePath ?? ''
         return {
-          key: item.key + '-exit-plan',
+          key: item.id + '-exit-plan',
           role: 'system' as const,
           content: (
             <ToolPermissionCard
@@ -701,12 +698,10 @@ function renderItemToBubble(
         }
       }
 
-      // 通用工具权限(must_confirm 等)：pending 显示授权卡片;answered 显示历史授权卡片 + 工具详情;
-      // 未触发权限(普通工具)只显示工具详情。
       // 通用工具权限(must_confirm 等)：pending 时移至底部卡片；历史态内联展示授权结果 + 工具详情
       if (isPending) return null
       const permItem: RenderedBubble = {
-        key: item.key + '-perm',
+        key: item.id + '-perm',
         role: 'system',
         content: (
           <ToolPermissionCard
@@ -719,7 +714,7 @@ function renderItemToBubble(
         ),
       }
       const toolUseItem: RenderedBubble = {
-        key: item.key,
+        key: item.id,
         role: 'ai',
         content: (
           <ToolUseBubbleContent
@@ -736,10 +731,8 @@ function renderItemToBubble(
     }
     case 'turn_end': {
       const modelUsages = item.modelUsages ?? []
-      const fork =
-        runId && item.messageUuid
-          ? buildForkIcon({ runId, messageUuid: item.messageUuid })
-          : undefined
+      const itemContextUsage = item.contextUsage
+      const fork = buildForkIcon()
       // turn_end 由 antd-x DividerBubble 包装（用 antd Divider 渲染 content）,
       // antd Divider 的 ::before/::after 横线会让 absolute 子元素被遮挡,group-hover
       // 在 divider 容器层级也会失效。所以 fork icon 必须 inline 渲染在 content 内。
@@ -761,7 +754,7 @@ function renderItemToBubble(
         </div>
       )
       return {
-        key: item.key,
+        key: item.id,
         role: 'divider',
         content: inner,
       }
@@ -774,8 +767,9 @@ function renderItemToBubble(
         .filter(Boolean)
         .join('\n')
       const breakdown = item.modelBreakdown ?? []
+      const itemContextUsage = item.contextUsage
       return {
-        key: item.key,
+        key: `${item.id}-complete`,
         role: 'ai',
         content: (
           <div className='flex'>
@@ -816,7 +810,7 @@ function renderItemToBubble(
     }
     case 'error': {
       return {
-        key: item.key,
+        key: item.id,
         role: 'ai',
         content: (
           <div className='flex min-w-20 flex-col gap-2'>
@@ -833,15 +827,15 @@ function renderItemToBubble(
 
 /**
  * 把 subAgent 的 text/thinking/tool_use 项归置到触发它的父「Agent tool_use」气泡之后
- * （并行多 subAgent 时各归各父），只重排顺序、不改 key。
+ * （并行多 subAgent 时各归各父），只重排顺序、不改 id。
  *
  * - 子项的 `parentToolUseId`（= SDK message.parent_tool_use_id）等于父 tool_use 的 `toolUseId`。
  * - 早退：无任何带 parentToolUseId 的项时返回原引用 + 空集，零开销（无 subAgent 的回归路径）。
  * - 孤儿（parentToolUseId 未命中任何 tool_use，父尚未到达等）：原序保留、不缩进、不丢。
- * - 返回 subItemKeys 供调用方对子项气泡加 ml-4 缩进。
+ * - 返回 subItemKeys（item.id 集合）供调用方对子项气泡加 ml-4 缩进。
  */
-function regroupSubAgentItems(items: RenderItem[]): {
-  ordered: RenderItem[]
+function regroupSubAgentItems(items: ChatMessage[]): {
+  ordered: ChatMessage[]
   subItemKeys: Set<string>
 } {
   const hasSub = items.some(
@@ -852,7 +846,7 @@ function regroupSubAgentItems(items: RenderItem[]): {
   if (!hasSub) return { ordered: items, subItemKeys: new Set() }
 
   // 趟1：按 parentToolUseId 分桶（保持原序），并收集所有 tool_use 的 toolUseId
-  const buckets = new Map<string, RenderItem[]>()
+  const buckets = new Map<string, ChatMessage[]>()
   const validParents = new Set<string>()
   for (const it of items) {
     if (it.kind === 'tool_use') validParents.add(it.toolUseId)
@@ -867,7 +861,7 @@ function regroupSubAgentItems(items: RenderItem[]): {
   }
 
   // 趟2：线性输出。父尚未到达的子项（孤儿）原序保留；命中父则跳过、由父带出整桶
-  const ordered: RenderItem[] = []
+  const ordered: ChatMessage[] = []
   const subItemKeys = new Set<string>()
   for (const it of items) {
     const parentId =
@@ -881,7 +875,7 @@ function regroupSubAgentItems(items: RenderItem[]): {
       if (bucket) {
         for (const sub of bucket) {
           ordered.push(sub)
-          subItemKeys.add(sub.key)
+          subItemKeys.add(sub.id)
         }
       }
     }
@@ -894,67 +888,53 @@ function indentBubble(b: RenderedBubble): RenderedBubble {
   return { ...b, content: <div className='from-sub-agent'>{b.content}</div> }
 }
 
+/**
+ * 折叠态轻量构建:首条 user 项（非 subAgent）+ agent_complete 项。
+ * 最后没有 agent_complete（中断 / error / stopped）则不展示折叠摘要。
+ */
+function pickLightItems(msgs: ChatMessage[]): ChatMessage[] {
+  const items: ChatMessage[] = []
+  const firstUser = msgs.find((m) => m.kind === 'user' && !m.parentToolUseId)
+  if (firstUser) items.push(firstUser)
+  const complete = msgs.find((m) => m.kind === 'agent_complete')
+  if (complete) items.push(complete)
+  return items
+}
+
 export function toBubbleItems(
   runId: string,
-  msgs: ExtensionToWebviewMessage[],
+  msgs: ChatMessage[],
   ctx?: BubbleCtx,
   sessionCompleted = false,
   injectedShareValues?: Record<string, string | null>,
-  mode?: import('./buildRenderItems').BuildMode,
+  mode: BuildMode = 'full',
   injectedTitle?: string,
 ): RenderedBubble[] {
-  const renderItems = buildRenderItems(runId, msgs, mode)
-  const { ordered, subItemKeys } = regroupSubAgentItems(renderItems)
+  const items = mode === 'light' ? pickLightItems(msgs) : msgs
+  // fork 锚点在时间序数组上按原 index 派生（不受 regroup 重排影响），按 id 缓存
+  const forkUuidById = new Map<string, string | undefined>()
+  items.forEach((it, i) => forkUuidById.set(it.id, deriveForkUuid(items, i)))
+  const { ordered, subItemKeys } = regroupSubAgentItems(items)
   const out: RenderedBubble[] = []
   let firstUserPassed = false
   for (const item of ordered) {
-    const cu = getContextUsage(runId, item.key)
-    // sessionId 在 MessageList 调用点传的是 run.runId(buildRenderItems 的 cache key 历史命名),
-    // 这里把它作为 runId 透传给 buildForkIcon 拼 fork target
     // 注入快照仅透传给首个 user 项，其余项不传
     const injected =
-      !firstUserPassed && item.kind === 'user' && injectedShareValues
-        ? injectedShareValues
-        : undefined
+      !firstUserPassed && item.kind === 'user' && injectedShareValues ? injectedShareValues : undefined
     if (item.kind === 'user') firstUserPassed = true
     const bubble = renderItemToBubble(
       item,
       ctx,
       sessionCompleted,
-      cu,
       runId,
+      forkUuidById.get(item.id),
       injected,
       injectedTitle,
     )
     if (!bubble) continue
-    const isSub = subItemKeys.has(item.key)
+    const isSub = subItemKeys.has(item.id)
     if (Array.isArray(bubble)) out.push(...(isSub ? bubble.map(indentBubble) : bubble))
     else out.push(isSub ? indentBubble(bubble) : bubble)
   }
   return out
 }
-
-export { clearBuildCache, clearBuildCacheForRuns }
-
-/**
- * 保留单气泡渲染入口（可用于调试或非列表场景）。
- * 列表场景请直接使用 Bubble.List + toBubbleItems。
- */
-const MessageBubbleInner: FC<Props> = ({ msg }) => {
-  const items = toBubbleItems('__debug__', [msg])
-  if (items.length === 0) return null
-  return (
-    <div className='flex flex-col gap-1'>
-      {items.map((item) => (
-        <Bubble
-          key={item.key}
-          placement={item.role === 'user' ? 'end' : 'start'}
-          content={item.content}
-          variant={item.role === 'divider' ? 'borderless' : 'filled'}
-        />
-      ))}
-    </div>
-  )
-}
-
-export const MessageBubble = memo(MessageBubbleInner)

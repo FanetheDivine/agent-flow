@@ -191,8 +191,7 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
           ),
         })
       }
-      // buildRenderItems 内部按 cacheKey 缓存(用 runId 作 key,与 store 端 clearBuildCacheForRuns 对齐)
-      // 折叠 run 传 'light':取首尾两条消息(用户初始 + agentComplete),不写缓存
+      // 折叠 run 传 'light':取首条 user 项 + agent_complete 项,不展开中间消息
       const isExpanded = run.runId === effectiveExpanded
       const bubbles = toBubbleItems(
         run.runId,
