@@ -381,6 +381,42 @@ function nextId(run: AgentRun): string {
   return String(run.acc.seq++)
 }
 
+/**
+ * 把消息插入 run.messages,有 parentToolUseId 时插到父 tool_use 或同 parent 最后一条
+ * 子消息之后(保证 subAgent 消息紧邻父 tool_use,而非散落在 run.messages 末尾)。
+ * 中间插入会令 insertAt 之后的下标整体后移 —— 同步修正 activeBlocks / toolUseIndex。
+ */
+function insertAfterParent(
+  run: AgentRun,
+  item: ChatMessage,
+  parentToolUseId: string | undefined,
+): number {
+  console.log(item)
+  if (!parentToolUseId) {
+    run.messages.push(item)
+    return run.messages.length - 1
+  }
+  const parentIdx = run.acc.toolUseIndex[parentToolUseId]
+  if (parentIdx === undefined) {
+    run.messages.push(item)
+    return run.messages.length - 1
+  }
+  // 从父 tool_use 往后扫,找同 parentToolUseId 的最后一条(已插入的兄弟 subAgent 消息)
+  let insertAt = parentIdx + 1
+  for (let i = parentIdx + 1; i < run.messages.length; i++) {
+    if (run.messages[i].parentToolUseId === parentToolUseId) insertAt = i + 1
+  }
+  run.messages.splice(insertAt, 0, item)
+  // 修正被后移的下标
+  for (const k of Object.keys(run.acc.activeBlocks)) {
+    if (run.acc.activeBlocks[k] >= insertAt) run.acc.activeBlocks[k]++
+  }
+  for (const id of Object.keys(run.acc.toolUseIndex)) {
+    if (run.acc.toolUseIndex[id] >= insertAt) run.acc.toolUseIndex[id]++
+  }
+  return insertAt
+}
+
 /** 从 tool_result 的 content 中提取纯文本 */
 function extractToolResultText(content: unknown): string {
   if (!content) return ''
@@ -409,8 +445,7 @@ function pushStreamItem(
     kind === 'text'
       ? { id: nextId(run), kind: 'text', status: 'streaming', text: '', parentToolUseId }
       : { id: nextId(run), kind: 'thinking', status: 'streaming', text: '', parentToolUseId }
-  run.messages.push(item)
-  const idx = run.messages.length - 1
+  const idx = insertAfterParent(run, item, parentToolUseId)
   run.acc.activeBlocks[blockKey] = idx
   return idx
 }
@@ -432,8 +467,7 @@ function startTool(
     input: {},
     parentToolUseId,
   }
-  run.messages.push(item)
-  const idx = run.messages.length - 1
+  const idx = insertAfterParent(run, item, parentToolUseId)
   run.acc.activeBlocks[blockKey] = idx
   run.acc.toolUseIndex[toolUseId] = idx
 }
@@ -487,7 +521,7 @@ function finalizeTool(
       return
     }
   }
-  run.messages.push({
+  const item: ToolUseMessage = {
     id: nextId(run),
     kind: 'tool_use',
     status: 'pending',
@@ -496,8 +530,8 @@ function finalizeTool(
     input,
     parentToolUseId,
     uuid,
-  })
-  run.acc.toolUseIndex[toolUseId] = run.messages.length - 1
+  }
+  run.acc.toolUseIndex[toolUseId] = insertAfterParent(run, item, parentToolUseId)
 }
 
 /** 合并 tool_result 到对应 tool_use 项:置 done + 填 result;interrupted 项不被迟到 result 翻转 */
