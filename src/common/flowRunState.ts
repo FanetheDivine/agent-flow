@@ -1003,7 +1003,7 @@ export function updateFlowRunState(
       })
       // ── commands ────────────────────────────────────────────
       .with({ type: 'flow.command.userMessage' }, ({ data }) => {
-        // 把用户消息累加为 user 项,消费者侧统一
+        run.interrupted = false
         appendSdkMessage(run, data.message)
       })
       .with({ type: 'flow.command.interrupt' }, () => {
