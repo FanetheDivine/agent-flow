@@ -10,6 +10,7 @@ import { FileRefChip } from '@/webview/components/FileRefChip'
 import { CopyButton, Md } from '../../text-components'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { ToolPermissionCard } from './ToolPermissionCard'
+import { EditDiffCard } from './EditDiffCard'
 import { ToolUseDetails } from './ToolUseDetails'
 
 export type BubbleCtx = {
@@ -574,6 +575,29 @@ export function chatMessageToBubble(
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(message.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
+
+      // Edit 工具：专用 EditDiffCard，不走 ToolUseDetails
+      if (message.toolName === 'Edit') {
+        const input = message.input as { file_path?: string; old_string?: string; new_string?: string }
+        const status = match(message.status)
+          .with('done', () => 'success' as const)
+          .with('pending', () => 'pending' as const)
+          .with('interrupted', () => 'error' as const)
+          .exhaustive()
+        return {
+          key: message.id + '-edit-diff',
+          role: 'system' as const,
+          content: (
+            <EditDiffCard
+              filePath={input.file_path ?? ''}
+              oldString={input.old_string ?? ''}
+              newString={input.new_string ?? ''}
+              status={status}
+              fork={fork}
+            />
+          ),
+        }
+      }
 
       // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
       if (message.toolName.includes('AskUserQuestion')) {

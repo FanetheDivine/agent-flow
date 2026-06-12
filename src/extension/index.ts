@@ -467,6 +467,27 @@ export function activate(context: vscode.ExtensionContext) {
             // 文件不存在或无法打开时静默忽略
           }
         })
+        .with({ type: 'openDiff' }, async ({ data }) => {
+          const { file_path, old_string, new_string, status } = data
+          const ext = file_path.split('.').pop()?.toLowerCase()
+          const language = ext ? LANG_BY_EXT[ext] : undefined
+          const folders = vscode.workspace.workspaceFolders
+          const fileUri = path.isAbsolute(file_path)
+            ? vscode.Uri.file(file_path)
+            : vscode.Uri.joinPath(folders?.[0]?.uri ?? vscode.Uri.file(''), file_path)
+          const title = `Diff: ${path.basename(file_path)}`
+          try {
+            if (status === 'success') {
+              const oldDoc = await vscode.workspace.openTextDocument({ language, content: old_string })
+              await vscode.commands.executeCommand('vscode.diff', oldDoc.uri, fileUri, title)
+            } else {
+              const newDoc = await vscode.workspace.openTextDocument({ language, content: new_string })
+              await vscode.commands.executeCommand('vscode.diff', fileUri, newDoc.uri, title)
+            }
+          } catch {
+            // 文件不存在时静默忽略
+          }
+        })
         .with({ type: P.string.startsWith('flow.command.') }, async (e) => {
           // fork 是特殊命令：不走 runner，由 extension 自己处理 SDK forkSession
           if (e.type === 'flow.command.fork') {
