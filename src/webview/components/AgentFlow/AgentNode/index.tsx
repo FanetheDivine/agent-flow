@@ -205,7 +205,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
         {/* Agent 信息：code 节点显示标签,普通 agent 显示 model + plan_mode 快捷切换 */}
 
-        <div className='flex h-6.5 items-center gap-1 px-3 pt-1'>
+        <div className='flex h-6.5 items-center gap-1 px-3 pt-1 pb-1.5'>
           {match(agent)
             .with(undefined, () => null)
             .with({ node_type: 'code' }, () => (
@@ -344,7 +344,7 @@ const AgentNodeInner: FC<NodeProps<AgentNode>> = (props) => {
 
         {/* 输出端口列表 */}
         {outputs.length > 0 && (
-          <div className='flex flex-col gap-1 px-3 pt-1.5 pb-2'>
+          <div className='flex flex-col gap-1 px-3 pb-2'>
             {outputs.map((output) => (
               <div
                 key={output.output_name}
