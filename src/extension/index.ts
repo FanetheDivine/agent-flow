@@ -76,6 +76,8 @@ const LANG_BY_EXT: Record<string, string> = {
   makefile: 'makefile',
 }
 
+const DIFF_SCHEME = 'agent-flow-diff'
+
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context)
   let currentPanel: vscode.WebviewPanel | undefined
@@ -89,6 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
   const flowStore = new PersistedDataController()
   const flowRunStateManager = new FlowRunStateManager()
   let currentFlows: PersistedData = { flows: [] }
+  const diffVirtualDocs = new Map<string, string>()
 
   const postMessageToWebview = (msg: ExtensionToWebviewMessage) => {
     if (msg.type === 'batchMessages') {
@@ -469,20 +472,23 @@ export function activate(context: vscode.ExtensionContext) {
         })
         .with({ type: 'openDiff' }, async ({ data }) => {
           const { file_path, old_string, new_string, status } = data
-          const ext = file_path.split('.').pop()?.toLowerCase()
-          const language = ext ? LANG_BY_EXT[ext] : undefined
+          const ext = file_path.split('.').pop()?.toLowerCase() ?? ''
           const folders = vscode.workspace.workspaceFolders
           const fileUri = path.isAbsolute(file_path)
             ? vscode.Uri.file(file_path)
             : vscode.Uri.joinPath(folders?.[0]?.uri ?? vscode.Uri.file(''), file_path)
-          const title = `Diff: ${path.basename(file_path)}`
+          const title = `Diff: ${file_path}`
           try {
+            const raw = await vscode.workspace.fs.readFile(fileUri)
+            const fileContent = Buffer.from(raw).toString('utf-8')
+            const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+            const virtualUri = vscode.Uri.parse(`${DIFF_SCHEME}://diff/${key}.${ext}`)
             if (status === 'success') {
-              const oldDoc = await vscode.workspace.openTextDocument({ language, content: old_string })
-              await vscode.commands.executeCommand('vscode.diff', oldDoc.uri, fileUri, title)
+              diffVirtualDocs.set(virtualUri.toString(), fileContent.replace(new_string, old_string))
+              await vscode.commands.executeCommand('vscode.diff', virtualUri, fileUri, title)
             } else {
-              const newDoc = await vscode.workspace.openTextDocument({ language, content: new_string })
-              await vscode.commands.executeCommand('vscode.diff', fileUri, newDoc.uri, title)
+              diffVirtualDocs.set(virtualUri.toString(), fileContent.replace(old_string, new_string))
+              await vscode.commands.executeCommand('vscode.diff', fileUri, virtualUri, title)
             }
           } catch {
             // 文件不存在时静默忽略
@@ -551,7 +557,15 @@ export function activate(context: vscode.ExtensionContext) {
     },
   )
 
-  context.subscriptions.push(openPanel, addSelectionToInput)
+  context.subscriptions.push(
+    openPanel,
+    addSelectionToInput,
+    vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, {
+      provideTextDocumentContent(uri) {
+        return diffVirtualDocs.get(uri.toString()) ?? ''
+      },
+    }),
+  )
 }
 
 export function deactivate() {}
