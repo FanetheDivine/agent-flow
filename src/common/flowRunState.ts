@@ -378,7 +378,8 @@ const emptyAcc = (): AgentRun['acc'] => ({
 
 /** id 计数器 —— 单调自增、永不复用 */
 function nextId(run: AgentRun): string {
-  return String(run.acc.seq++)
+  const { runId } = run
+  return `${runId}-${run.acc.seq++}`
 }
 
 /**
