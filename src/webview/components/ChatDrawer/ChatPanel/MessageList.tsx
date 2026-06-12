@@ -1,6 +1,5 @@
 import {
   memo,
-  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -47,7 +46,6 @@ type Props = {
   loading?: boolean
   ref?: Ref<MessageListRef>
 }
-
 const roleStyles = {
   user: {
     placement: 'end' as const,
@@ -62,7 +60,6 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
   // ── 数据订阅 —— 全部用稳定原始引用,过滤 / 转换在 useMemo 中完成 ──────────────
   const fs = useFlowStore((s) => s.flowRunStates[flowId])
   const allRuns = fs?.runs
-  const answeredToolPermissions = useMemo(() => getAnsweredToolPermissions(fs), [fs])
 
   // 注入快照小节标题按 node_type 区分:code 节点展示全量 shareValues(「共享数据」),
   // agent 节点展示按 allowed_read 过滤的注入值(「注入数据」)。MessageList 按 agentId 聚合,
@@ -82,95 +79,86 @@ function MessageListInner({ flowId, agentId, runId, loading, ref }: Props) {
     return allRuns.filter((r) => r.agentId === agentId)
   }, [allRuns, agentId, runId])
 
-  // 四类挂起统一订阅 pendingToolPermissions(AskUserQuestion / CompleteTask / ExitPlanMode / must_confirm)
-  const pendingToolPerms = useMemo(() => {
-    if (!fs) return EMPTY_PENDING_TOOL_PERMS
-    if (runId) {
-      const list = fs.pendingToolPermissions
-      const filtered = list.filter((p) => p.runId === runId)
-      if (filtered.length === list.length) return list
-      if (filtered.length === 0) return EMPTY_PENDING_TOOL_PERMS
-      return filtered
-    }
-    return getPendingToolPermissionsFor(fs, agentId)
-  }, [fs, runId, agentId])
-
-  const answerToolPermission = useFlowStore((s) => s.answerToolPermission)
-  const forkFlow = useFlowStore((s) => s.forkFlow)
   const { modal } = App.useApp()
 
   // ── ctx 构建 —— 历史 AskUserQuestion 卡片 / fork icon / tool 权限卡片用 ──
 
-  const pendingToolPermissionToolUseIds = useMemo(() => {
-    if (pendingToolPerms.length === 0) return undefined
-    return new Set(pendingToolPerms.map((p) => p.toolUseId))
-  }, [pendingToolPerms])
-
-  const onToolPermissionAllow = useCallback(
-    (toolUseId: string) => {
-      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
-      if (!p) return
-      answerToolPermission(flowId, p.runId, toolUseId, true)
-    },
-    [answerToolPermission, flowId, pendingToolPerms],
-  )
-  // deny:message 供 CompleteTask 拒绝原因(回喂模型);其余工具不传 → executor 用 'user denied'
-  const onToolPermissionDeny = useCallback(
-    (toolUseId: string, message?: string) => {
-      const p = pendingToolPerms.find((p) => p.toolUseId === toolUseId)
-      if (!p) return
-      answerToolPermission(flowId, p.runId, toolUseId, false, message ? { message } : undefined)
-    },
-    [answerToolPermission, flowId, pendingToolPerms],
-  )
-
-  const onViewPlan = useCallback((planFilePath: string) => {
-    postMessageToExtension({
-      type: 'openFile',
-      data: { filename: planFilePath, placement: 'active' },
-    })
-  }, [])
-
-  /**
-   * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示
-   * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
-   */
-  const onForkRequest = useCallback(
-    (target: { runId: string; messageUuid: string }, sessionCompleted: boolean) => {
-      const doFork = () => forkFlow(flowId, target)
-      if (!sessionCompleted) {
-        doFork()
-        return
+  const ctx = useMemo<BubbleCtx>(() => {
+    const answeredToolPermissions = getAnsweredToolPermissions(fs)
+    // 四类挂起统一订阅 pendingToolPermissions(AskUserQuestion / CompleteTask / ExitPlanMode / must_confirm)
+    const pendingToolPerms = (() => {
+      if (!fs) return EMPTY_PENDING_TOOL_PERMS
+      if (runId) {
+        const list = fs.pendingToolPermissions
+        const filtered = list.filter((p) => p.runId === runId)
+        if (filtered.length === list.length) return list
+        if (filtered.length === 0) return EMPTY_PENDING_TOOL_PERMS
+        return filtered
       }
-      modal.confirm({
-        title: '从历史会话 fork',
-        content: '该会话已完成，shareValues 在 fork 后可能与原值不一致。是否继续？',
-        okText: 'fork',
-        cancelText: '取消',
-        onOk: doFork,
-      })
-    },
-    [forkFlow, flowId, modal],
-  )
-
-  const ctx = useMemo<BubbleCtx>(
-    () => ({
+      return getPendingToolPermissionsFor(fs, agentId)
+    })()
+    const pendingToolPermissionToolUseIds = (() => {
+      if (pendingToolPerms.length === 0) return undefined
+      return new Set(pendingToolPerms.map((p) => p.toolUseId))
+    })()
+    return {
       pendingToolPermissionToolUseIds,
       answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      onViewPlan,
-      onFork: onForkRequest,
-    }),
-    [
-      pendingToolPermissionToolUseIds,
-      answeredToolPermissions,
-      onToolPermissionAllow,
-      onToolPermissionDeny,
-      onViewPlan,
-      onForkRequest,
-    ],
-  )
+      onToolPermissionAllow: (toolUseId) => {
+        const state = useFlowStore.getState()
+        const fs = state.flowRunStates[flowId]
+        if (!fs) return
+        const list = runId
+          ? fs.pendingToolPermissions.filter((p) => p.runId === runId)
+          : getPendingToolPermissionsFor(fs, agentId)
+        const p = list.find((p) => p.toolUseId === toolUseId)
+        if (!p) return
+        state.answerToolPermission(flowId, p.runId, toolUseId, true)
+      },
+      // deny:message 供 CompleteTask 拒绝原因(回喂模型);其余工具不传 → executor 用 'user denied'
+      onToolPermissionDeny: (toolUseId, message) => {
+        const state = useFlowStore.getState()
+        const fs = state.flowRunStates[flowId]
+        if (!fs) return
+        const list = runId
+          ? fs.pendingToolPermissions.filter((p) => p.runId === runId)
+          : getPendingToolPermissionsFor(fs, agentId)
+        const p = list.find((p) => p.toolUseId === toolUseId)
+        if (!p) return
+        state.answerToolPermission(
+          flowId,
+          p.runId,
+          toolUseId,
+          false,
+          message ? { message } : undefined,
+        )
+      },
+      onViewPlan: (planFilePath) => {
+        postMessageToExtension({
+          type: 'openFile',
+          data: { filename: planFilePath, placement: 'active' },
+        })
+      },
+      /**
+       * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示
+       * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
+       */
+      onFork: (target, sessionCompleted) => {
+        const doFork = () => useFlowStore.getState().forkFlow(flowId, target)
+        if (!sessionCompleted) {
+          doFork()
+          return
+        }
+        modal.confirm({
+          title: '从历史会话 fork',
+          content: '该会话已完成，shareValues 在 fork 后可能与原值不一致。是否继续？',
+          okText: 'fork',
+          cancelText: '取消',
+          onOk: doFork,
+        })
+      },
+    }
+  }, [fs, runId, agentId, flowId, modal])
 
   // ── 折叠状态 ────────────────────────────────────────────────────────────────
   // 同时只展开一个 run；expandedRunId 为空时自动跟随末位（新 run 追加时自动展开最新）
