@@ -534,6 +534,7 @@ const isToolResultBlock = (b: unknown): boolean =>
  * 把一条 SDK 消息累加进 run.messages（操作 immer draft 的 run 与 run.acc）。
  * 外层 match 取 stream_event/assistant/user/system,.otherwise 忽略其余分支。
  * result 不在此处理 —— 普通回合 result 由 reducer 显式 push turn_end。
+ * userMessage&tool_use_id 为tooluse设置uuid;流式消息不设置uuid；assisant为最后一个thinking/text块设置uuid
  */
 function appendSdkMessage(run: AgentRun, sdkMsg: AIMessageType): void {
   match(sdkMsg)
