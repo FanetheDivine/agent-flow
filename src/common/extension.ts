@@ -244,7 +244,12 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
         model: z.literal('sonnet'),
         must_confirm_tools: z.tuple([z.literal('Bash(git merge)'), z.literal('Bash(git push)')]),
       }) satisfies z.ZodType<Agent>
-      const LiteFlow = FlowSchema.pick({ id: true, name: true, shareValuesKeys: true, icon: true }).extend({
+      const LiteFlow = FlowSchema.pick({
+        id: true,
+        name: true,
+        shareValuesKeys: true,
+        icon: true,
+      }).extend({
         agents: z
           .array(z.union([LiteAgent, CodeSchema]))
           .optional()

@@ -56,7 +56,12 @@ export type ExtensionFromWebviewEvents = {
   /** 在 VSCode 中预览一段外部粘入的文本附件（非文件系统文件） */
   previewAttachment: { name: string; content: string }
   /** 打开 VSCode diff 编辑器展示文件变更 */
-  openDiff: { file_path: string; old_string: string; new_string: string; status: 'pending' | 'success' | 'error' }
+  openDiff: {
+    file_path: string
+    old_string: string
+    new_string: string
+    status: 'pending' | 'success' | 'error'
+  }
   /** 展示指定 run 的文件变更侧边栏视图 */
   showRunDiff: { flowId: string; runId: string }
 } & ExtensionFlowCommandEvents

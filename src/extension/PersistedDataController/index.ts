@@ -64,9 +64,7 @@ export class PersistedDataController {
   private saveQueue: Promise<void> = Promise.resolve()
 
   async save(data: PersistedData): Promise<void> {
-    this.saveQueue = this.saveQueue
-      .catch(() => undefined)
-      .then(() => this._doSave(data))
+    this.saveQueue = this.saveQueue.catch(() => undefined).then(() => this._doSave(data))
     return this.saveQueue
   }
 
@@ -117,7 +115,11 @@ export class WorkspacePersistedDataController {
 
       return parsed.data
     } catch (err: unknown) {
-      if (typeof err === 'object' && err !== null && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        (err as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
         return null
       }
       return fallback
@@ -127,9 +129,7 @@ export class WorkspacePersistedDataController {
   private saveQueue: Promise<void> = Promise.resolve()
 
   async save(data: WorkspacePersistedData): Promise<void> {
-    this.saveQueue = this.saveQueue
-      .catch(() => undefined)
-      .then(() => this._doSave(data))
+    this.saveQueue = this.saveQueue.catch(() => undefined).then(() => this._doSave(data))
     return this.saveQueue
   }
 
