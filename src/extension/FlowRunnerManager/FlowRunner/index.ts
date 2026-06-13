@@ -163,6 +163,8 @@ export class FlowRunner {
       .with('flow.command.fork', () => {
         // fork 由 extension 端 handleFork 直接处理，不进入 FlowRunner
       })
+      .with('flow.command.clearFlow', () => {})
+      .with('flow.command.continueFlow', () => {})
       .exhaustive()
   }
 
