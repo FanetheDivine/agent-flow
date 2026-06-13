@@ -94,6 +94,15 @@ Flow 分三个持久化文件：全局（`~/.agent-flows.json`）、工作区（
 - **webview load 时 flow 合并保留有消息的 flow** → [src/extension/index.ts](src/extension/index.ts) load 分支:加载时磁盘 flows 为基准;内存中存在但磁盘不存在的 flow,若该 flow 有消息记录(`state.runs.some(r => r.messages.length > 0)`)则追加保留,否则丢弃;防止用户编辑磁盘配置后正在对话的 flow 被无谓丢失
 - **`project` 字段不入库** → [stripFlowRuntimeFields](src/common/index.ts) / [extension save handler](src/extension/index.ts):保存前必须调 `stripFlowRuntimeFields` 剥除 `project`;extension save handler 按此字段路由到不同文件;`LiteFlow`(GetFlowJSONSchema) 不含 `project`,AI 无法设置
 
+### 权限卡片与 tool_use 气泡展示规则
+
+[MessageBubble.tsx chatMessageToBubble](src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) `case 'tool_use'` 分支对四类特殊工具(Edit / ExitPlanMode / AskUserQuestion / CompleteTask)的渲染规则:
+
+- **pending 阶段一律底部卡片**:isPending 时消息队列返回 null,由底部固定卡片渲染;CompleteTask 例外 —— pending 确认卡片直接挂在消息队列内
+- **失败且无 answered = 系统自动拒绝**:展示为 defaultToolUseItem(tool_use 气泡),不展示权限卡片;此时气泡可挂 fork(Edit/CompleteTask)
+- **成功或用户已回答 = 权限卡片**:ToolPermissionCard historical 模式,answered 从 `answeredToolPermissions` 取,loading = 已回答但 result 未到达
+- **AskUserQuestion 更严格**:必须 `answered` 存在才渲染历史卡片(它是唯一强制用户交互的 tool);answered 来源 = 用户手动选择 / silent_task 自动应答事件(`flow.signal.toolPermissionResult`);无 answered 时(系统自动拒绝)返回 null 不渲染
+
 ### 消息流与 Executor 生命周期
 
 - **CompleteTask.content 作为 next agent 首条消息回显** → [reducer agentComplete 分支](src/common/flowRunState.ts):创建新 `AgentRun` 时 `messages` 预置一条 user `aiMessage`(content = `nextAgent.no_input || currentAgent.no_output ? '执行任务' : data.content`),与 `FlowRunner.doOnCompleteTask` 喂 SDK 的 `nextInitMessage` 同源,改链路两端同改

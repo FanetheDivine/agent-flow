@@ -603,18 +603,10 @@ export function chatMessageToBubble(
       const isPending = ctx?.pendingToolPermissionToolUseIds?.has(message.toolUseId) ?? false
       const answered = ctx?.answeredToolPermissions?.[message.toolUseId]
       const fork = buildForkIcon()
-      // answered 无记录时（工具自动允许，未走 pendingToolPermissions 链路），用 message.status 补全
-      const effectiveAnswered = answered
-        ? { allow: answered.allow, reason: answered.message }
-        : message.status === 'done'
-          ? { allow: !message.result?.isError, reason: message.result?.text }
-          : message.status === 'interrupted'
-            ? { allow: false }
-            : undefined
 
       // loading 判定：用户已显式回答（answeredToolPermissions 有记录）但工具执行结果尚未到达
       const isAnsweredAwaitingResult = !!answered && !message.result
-      // 默认tooluse气泡 可以为权限卡片补充信息
+      // 默认tooluse气泡
       const defaultToolUseItem: RenderedBubble = {
         key: message.id,
         role: 'ai',
@@ -628,44 +620,70 @@ export function chatMessageToBubble(
           />
         ),
       }
-      // Edit 工具：走 ToolPermissionCard editDiff 变体；pending 时移至底部活动卡片，历史态内联展示
+      // Edit/ExitPlanMode pending时展示在底部而不是消息队列
+      // 自动失败时(例如入参有问题) 展示tooluse气泡
+      // 执行成功或用户选择答案时 展示卡片
       if (message.toolName === 'Edit') {
         if (isPending) return null
+        if (message.result?.isError && !answered) {
+          return defaultToolUseItem
+        }
         const input = message.input as {
           file_path?: string
           old_string?: string
           new_string?: string
         }
-        return [
-          {
-            key: message.id + '-edit-diff',
-            role: 'system' as const,
-            content: (
-              <ToolPermissionCard
-                toolName='Edit'
-                input={message.input}
-                mode='historical'
-                answered={effectiveAnswered}
-                loading={isAnsweredAwaitingResult}
-                editDiff={{
-                  filePath: input.file_path ?? '',
-                  oldString: input.old_string ?? '',
-                  newString: input.new_string ?? '',
-                }}
-                fork={fork}
-              />
-            ),
-          },
-          defaultToolUseItem,
-        ]
+        return {
+          key: message.id + '-edit-diff',
+          role: 'system' as const,
+          content: (
+            <ToolPermissionCard
+              toolName='Edit'
+              input={message.input}
+              mode='historical'
+              answered={answered}
+              loading={isAnsweredAwaitingResult}
+              editDiff={{
+                filePath: input.file_path ?? '',
+                oldString: input.old_string ?? '',
+                newString: input.new_string ?? '',
+              }}
+              fork={fork}
+            />
+          ),
+        }
+      }
+      if (message.toolName.includes('ExitPlanMode')) {
+        if (isPending) return null
+        if (message.result?.isError && !answered) {
+          return defaultToolUseItem
+        }
+        const planFilePath = (message.input as { planFilePath?: string })?.planFilePath ?? ''
+        return {
+          key: message.id + '-exit-plan',
+          role: 'system' as const,
+          content: (
+            <ToolPermissionCard
+              toolName='ExitPlanMode'
+              input={message.input}
+              mode='historical'
+              answered={answered}
+              loading={isAnsweredAwaitingResult}
+              exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
+              fork={fork}
+            />
+          ),
+        }
       }
 
-      // AskUserQuestion：pending 时由底部固定卡片渲染(active)，历史态从 answeredToolPermissions 就地解析答案
+      // AskUserQuestion pending时展示在底部而不是消息队列
+      // 历史态从 answeredToolPermissions 就地解析答案
       if (message.toolName.includes('AskUserQuestion')) {
-        if (!answered || isPending) return null
-        // 从 answeredToolPermissions.updatedInput 就地解析历史答案
+        if (isPending) return null
+        // 无论成功还是失败 都必须有用户回答
+        if (!answered) return defaultToolUseItem
         const answersObj = (
-          answered.updatedInput as { answers?: Record<string, string> } | undefined
+          answered?.updatedInput as { answers?: Record<string, string> } | undefined
         )?.answers
         const answeredValues: Record<string, string[]> | undefined = answersObj
           ? Object.fromEntries(
@@ -693,27 +711,13 @@ export function chatMessageToBubble(
         }
       }
 
-      // CompleteTask：完成前确认。pending 时在工具详情下方挂确认卡片;历史只显示工具详情
+      // CompleteTask pending时在消息队列展示卡片 失败展示tooluse(允许fork)
+      // 成功不展示 由agentComplete展示详细信息
       // (成功完成由 agent_complete 卡片体现,拒绝则带 isError result)。
       if (message.toolName.includes('CompleteTask')) {
-        const completeInput = message.input as Record<string, any> | undefined
-        // CompleteTask 仅在被拒绝(带 isError result)时可作 fork 起点;成功完成 / pending 不挂 fork。
-        const completeFork = message.result?.isError ? fork : undefined
-        const toolUseItem: RenderedBubble = {
-          key: message.id,
-          role: 'ai',
-          content: (
-            <ToolUseBubbleContent
-              toolName={message.toolName}
-              input={message.input}
-              result={message.result}
-              treatNoResultAsSuccess={sessionCompleted}
-              copyText={message.result?.text ?? ''}
-              fork={completeFork}
-            />
-          ),
-        }
+        if (message.result?.isError) return defaultToolUseItem
         if (isPending && ctx) {
+          const completeInput = message.input as Record<string, any> | undefined
           const confirmItem: RenderedBubble = {
             key: message.id + '-confirm',
             role: 'ai',
@@ -733,30 +737,9 @@ export function chatMessageToBubble(
               />
             ),
           }
-          return [toolUseItem, confirmItem]
+          return confirmItem
         }
-        return toolUseItem
-      }
-
-      // ExitPlanMode：pending 时移至底部卡片；历史态仍内联展示
-      if (message.toolName.includes('ExitPlanMode')) {
-        if (isPending) return null
-        const planFilePath = (message.input as { planFilePath?: string })?.planFilePath ?? ''
-        return {
-          key: message.id + '-exit-plan',
-          role: 'system' as const,
-          content: (
-            <ToolPermissionCard
-              toolName='ExitPlanMode'
-              input={message.input}
-              mode='historical'
-              answered={effectiveAnswered}
-              loading={isAnsweredAwaitingResult}
-              exitPlan={{ planFilePath, onViewPlan: () => ctx!.onViewPlan?.(planFilePath) }}
-              fork={fork}
-            />
-          ),
-        }
+        return null
       }
 
       // 通用工具权限(must_confirm 等)：pending 时移至底部卡片 不在消息中展示权限配置
