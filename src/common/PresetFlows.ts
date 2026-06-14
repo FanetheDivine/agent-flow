@@ -383,7 +383,6 @@ export const PresetFlows: Flow[] = [
         model: 'sonnet[1m]',
         effort: 'high',
         work_mode: 'silent_task',
-        no_input: true,
         no_output: true,
         plan_mode: true,
         agent_prompt: [
