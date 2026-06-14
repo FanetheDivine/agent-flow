@@ -376,7 +376,10 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
       </div>
       {/* 快捷确认/继续悬浮按钮组 最后一个run展开时可用 */}
       {effectiveExpanded === lastRunId && (
-        <FloatButton.Group className='absolute right-3 bottom-1 text-xs [&_.ant-float-btn]:!w-7 [&_.ant-float-btn]:!h-7 [&_.ant-float-btn]:!min-h-0 [&_.ant-float-btn-body]:!w-7 [&_.ant-float-btn-body]:!h-7 [&_.ant-float-btn-icon]:!text-sm' shape='square'>
+        <FloatButton.Group
+          className='absolute right-3 bottom-1 text-xs [&_.ant-float-btn]:!h-7 [&_.ant-float-btn]:!min-h-0 [&_.ant-float-btn]:!w-7 [&_.ant-float-btn-body]:!h-7 [&_.ant-float-btn-body]:!w-7 [&_.ant-float-btn-icon]:!text-sm'
+          shape='square'
+        >
           {lastRunHasSuccessfulEdit ? (
             // 最后一个run进行了文件变更时展示
             <FloatButton
