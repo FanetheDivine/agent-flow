@@ -47,7 +47,7 @@ type RenderItem = { runId?: string; message: RenderMessage }
 export type MessageListRef = {
   scrollBoxNativeElement: HTMLElement | null
   scrollToBottom: (behavior?: 'auto' | 'smooth') => void
-  reFocus: () => void
+  focusLatestRun: () => void
 }
 
 type Props = {
@@ -298,16 +298,16 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
   // 是否粘底:用户向上滚则置 false,滚回底部 32px 内置 true
   const shouldFocusRef = useRef(true)
   // 重新聚焦
-  const reFocus = useMemoizedFn(() => {
+  const focusLatestRun = useMemoizedFn(() => {
     setExpandedRunId(undefined)
     shouldFocusRef.current = true
     setTimeout(scrollToEnd)
   })
   useLayoutEffect(() => {
     if (!shouldFocusRef.current) return
-    reFocus()
+    focusLatestRun()
     // 有AI消息/首次进入/渲染变化时滚动
-  }, [renderItems, totalSize, scrollToEnd, reFocus])
+  }, [renderItems, totalSize, scrollToEnd, focusLatestRun])
 
   useImperativeHandle(
     ref,
@@ -319,9 +319,9 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
         shouldFocusRef.current = true
         setTimeout(() => scrollToEnd(behavior))
       },
-      reFocus,
+      focusLatestRun,
     }),
-    [reFocus, scrollToEnd],
+    [focusLatestRun, scrollToEnd],
   )
   const lastRunHasSuccessfulEdit = runs
     .at(-1)
@@ -339,7 +339,10 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
         ref={scrollerElRef}
         onScroll={(e) => {
           const dom = e.target as HTMLDivElement
-          shouldFocusRef.current = dom.scrollHeight - dom.scrollTop - dom.clientHeight < 32
+          // 在最新的run且滚动到下方时 继续自动滚动
+          shouldFocusRef.current =
+            (!expandedRunId || expandedRunId === runs.at(-1)?.runId) &&
+            dom.scrollHeight - dom.scrollTop - dom.clientHeight < 32
         }}
         className='chat-bubble-compact min-h-0 flex-1 overflow-x-hidden overflow-y-auto'
       >
@@ -362,8 +365,15 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
                   ctx={ctx}
                   setExpandedRunId={(id) => {
                     setExpandedRunId(id)
-                    if (id !== runs.at(-1)?.runId) return
-                    reFocus()
+                    // 切换到非最后一个run时 不再自动滚动
+                    if (!id || id !== runs.at(-1)?.runId) {
+                      shouldFocusRef.current = false
+                      return
+                    }
+                    const dom = scrollerElRef.current
+                    if (!dom) return
+                    shouldFocusRef.current =
+                      dom.scrollHeight - dom.scrollTop - dom.clientHeight < 32
                   }}
                 />
               </div>
