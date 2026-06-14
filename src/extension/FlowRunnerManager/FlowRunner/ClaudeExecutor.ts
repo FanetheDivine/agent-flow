@@ -377,27 +377,8 @@ export class ClaudeExecutor {
       }
       return this.requestToolPermission(toolUseID, toolName, toolInput)
     }
-    const { must_confirm_tools, deny_tools } = agent
-    // 优先级 0：命中 deny 列表，直接禁止，不弹窗。
-    // Bash 命令级：组合命令中任一子命令命中即禁止（防绕过）
-    if (
-      deny_tools &&
-      (matchTool(toolName, deny_tools, toolInput) ||
-        matchToolAnySubCommand(toolName, deny_tools, toolInput))
-    ) {
-      const matchedPatterns = deny_tools.filter(
-        (p) =>
-          matchTool(toolName, [p], toolInput) || matchToolAnySubCommand(toolName, [p], toolInput),
-      )
-      const denyDesc =
-        matchedPatterns.length > 0
-          ? matchedPatterns.reduce((a, b) => (a.length <= b.length ? a : b))
-          : toolName
-      return Promise.resolve({
-        behavior: 'deny',
-        message: `禁止使用 ${denyDesc}`,
-      })
-    }
+    const { must_confirm_tools } = agent
+
     // 优先级 1：命中 must_confirm 列表，始终要求确认。
     // Bash 命令级：组合命令中任一子命令命中即要求确认（防绕过）
     if (
@@ -502,6 +483,7 @@ export class ClaudeExecutor {
       canUseTool: this.canUseTool,
       cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
       includePartialMessages: true,
+      disallowedTools: agent.deny_tools,
     }
     // env 注入:SDK 文档约定 options.env 一旦设置会**替换**整个子进程 env,
     // 因此必须 spread process.env 保住 PATH/HOME 等。仅当 baseUrl / apiKey 任一非空
