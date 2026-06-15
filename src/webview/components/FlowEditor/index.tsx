@@ -32,6 +32,7 @@ type FormValues = {
   shareValues: Record<string, string>
   base_url?: string
   api_key?: string
+  cwd?: string
 }
 
 type SortableRowProps = {
@@ -108,8 +109,12 @@ export const FlowEditor: FC = () => {
   const save = useFlowStore((s) => s.save)
   const setEditingFlowId = useFlowStore((s) => s.setEditingFlowId)
   const setShareValues = useFlowStore((s) => s.setShareValues)
+  const setCwd = useFlowStore((s) => s.setCwd)
   const runShareValues = useFlowStore((s) =>
     editingFlowId ? s.flowRunStates[editingFlowId]?.shareValues : undefined,
+  )
+  const runCwd = useFlowStore((s) =>
+    editingFlowId ? s.flowRunStates[editingFlowId]?.cwd : undefined,
   )
 
   const open = !!editingFlowId
@@ -139,11 +144,16 @@ export const FlowEditor: FC = () => {
         shareValues: runShareValues ?? {},
         base_url: flow.base_url,
         api_key: flow.api_key,
+        // runCwd 刻意不加入 deps：仅在 open/flow 变化时初始化，
+        // 避免实时 setCwd 回写 store 后触发重置（onValuesChange 负责实时同步）
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        cwd: runCwd ?? '',
       })
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditingKey(null)
       setNewKeyInput('')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, flow, runShareValues, form])
 
   if (!flow) return null
@@ -221,6 +231,11 @@ export const FlowEditor: FC = () => {
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
         onFinish={handleFinish}
+        onValuesChange={(changedValues: Partial<FormValues>) => {
+          if ('cwd' in changedValues) {
+            setCwd(flow.id, (changedValues.cwd ?? '').trim())
+          }
+        }}
       >
         <div className='flex w-150 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
@@ -354,6 +369,13 @@ export const FlowEditor: FC = () => {
                 tooltip='Flow 默认 api key;Agent 同名字段非空时覆盖,注入 SDK 子进程的 ANTHROPIC_AUTH_TOKEN'
               >
                 <Input placeholder='sk-ant-...' />
+              </Form.Item>
+              <Form.Item
+                name='cwd'
+                label='当前工作路径'
+                tooltip='当前 Flow 的运行态工作路径；作为 Code 节点 cwd 入参并影响后续 Agent/Code 节点 cwd；runCommand 本身始终在 VSCode workspace root 执行；不填则回退工作区根目录'
+              >
+                <Input placeholder='不填则使用工作区根目录' />
               </Form.Item>
             </div>
           </div>

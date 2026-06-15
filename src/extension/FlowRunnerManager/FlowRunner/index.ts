@@ -85,6 +85,14 @@ export type FlowRunnerOptions = {
    * 取最新值,确保 fork 后(lazy 模式构造到首次启动间)用户改 agent 在首次启动时生效。
    */
   getLatestFlow: () => Flow
+  /**
+   * 取当前 Flow 的工作目录（FlowRunState.cwd）。
+   * Code 节点返回 cwd 后经 agentComplete signal → reducer 写入 FlowRunState,
+   * 下一个 Code 节点启动时经此回调取最新值，作为用户代码函数的 cwd 参数透传；
+   * runCommand 本身始终在 VSCode workspace root 执行，不受此值影响。
+   * 返回 undefined 时回退到 VSCode workspaceFolder。
+   */
+  getLatestCwd: () => string | undefined
 }
 
 /**
@@ -105,10 +113,12 @@ export class FlowRunner {
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
   private readonly getLatestFlow: () => Flow
+  private readonly getLatestCwd: () => string | undefined
 
   constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
     this.getLatestFlow = options.getLatestFlow
+    this.getLatestCwd = options.getLatestCwd
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -164,6 +174,10 @@ export class FlowRunner {
         // fork 由 extension 端 handleFork 直接处理，不进入 FlowRunner
       })
       .with('flow.command.clearFlow', () => {})
+      .with('flow.command.setCwd', () => {
+        // FlowRunner 不维护 cwd 副本；reducer（FlowRunStateManager）是唯一真相源，
+        // 下一次 runAgent 通过 getLatestCwd() 实时取。
+      })
       .exhaustive()
   }
 
@@ -223,6 +237,7 @@ export class FlowRunner {
         initMessage: dummyInit,
         agent: latestAgent,
         currentValues: this.getLatestShareValues(),
+        cwd: this.getLatestCwd() ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor),
         resumeSessionId,
@@ -328,21 +343,28 @@ export class FlowRunner {
     agent: Agent | Code,
     currentValues: Record<string, string>,
     fireFlowStartSignal: boolean,
+    overrideCwd?: string | null,
   ): void {
     if (agent.node_type === 'code') {
       const executor: CodeExecutor = new CodeExecutor('eager', () => {
         const latestFlow = this.getLatestFlow()
-        const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
+        // null → 清空，直接回退 workspaceRoot；undefined → 沿用 getLatestCwd()；string → 使用指定路径
+        const cwd = overrideCwd === null
+          ? workspaceRoot
+          : (overrideCwd ?? this.getLatestCwd()) ?? workspaceRoot
         return {
           initMessage,
           agent,
           currentValues,
+          cwd,
           shareValueKeys: latestFlow.shareValuesKeys ?? [],
           runCommand: async (command: string, timeout?: number) => {
             // Windows 上 `bash` 会被 WSL 拦截,需要显式定位 Git Bash
             const shell = process.platform === 'win32' ? ((await resolveGitBash()) ?? 'bash') : true
+            // runCommand 始终在 VSCode workspace root 执行；如需在 cwd 路径执行，用户代码应自行 cd "${cwd}" && ...
             const { stdout, stderr } = await execaCommand(command, {
-              cwd,
+              cwd: workspaceRoot,
               timeout: timeout ?? 600_000,
               shell,
             })
@@ -364,6 +386,9 @@ export class FlowRunner {
         initMessage,
         agent: latestAgent,
         currentValues,
+        cwd: overrideCwd === null
+          ? vscode.workspace.workspaceFolders?.[0].uri.fsPath
+          : (overrideCwd ?? this.getLatestCwd()) ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor, fireFlowStartSignal),
         flowBaseUrl: latestFlow.base_url,
@@ -491,14 +516,18 @@ export class FlowRunner {
       const nextValues = result.values
         ? { ...this.getLatestShareValues(), ...result.values }
         : this.getLatestShareValues()
+      // 同理:reducer 尚未处理 agentComplete，getLatestCwd 还是旧值；手动叠加 result.cwd。
+      // 三态直接透传——runAgent 内 overrideCwd===null 时直接取 workspaceRoot，避免依赖 reducer 时序
+      const effectiveCwd = result.cwd
       // extension 端为下一个 agent 生成新 runId
       const newRunId = crypto.randomUUID()
-      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false)
+      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd)
       this.fire('flow.signal.agentComplete', {
         runId,
         content,
         output: { name: result.outputName!, newRunId },
         values: result.values,
+        cwd: result.cwd,
         result: result.resultMessage,
       })
     } else {
@@ -509,6 +538,7 @@ export class FlowRunner {
         output: { name: result.outputName },
         content: result.content,
         values: result.values,
+        cwd: result.cwd,
         result: result.resultMessage,
       })
     }

@@ -342,6 +342,10 @@ export type FlowRunState = {
   pendingToolPermissions: PendingToolPermission[]
   /** Flow 运行时的共享数据 */
   shareValues: Record<string, string>
+  /** Flow 级工作目录；Code 节点可通过返回 cwd 字段设置，webview 可通过 setCwd 命令设置；
+   * agentComplete 携带 null 时清空，携带 string 时更新，未携带或 undefined 时不变；
+   * flow 末端完成（无 nextAgent）时自动清空；clearFlow 时随整个 state 删除 */
+  cwd?: string
 }
 
 /** FlowRunState 的 zod schema（z.custom 避免深层嵌套完整定义，仅做基本结构校验） */
@@ -789,6 +793,7 @@ export function updateFlowRunState(
       answeredToolPermissions: state?.answeredToolPermissions ?? {},
       pendingToolPermissions: [],
       shareValues: baseValues,
+      cwd: state?.cwd,
     }
     return { state: started, effects }
   }
@@ -801,6 +806,23 @@ export function updateFlowRunState(
       pendingToolPermissions: [],
       ...state,
       shareValues: msg.data.values,
+    }
+    return { state: base, effects }
+  }
+
+  if (msg.type === 'flow.command.setCwd') {
+    const base: FlowRunState = {
+      killed: false,
+      runs: [],
+      answeredToolPermissions: {},
+      pendingToolPermissions: [],
+      shareValues: {},
+      ...(state ?? {}),
+    }
+    if (msg.data.cwd) {
+      base.cwd = msg.data.cwd
+    } else {
+      delete base.cwd // 空字符串视为清空，等同于 null 语义
     }
     return { state: base, effects }
   }
@@ -908,6 +930,14 @@ export function updateFlowRunState(
         if (data.values) {
           draft.shareValues = { ...draft.shareValues, ...data.values }
         }
+        // 合并 cwd（必须在追加 nextRun 之前，nextRun 的用户代码 cwd 参数通过 getLatestCwd 取此值）
+        if ('cwd' in data) {
+          if (data.cwd === null) {
+            delete draft.cwd
+          } else if (typeof data.cwd === 'string') {
+            draft.cwd = data.cwd
+          }
+        }
         run.completed = true
         run.outputName = data.output?.name
         // CompleteTask result:只更 acc（token 累计），不 push turn_end（避免 phase 误切 result）
@@ -967,8 +997,9 @@ export function updateFlowRunState(
           )
           draft.runs.push(newRun)
         } else {
-          // Flow 走到末端:全部 run 完成,清空 shareValues 防污染下次启动
+          // Flow 走到末端:全部 run 完成,清空 shareValues / cwd 防污染下次启动
           draft.shareValues = {}
+          delete draft.cwd
           pushEffect({ flowId, runId: run.runId, agentId: run.agentId, reason: 'flow-completed' })
         }
       })
