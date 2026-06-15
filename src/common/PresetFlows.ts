@@ -115,7 +115,7 @@ export const PresetFlows: Flow[] = [
           '}',
           '// 清理worktree',
           'await runCommand(`git worktree remove -f "${cwd}"`)',
-          'return { content: `分支: ${branchName}\\n代码修改已完成` }',
+          'return { content: `分支: ${branchName}  \\n代码修改已完成` }',
         ].join('\n'),
         id: '3',
       },
