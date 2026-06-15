@@ -124,7 +124,7 @@ export const PresetFlows: Flow[] = [
         node_type: 'code',
         agent_name: '提交遗漏代码',
         code: [
-          `await runCommand("git diff --quiet && git diff --cached --quiet || (git add . && git commit -m 'auto commit')")`,
+          "await runCommand(`${cwd?`cd \"${cwd}\"`:''}git diff --quiet && git diff --cached --quiet || (git add . && git commit -m 'auto commit')`)",
           `return { output_name: '输出', content: input }`,
         ].join('\n'),
         outputs: [{ output_name: '输出', next_agent: '1' }],
