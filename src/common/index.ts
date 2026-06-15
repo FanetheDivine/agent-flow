@@ -572,7 +572,6 @@ export function buildAgentSystemPrompt(
   // ── 顶部：配置无关、跨 Agent 不变 ────────────────────────────────────────
   const lines: string[] = [
     '中文思考与回复，简洁输出，直接给代码或结果，不解释推导过程',
-    '引用文件采用markdown格式`[file_path:line_number](file_path:line_number)`，引用整份文件不需要line_number',
     '理解用户真实需求，精确改动相关代码',
     '**禁止**主动优化、重构或任何无关改动，严格遵循代码库既有规范与风格',
     '**禁止**道歉、表明身份、免责声明等与任务无关的内容',
