@@ -27,8 +27,8 @@ export type ExecutorResult = {
   content?: string
   values?: Record<string, string>
   /**
-   * Code 节点返回的工作目录，透传至 agentComplete signal 后由 reducer 写入 FlowRunState.cwd
-   * string=设置路径 / null=清空为默认工作区 / undefined=不更改
+   * 仅Code 节点使用，返回的工作目录，透传至 agentComplete signal 后由 reducer 写入 FlowRunState.cwd
+   * string=设置路径 / null或空串=清空为默认工作区 / undefined=不更改
    */
   cwd?: string | null
   /**

@@ -92,7 +92,7 @@ export type FlowRunnerOptions = {
    * runCommand 本身始终在 VSCode workspace root 执行，不受此值影响。
    * 返回 undefined 时回退到 VSCode workspaceFolder。
    */
-  getLatestCwd: () => string | undefined
+  getLatestCwd: () => string | undefined | null
 }
 
 /**
@@ -113,7 +113,7 @@ export class FlowRunner {
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
   private readonly getLatestFlow: () => Flow
-  private readonly getLatestCwd: () => string | undefined
+  private readonly getLatestCwd: () => string | undefined | null
 
   constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
@@ -237,7 +237,7 @@ export class FlowRunner {
         initMessage: dummyInit,
         agent: latestAgent,
         currentValues: this.getLatestShareValues(),
-        cwd: this.getLatestCwd() ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+        cwd: this.getLatestCwd() || vscode.workspace.workspaceFolders?.[0].uri.fsPath,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor),
         resumeSessionId,
@@ -345,12 +345,14 @@ export class FlowRunner {
     fireFlowStartSignal: boolean,
     overrideCwd?: string | null,
   ): void {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
+    // 写入时 undefined表示保持现状 使用时则null/undefined/空串统一回退到默认工作区
+    // null/空串/undefined 均回退 workspaceRoot；string 使用指定路径
+    const rawCwd = overrideCwd !== undefined ? overrideCwd : this.getLatestCwd()
+    const cwd = rawCwd || workspaceRoot
     if (agent.node_type === 'code') {
       const executor: CodeExecutor = new CodeExecutor('eager', () => {
         const latestFlow = this.getLatestFlow()
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
-        // null → 清空，直接回退 workspaceRoot；undefined → 沿用 getLatestCwd()；string → 使用指定路径
-        const cwd = overrideCwd || this.getLatestCwd() || workspaceRoot
         return {
           initMessage,
           agent,
@@ -384,12 +386,7 @@ export class FlowRunner {
         initMessage,
         agent: latestAgent,
         currentValues,
-        cwd:
-          overrideCwd === null
-            ? vscode.workspace.workspaceFolders?.[0].uri.fsPath
-            : (overrideCwd ??
-              this.getLatestCwd() ??
-              vscode.workspace.workspaceFolders?.[0].uri.fsPath),
+        cwd,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor, fireFlowStartSignal),
         flowBaseUrl: latestFlow.base_url,

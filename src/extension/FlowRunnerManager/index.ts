@@ -5,7 +5,7 @@ import { FlowRunner } from './FlowRunner'
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
 type GetLatestShareValues = (flowId: string) => Record<string, string>
 type GetLatestFlow = (flowId: string) => Flow | undefined
-type GetLatestCwd = (flowId: string) => string | undefined
+type GetLatestCwd = (flowId: string) => string | undefined | null
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
