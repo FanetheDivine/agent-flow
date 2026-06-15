@@ -18,7 +18,7 @@ export const PresetFlows: Flow[] = [
           'const branchName = `agent-flow-dev/${suffix}`',
           'const worktreePath = `./claude/worktrees/${suffix}`',
           'await runCommand(`git worktree add --no-track -b ${branchName} ${worktreePath}`)',
-          'const absPath = (await runCommand(`cd ${worktreePath} && pwd`)).trim()',
+          'const absPath = (await runCommand(`git -C ${worktreePath} rev-parse --show-toplevel`)).trim()',
           'return {',
           "  output_name: '准备完成',",
           '  content: `已创建工作区 ${branchName}`,',
