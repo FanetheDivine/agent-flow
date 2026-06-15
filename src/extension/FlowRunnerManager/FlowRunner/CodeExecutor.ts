@@ -10,7 +10,7 @@ import { ExecutorEvents, ExecutorMode, ExecutorResult } from './ClaudeExecutor'
  *
  * runCommand: 始终在 VSCode workspace root 下执行 shell 命令的函数，由上层 FlowRunner 注入,透传给 AsyncFunction 作为第三个入参;
  * 如需在当前 Flow cwd 执行，用户代码应自行 cd "${cwd}" && ... （注意 shell 转义）。
- * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd，无则为 VSCode workspace root），透传给 AsyncFunction 作为第四个入参。
+ * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd；**未设置时为 undefined，不回退 workspace root**），透传给 AsyncFunction 作为第四个入参。
  */
 export type CodeExecutorOptions = {
   initMessage: UserMessageType

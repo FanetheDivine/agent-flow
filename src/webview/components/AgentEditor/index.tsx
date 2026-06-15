@@ -494,7 +494,7 @@ export const AgentEditor: FC = () => {
                       }`,
                       '// runCommand: async (cmd: string, timeout?: number) => Promise<string> 始终在 VSCode workspace root 执行；',
                       '//   如需在当前 Flow cwd 执行，请在命令内自行 cd "${cwd}" && ...',
-                      '// cwd: string | undefined  当前工作目录（FlowRunState.cwd，无则为 VSCode workspaceFolder）',
+                      '// cwd: string | undefined  当前工作目录（FlowRunState.cwd；未设置时为 undefined，不回退 workspaceFolder）',
                     ].join('\n')}
                   </div>
                   <div className='text-[#94e2d5]'>

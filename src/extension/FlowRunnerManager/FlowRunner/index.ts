@@ -346,10 +346,11 @@ export class FlowRunner {
     overrideCwd?: string | null,
   ): void {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
-    // 写入时 undefined表示保持现状 使用时则null/undefined/空串统一回退到默认工作区
-    // null/空串/undefined 均回退 workspaceRoot；string 使用指定路径
+    // overrideCwd===undefined 时保持现状（取 FlowRunState.cwd）；否则用 override 覆盖（含 null/空串=清空）
     const rawCwd = overrideCwd !== undefined ? overrideCwd : this.getLatestCwd()
-    const cwd = rawCwd || workspaceRoot
+    // code 节点允许 cwd 为 undefined（未设置时不强制回退 workspaceRoot，由用户代码自行判断）；
+    // claude 节点注入 system prompt，需有明确工作目录，回退 workspaceRoot
+    const cwd = agent.node_type === 'code' ? (rawCwd || undefined) : (rawCwd || workspaceRoot)
     if (agent.node_type === 'code') {
       const executor: CodeExecutor = new CodeExecutor('eager', () => {
         const latestFlow = this.getLatestFlow()

@@ -76,7 +76,7 @@ function createCompletionSource(shareValueKeys: string[], outputs: string[]): Co
           label: 'cwd',
           type: 'variable',
           detail: 'string | undefined',
-          info: '当前工作目录（FlowRunState.cwd，无则为 VSCode workspaceFolder）',
+          info: '当前工作目录（FlowRunState.cwd；未设置时为 undefined，不回退 workspaceFolder）',
         },
         {
           label: 'CodeResult',
