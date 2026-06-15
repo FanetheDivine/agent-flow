@@ -1,4 +1,5 @@
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+type UserContent = SDKUserMessage['message']['content']
 import { AIMessageType, Code, ShareValueKey, UserMessageType } from '@/common'
 import { logError } from '../../logger'
 import { ExecutorEvents, ExecutorMode, ExecutorResult } from './ClaudeExecutor'
@@ -30,13 +31,13 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
 /**
  * 把 code 节点的返回值规整为 ExecutorResult 形态:
  * - 顶层是字符串 → { content: 字符串 }
- * - 顶层是 { output_name?, content?, values?, cwd? } → 取这四项
+ * - 顶层是 { output_name?, content?, values?, cwd? } → 取这四项；content 可为 string 或 ContentBlockParam[]
  * - undefined / null → { content: '' }
  * - 其他对象/数组 → { content: JSON.stringify(返回值) }
  */
 function normalizeCodeResult(raw: unknown): {
   outputName?: string
-  content: string
+  content: UserContent
   values?: Record<string, string>
   cwd?: string | null
 } {
@@ -46,9 +47,16 @@ function normalizeCodeResult(raw: unknown): {
     const obj = raw as Record<string, unknown>
     const hasShape = 'output_name' in obj || 'content' in obj || 'values' in obj || 'cwd' in obj
     if (hasShape) {
+      const rawContent = obj.content
+      const content: UserContent =
+        typeof rawContent === 'string'
+          ? rawContent
+          : Array.isArray(rawContent) && rawContent.length > 0
+            ? (rawContent as UserContent)
+            : ''
       return {
         outputName: typeof obj.output_name === 'string' ? obj.output_name : undefined,
-        content: typeof obj.content === 'string' ? obj.content : '',
+        content,
         values:
           obj.values && typeof obj.values === 'object'
             ? (obj.values as Record<string, string>)
@@ -69,7 +77,7 @@ function normalizeCodeResult(raw: unknown): {
  */
 function validateCodeOutput(
   agent: Code,
-  normalized: { outputName?: string; content: string; values?: Record<string, string> },
+  normalized: { outputName?: string; content: UserContent; values?: Record<string, string> },
 ): string | null {
   const outputs = agent.outputs
   if (outputs && outputs.length > 0) {
@@ -88,7 +96,7 @@ function validateCodeOutput(
 
 /**
  * 代码节点执行器 —— 与 ClaudeExecutor 同构 ExecutorEvents,但不调 AI、不挂 MCP、
- * 不走 SDK。把 agent.code 视为 `async function (input, values, runCommand, cwd) { ... }` 函数体执行,
+ * 不走 SDK。把 agent.code 视为 `async function (input: string | ContentBlockParam[], values, runCommand, cwd) { ... }` 函数体执行,
  * 返回值映射为 ExecutorResult。
  *
  * 严格只产出 agentComplete 信号:

@@ -161,6 +161,22 @@ function renderTextBlockParts(
   })
 }
 
+/** UserContent（string | ContentBlockParam[]）→ 纯文本，供完成卡片渲染与复制按钮 */
+function userContentToText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return (content as Array<Record<string, unknown>>)
+      .map((block) => {
+        if (block?.type === 'text') return (block.text as string) ?? ''
+        if (block?.type === 'image') return '[图片]'
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
 /** 渲染用户消息内容 —— 代码片段 / 文件 / 图片均以 chip 形式内联展示，允许换行 */
 function renderUserContent(rawContent: unknown): { copyText: string; node: ReactNode } {
   if (typeof rawContent === 'string') {
@@ -342,11 +358,12 @@ const ToolUseBubbleContent: FC<{
  *  被「完成卡片」(agent_complete) 与「完成前确认卡片」复用。 */
 const CompleteTaskBody: FC<{
   outputName?: string
-  content?: string
+  content?: string | unknown[]
   cwd?: string | null
   values?: Record<string, string>
 }> = ({ outputName, content, values, cwd }) => {
   const shareEntries = values ? Object.entries(values) : []
+  const displayText = content ? userContentToText(content) : ''
   return (
     <div className='flex min-w-75 flex-col gap-2'>
       {cwd === undefined ? null : (
@@ -360,7 +377,7 @@ const CompleteTaskBody: FC<{
       <Tag color='green' className='m-0 self-start text-[10px]'>
         完成{outputName ? ` → ${outputName}` : ''}
       </Tag>
-      {content && <Md content={content} />}
+      {displayText && <Md content={displayText} />}
       {shareEntries.length > 0 && (
         <div className='mt-2 border-t border-[#45475a] pt-2'>
           <div className='mb-1 text-[10px] text-[#a6adc8]'>共享数据写入</div>
@@ -385,7 +402,7 @@ const CompleteTaskBody: FC<{
  *  用户点击同意/拒绝后立即进入 loading 态（发送按钮 spinning），直到 SDK 处理后卡片卸载。 */
 const CompleteTaskConfirmCard: FC<{
   outputName?: string
-  content?: string
+  content?: string | unknown[]
   values?: Record<string, string>
   onAccept: () => void
   onDeny: (reason: string) => void
@@ -724,9 +741,7 @@ export function chatMessageToBubble(
             content: (
               <CompleteTaskConfirmCard
                 outputName={completeInput?.output_name ?? completeInput?.output?.name}
-                content={
-                  typeof completeInput?.content === 'string' ? completeInput.content : undefined
-                }
+                content={completeInput?.content}
                 values={
                   completeInput?.values && typeof completeInput.values === 'object'
                     ? completeInput.values
@@ -780,7 +795,7 @@ export function chatMessageToBubble(
     case 'agent_complete': {
       const completionText = [
         message.outputName ? `完成 → ${message.outputName}` : '完成',
-        message.displayContent,
+        userContentToText(message.displayContent),
       ]
         .filter(Boolean)
         .join('\n')
