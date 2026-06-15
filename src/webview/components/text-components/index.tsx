@@ -15,6 +15,7 @@ import mermaid from 'mermaid'
 import { match, P } from 'ts-pattern'
 import { cn } from '@/webview/utils'
 import { postMessageToExtension } from '@/webview/utils/ExtensionMessage'
+import { useFlowStore } from '@/webview/store/flow'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -77,9 +78,14 @@ const parseFileRef = (text: string): { filename: string; line?: [number, number]
 
 /** 向 extension 发送 openFile 事件 */
 const openFileRef = (ref: { filename: string; line?: [number, number] }) => {
+  const { chatDrawer, flowRunStates } = useFlowStore.getState()
+  const cwd = chatDrawer ? flowRunStates[chatDrawer.flowId]?.cwd : undefined
+  const data = ref.line
+    ? { filename: ref.filename, line: ref.line }
+    : { filename: ref.filename }
   postMessageToExtension({
     type: 'openFile',
-    data: ref.line ? { filename: ref.filename, line: ref.line } : { filename: ref.filename },
+    data: cwd ? { ...data, cwd } : data,
   })
 }
 

@@ -118,14 +118,18 @@ export function activate(context: vscode.ExtensionContext) {
     filename: string
     line?: [number, number]
     placement?: 'active' | 'beside'
+    cwd?: string
   }) {
-    const { filename, line, placement } = data
+    const { filename, line, placement, cwd } = data
     const folders = vscode.workspace.workspaceFolders
-    if (!path.isAbsolute(filename) && !folders?.length) return
+    if (!path.isAbsolute(filename) && !cwd && !folders?.length) return
     try {
       const uri = path.isAbsolute(filename)
         ? vscode.Uri.file(filename)
-        : vscode.Uri.joinPath(folders![0].uri, filename)
+        : vscode.Uri.joinPath(
+            cwd ? vscode.Uri.file(cwd) : folders![0].uri,
+            filename,
+          )
       const doc = await vscode.workspace.openTextDocument(uri)
       const editor = await vscode.window.showTextDocument(
         doc,
@@ -730,6 +734,7 @@ export function activate(context: vscode.ExtensionContext) {
       filename: string
       line?: [number, number]
       placement?: 'active' | 'beside'
+      cwd?: string
     }) => {
       await openFileInEditor(data)
     },
