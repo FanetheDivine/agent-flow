@@ -333,10 +333,11 @@ export const ChatPanel: FC<Props> = ({
           />
         </div>
         <div className='flex h-7 min-w-0 items-center gap-1 px-3'>
+          <span className='text-xs whitespace-nowrap text-[#6c7086]'>当前工作路径：</span>
           {editingCwd !== null ? (
             <Input
               size='small'
-              className='h-5 flex-1 text-xs leading-5'
+              className='h-5 text-xs leading-5'
               value={editingCwd}
               onChange={(e) => setEditingCwd(e.target.value)}
               onPressEnter={() => {
@@ -356,18 +357,12 @@ export const ChatPanel: FC<Props> = ({
               autoFocus
             />
           ) : (
-            <>
-              <span className='min-w-0 flex-1 truncate text-xs text-[#6c7086]'>
-                当前工作路径：{cwd || '默认工作区'}
-              </span>
-              <Button
-                size='small'
-                type='text'
-                icon={<EditOutlined />}
-                style={{ color: '#6c7086', flexShrink: 0 }}
-                onClick={() => setEditingCwd(cwd ?? '')}
-              />
-            </>
+            <span
+              className='min-w-0 flex-1 cursor-pointer truncate text-xs text-[#6c7086]'
+              onClick={() => setEditingCwd(cwd ?? '')}
+            >
+              {cwd || '默认工作区'}
+            </span>
           )}
         </div>
       </div>
