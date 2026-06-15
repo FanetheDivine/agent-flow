@@ -346,7 +346,7 @@ export type FlowRunState = {
   /** Flow 级工作目录；Code 节点可通过返回 cwd 字段设置，webview 可通过 setCwd 命令设置；
    * agentComplete 携带 null 时清空，携带 string 时更新，未携带或 undefined 时不变；
    * flow 末端完成（无 nextAgent）时自动清空；clearFlow 时随整个 state 删除 */
-  cwd?: string
+  cwd?: string | null
 }
 
 /** FlowRunState 的 zod schema（z.custom 避免深层嵌套完整定义，仅做基本结构校验） */
@@ -932,12 +932,8 @@ export function updateFlowRunState(
           draft.shareValues = { ...draft.shareValues, ...data.values }
         }
         // 合并 cwd（必须在追加 nextRun 之前，nextRun 的用户代码 cwd 参数通过 getLatestCwd 取此值）
-        if ('cwd' in data) {
-          if (data.cwd === null) {
-            delete draft.cwd
-          } else if (typeof data.cwd === 'string') {
-            draft.cwd = data.cwd
-          }
+        if (data.cwd !== undefined) {
+          draft.cwd = data.cwd
         }
         run.completed = true
         run.outputName = data.output?.name
