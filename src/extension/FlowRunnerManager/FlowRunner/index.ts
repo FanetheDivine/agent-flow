@@ -350,9 +350,7 @@ export class FlowRunner {
         const latestFlow = this.getLatestFlow()
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
         // null → 清空，直接回退 workspaceRoot；undefined → 沿用 getLatestCwd()；string → 使用指定路径
-        const cwd = overrideCwd === null
-          ? workspaceRoot
-          : (overrideCwd ?? this.getLatestCwd()) ?? workspaceRoot
+        const cwd = overrideCwd || this.getLatestCwd() || workspaceRoot
         return {
           initMessage,
           agent,
@@ -386,9 +384,12 @@ export class FlowRunner {
         initMessage,
         agent: latestAgent,
         currentValues,
-        cwd: overrideCwd === null
-          ? vscode.workspace.workspaceFolders?.[0].uri.fsPath
-          : (overrideCwd ?? this.getLatestCwd()) ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+        cwd:
+          overrideCwd === null
+            ? vscode.workspace.workspaceFolders?.[0].uri.fsPath
+            : (overrideCwd ??
+              this.getLatestCwd() ??
+              vscode.workspace.workspaceFolders?.[0].uri.fsPath),
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor, fireFlowStartSignal),
         flowBaseUrl: latestFlow.base_url,
