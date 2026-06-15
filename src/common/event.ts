@@ -256,7 +256,7 @@ type FlowCommandPayload = {
   /** 清空 Flow：销毁 FlowRunner，清除全部对话记录和 shareValues，仅需 flowId */
   clearFlow: object
   /** 设置 Flow 的工作目录；即使 Flow 未运行也可调用（state 不存在时自动创建） */
-  setCwd: { cwd: string }
+  setCwd: { cwd?: string | null }
 }
 
 /** FlowRunner 内部指令（不含 flowId） */

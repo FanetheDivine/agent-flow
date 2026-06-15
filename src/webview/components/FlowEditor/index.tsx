@@ -199,6 +199,7 @@ export const FlowEditor: FC = () => {
     // shareValues 是运行时数据，不进入持久化的 Flow 定义；
     // 通过单独的 setShareValues 命令同步到运行中的 RunState（无 active run 时为 no-op）。
     setShareValues(flow.id, cleanedValues)
+    setCwd(flow.id, values.cwd)
     handleClose()
   }
 
