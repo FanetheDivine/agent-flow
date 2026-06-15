@@ -220,6 +220,7 @@ export type AgentCompleteMessage = Base & {
   totalCost?: number
   /** 最后一个 turn 的主模型窗口占用 */
   contextUsage?: ContextUsage
+  cwd?: string | null
 }
 /** 错误项 —— agentError / error 时 push */
 export type ErrorMessage = Base & { kind: 'error'; message: string }
@@ -955,6 +956,7 @@ export function updateFlowRunState(
           modelBreakdown: modelBreakdown.length > 0 ? modelBreakdown : undefined,
           totalCost: run.acc.lastTotalCost > 0 ? run.acc.lastTotalCost : undefined,
           contextUsage: run.acc.lastTurnContextUsage,
+          cwd: data.cwd,
         })
         clearPendings()
         const flow = findFlow(flowId)
