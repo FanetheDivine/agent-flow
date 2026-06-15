@@ -248,7 +248,6 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
         id: true,
         name: true,
         shareValuesKeys: true,
-        icon: true,
       }).extend({
         agents: z
           .array(z.union([LiteAgent, CodeSchema]))

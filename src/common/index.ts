@@ -157,7 +157,6 @@ export const FlowSchema = z.object({
     .boolean()
     .optional()
     .describe('项目级 flow 标记（仅内存/UI，不持久化到磁盘 flows 数组）'),
-  icon: z.string().optional().describe('Flow 图标（emoji 或 icon name）'),
 })
 
 /** @see {@link FlowSchema} */

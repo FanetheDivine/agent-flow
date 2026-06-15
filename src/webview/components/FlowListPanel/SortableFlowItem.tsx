@@ -123,7 +123,6 @@ export const SortableFlowItem: FC<SortableFlowItemProps> = (props) => {
             ellipsis
             className='w-full'
           >
-            {flow.icon && <span className='mr-1'>{flow.icon}</span>}
             {name}
           </Typography.Text>
         </div>
