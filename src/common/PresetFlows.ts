@@ -559,7 +559,7 @@ export const PresetFlows: Flow[] = [
         agent_prompt: [
           '如果当前在main分支，stash工作区变更',
           '如果当前不在main分支，基于main创建worktree，后续命令在工作区执行',
-          '查看main分支上一个tag到最新提交**全部**、**完整**commit message，更新README.md/CLAUDE.md/CHANGELOG.md',
+          '查看main分支上一个tag到最新提交**全部**、**完整**commit message，更新README.md/CLAUDE.md/CHANGELOG.md，更新docs/下的文档',
           'Changelog.md只保留最新版本；当归档文件（changelogs/目录下）累积到10个版本时，新建下一个归档文件，命名格式为v起始版本-v结束版本.md（如v0.0.38-v0.0.47.md）',
         ].join('\n'),
         id: '6',
