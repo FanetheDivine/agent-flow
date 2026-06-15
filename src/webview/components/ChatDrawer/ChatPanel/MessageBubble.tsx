@@ -108,24 +108,13 @@ function parseUserParts(text: string): UserPart[] {
   return parts
 }
 
-function codeRefLabel(path: string, line?: [number, number]): string {
-  if (!line) return path
-  return line[0] === line[1] ? `${path}:${line[0]}` : `${path}:${line[0]}-${line[1]}`
-}
-
 /** 渲染单个 text block 的各 part（文本/代码片段/文件引用/附件） */
-function renderTextBlockParts(
-  text: string,
-  keyPrefix: string,
-  copyParts: string[],
-  nodes: ReactNode[],
-): void {
+function renderTextBlockParts(text: string, keyPrefix: string, nodes: ReactNode[]): void {
   const parts = parseUserParts(text)
   parts.forEach((p, j) => {
     const key = `${keyPrefix}-${j}`
     if (p.kind === 'text') {
       if (p.text.length === 0) return
-      copyParts.push(p.text)
       nodes.push(
         <span key={key} className='whitespace-pre-wrap'>
           {p.text}
@@ -134,7 +123,6 @@ function renderTextBlockParts(
       return
     }
     if (p.kind === 'code_snippet') {
-      copyParts.push(codeRefLabel(p.path, p.line))
       nodes.push(
         <span key={key} className='mx-0.5 inline-flex align-middle'>
           <CodeRefChip codeRef={{ filename: p.path, line: p.line }} />
@@ -143,7 +131,6 @@ function renderTextBlockParts(
       return
     }
     if (p.kind === 'file_ref') {
-      copyParts.push(p.path)
       nodes.push(
         <span key={key} className='mx-0.5 inline-flex align-middle'>
           <CodeRefChip codeRef={{ filename: p.path }} />
@@ -151,8 +138,6 @@ function renderTextBlockParts(
       )
       return
     }
-    // attachment
-    copyParts.push(`📎 ${p.name}`)
     nodes.push(
       <span key={key} className='mx-0.5 inline-flex align-middle'>
         <FileRefChip data={{ id: `att-${key}`, name: p.name, mimeType: p.mime, text: p.text }} />
@@ -199,7 +184,9 @@ function renderRichContent(content: string | unknown[] | undefined): ReactNode {
       } else {
         nodes.push(
           <span key={key} className='mx-0.5 inline-flex align-middle'>
-            <FileRefChip data={{ id: `att-${key}`, name: p.name, mimeType: p.mime, text: p.text }} />
+            <FileRefChip
+              data={{ id: `att-${key}`, name: p.name, mimeType: p.mime, text: p.text }}
+            />
           </span>,
         )
       }
@@ -237,7 +224,8 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
   if (typeof rawContent === 'string') {
     const copyParts: string[] = []
     const nodes: ReactNode[] = []
-    renderTextBlockParts(rawContent, 'str', copyParts, nodes)
+    copyParts.push(rawContent)
+    renderTextBlockParts(rawContent, 'str', nodes)
     return {
       copyText: copyParts.join(''),
       node: <div className='leading-relaxed wrap-break-word'>{nodes}</div>,
@@ -257,7 +245,8 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
     if (block.type === 'text') {
       const text = block.text ?? ''
       if (text) {
-        renderTextBlockParts(text, String(i), copyParts, nodes)
+        copyParts.push(text)
+        renderTextBlockParts(text, String(i), nodes)
       }
       return
     }
