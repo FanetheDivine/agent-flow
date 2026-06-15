@@ -95,7 +95,7 @@ export const PresetFlows: Flow[] = [
         outputs: [
           {
             output_name: '修改完成',
-            next_agent: '1',
+            next_agent: '4',
           },
         ],
         work_mode: 'silent_task',
@@ -118,6 +118,16 @@ export const PresetFlows: Flow[] = [
           'return { content: `分支: ${branchName}  \\n代码修改已完成` }',
         ].join('\n'),
         id: '3',
+      },
+      {
+        id: '4',
+        node_type: 'code',
+        agent_name: '提交遗漏代码',
+        code: [
+          `await runCommand("git diff --quiet && git diff --cached --quiet || (git add . && git commit -m 'auto commit')")`,
+          `return { output_name: '输出', content: input }`,
+        ].join('\n'),
+        outputs: [{ output_name: '输出', next_agent: '1' }],
       },
     ],
     shareValuesKeys: [
