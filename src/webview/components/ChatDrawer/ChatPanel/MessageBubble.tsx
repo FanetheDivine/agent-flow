@@ -179,18 +179,48 @@ function userContentToText(content: unknown): string {
 
 /** 渲染富文本内容（string | ContentBlockParam[]）→ ReactNode，用于完成卡片等需要展示图片/格式化文本的场景 */
 function renderRichContent(content: string | unknown[] | undefined): ReactNode {
-  if (typeof content === 'string') return <Md content={content} />
+  const renderParts = (text: string, prefix: string, nodes: ReactNode[]) => {
+    parseUserParts(text).forEach((p, j) => {
+      const key = `${prefix}-${j}`
+      if (p.kind === 'text') {
+        if (p.text) nodes.push(<Md key={key} content={p.text} />)
+      } else if (p.kind === 'code_snippet') {
+        nodes.push(
+          <span key={key} className='mx-0.5 inline-flex align-middle'>
+            <CodeRefChip codeRef={{ filename: p.path, line: p.line }} />
+          </span>,
+        )
+      } else if (p.kind === 'file_ref') {
+        nodes.push(
+          <span key={key} className='mx-0.5 inline-flex align-middle'>
+            <CodeRefChip codeRef={{ filename: p.path }} />
+          </span>,
+        )
+      } else {
+        nodes.push(
+          <span key={key} className='mx-0.5 inline-flex align-middle'>
+            <FileRefChip data={{ id: `att-${key}`, name: p.name, mimeType: p.mime, text: p.text }} />
+          </span>,
+        )
+      }
+    })
+  }
+  if (typeof content === 'string') {
+    const nodes: ReactNode[] = []
+    renderParts(content, 'str', nodes)
+    return nodes.length > 0 ? <>{nodes}</> : null
+  }
   if (!Array.isArray(content)) return null
   const nodes: ReactNode[] = []
   ;(content as Array<Record<string, unknown>>).forEach((block, i) => {
     if (!block || typeof block !== 'object') return
     if (block.type === 'text') {
       const text = (block.text as string) ?? ''
-      if (text) nodes.push(<Md key={i} content={text} />)
+      if (text) renderParts(text, String(i), nodes)
       return
     }
     if (block.type === 'image') {
-      const mime = (block.source as Record<string, unknown>)?.media_type as string ?? 'image/png'
+      const mime = ((block.source as Record<string, unknown>)?.media_type as string) ?? 'image/png'
       const base64 = ((block.source as Record<string, unknown>)?.data as string) ?? ''
       nodes.push(
         <span key={i} className='mx-0.5 inline-flex align-middle'>
@@ -227,8 +257,7 @@ function renderUserContent(rawContent: unknown): { copyText: string; node: React
     if (block.type === 'text') {
       const text = block.text ?? ''
       if (text) {
-        copyParts.push(text)
-        nodes.push(<Md key={i} content={text} />)
+        renderTextBlockParts(text, String(i), copyParts, nodes)
       }
       return
     }
