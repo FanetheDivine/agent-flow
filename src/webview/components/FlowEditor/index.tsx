@@ -357,6 +357,13 @@ export const FlowEditor: FC = () => {
                 </Form.List>
               </Form.Item>
               <Form.Item
+                name='cwd'
+                label='当前工作路径'
+                tooltip='当前 Flow 的运行态工作路径；作为 Code 节点 cwd 入参并影响后续 Agent/Code 节点 cwd；runCommand 本身始终在 VSCode workspace root 执行；不填则回退工作区根目录'
+              >
+                <Input placeholder='不填则使用工作区根目录' />
+              </Form.Item>
+              <Form.Item
                 name='base_url'
                 label='Base URL'
                 tooltip='Flow 默认 base url;Agent 同名字段非空时覆盖,注入 SDK 子进程的 ANTHROPIC_BASE_URL'
@@ -369,13 +376,6 @@ export const FlowEditor: FC = () => {
                 tooltip='Flow 默认 api key;Agent 同名字段非空时覆盖,注入 SDK 子进程的 ANTHROPIC_AUTH_TOKEN'
               >
                 <Input placeholder='sk-ant-...' />
-              </Form.Item>
-              <Form.Item
-                name='cwd'
-                label='当前工作路径'
-                tooltip='当前 Flow 的运行态工作路径；作为 Code 节点 cwd 入参并影响后续 Agent/Code 节点 cwd；runCommand 本身始终在 VSCode workspace root 执行；不填则回退工作区根目录'
-              >
-                <Input placeholder='不填则使用工作区根目录' />
               </Form.Item>
             </div>
           </div>
