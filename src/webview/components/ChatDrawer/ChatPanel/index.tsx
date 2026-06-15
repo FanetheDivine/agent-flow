@@ -332,7 +332,7 @@ export const ChatPanel: FC<Props> = ({
             style={{ color: '#6c7086' }}
           />
         </div>
-        <div className='flex h-7 min-w-0 items-center gap-1 px-3'>
+        <div className='flex h-7 min-w-0 items-center gap-1 overflow-hidden px-3'>
           <span className='text-xs whitespace-nowrap text-[#6c7086]'>当前工作路径：</span>
           {editingCwd !== null ? (
             <Input
@@ -345,7 +345,6 @@ export const ChatPanel: FC<Props> = ({
                 setEditingCwd(null)
               }}
               onBlur={() => {
-                setCwd(flowId, editingCwd.trim())
                 setEditingCwd(null)
               }}
               onKeyDown={(e) => {
@@ -357,12 +356,23 @@ export const ChatPanel: FC<Props> = ({
               autoFocus
             />
           ) : (
-            <span
-              className='min-w-0 flex-1 cursor-pointer truncate text-xs text-[#6c7086]'
-              onClick={() => setEditingCwd(cwd ?? '')}
-            >
-              {cwd || '主工作区'}
-            </span>
+            <>
+              <span
+                className='min-w-0 cursor-pointer truncate text-xs text-[#6c7086]'
+                onClick={() => setEditingCwd(cwd ?? '')}
+              >
+                {cwd || '主工作区'}
+              </span>
+              {cwd && (
+                <CloseOutlined
+                  className='mr-auto ml-1 cursor-pointer text-xs text-[#6c7086] hover:text-[#1677ff]'
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setCwd(flowId, '')
+                  }}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
