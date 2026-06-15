@@ -1,0 +1,58 @@
+# tool permission 链路
+
+## 关键文件
+
+- [`../src/common/event.ts`](../src/common/event.ts) — `toolPermissionRequest` / `toolPermissionResult` 事件。
+- [`../src/common/flowRunState.ts`](../src/common/flowRunState.ts) — pending / answered 队列与 phase 推断。
+- [`../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts`](../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) — `preToolUseHook` 与 silent_task 自动处理。
+- [`../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) — tool_use 气泡与权限卡片路由。
+- [`../src/webview/components/ChatDrawer/ChatPanel/ToolUseDetails.tsx`](../src/webview/components/ChatDrawer/ChatPanel/ToolUseDetails.tsx) — toolName 展示转换。
+
+## 统一机制
+
+AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_tools 四类挂起共用一套机制：
+
+- 一个 `pendingToolPermissions` 队列。
+- 一个 `answeredToolPermissions` 记录。
+- 一个 `awaiting-tool-permission` phase。
+- 一对 `toolPermissionRequest` / `toolPermissionResult` 事件。
+- 一个 `answerToolPermission(toolUseId, allow, opts?)` 方法。
+
+preToolUseHook 只决定工具是否挂起与如何处理；挂起、回答、回显统一走 reducer 通道。
+
+## preToolUseHook 决策链
+
+[`../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts`](../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) 中的顺序：
+
+1. `deny_tools`：`matchToolRule` 黑名单语义，任一子命令命中即拒绝。
+2. 特殊工具：AskUserQuestion、CompleteTask require_confirm、ExitPlanMode。
+3. `must_confirm_tools`：`matchToolRule`；silent_task 自动拒绝，其余挂起。
+4. `{ continue: true }`：交给 Claude Code 自身权限体系。
+5. `canUseTool`：兜底放行。
+
+`matchTool` 是白名单语义，要求所有子命令匹配；`matchToolRule` 是黑名单语义，任一子命令匹配即命中；两者共用 `matchToolImpl`。
+
+## silent_task 自动处理
+
+- AskUserQuestion：自动回答，走 `flow.signal.toolPermissionResult` 回显卡片。
+- ExitPlanMode：自动接受，走 `flow.signal.toolPermissionResult` 回显卡片，不触发 `pushEffect`。
+- must_confirm_tools：自动拒绝，因无人确认禁止使用。
+- 普通工具授权：静默处理。
+- 自动续轮、AskUserQuestion 自动应答、ExitPlanMode 自动接受共享 `SILENT_MAX_AUTO_REPLIES` per-run 上限。
+
+## webview 展示规则
+
+[`../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) 的 `tool_use` 分支按工具类型展示：
+
+- pending 阶段：消息队列返回 null，由底部固定卡片渲染。
+- CompleteTask pending：确认卡片直接挂在消息队列内。
+- 失败且无 answered：展示默认 tool_use 气泡，不展示权限卡片；此时气泡可挂 fork(Edit/CompleteTask)。
+- 成功或用户已回答：展示 ToolPermissionCard 的已回答形态；已回答但 result 未到达时 loading。
+- AskUserQuestion：必须存在 answered 才展示已回答卡片；无 answered 时返回 null。
+
+## 硬约束
+
+- 只有一套 tool permission 机制，禁止为特殊工具新增旁路。
+- `flow.signal.toolPermissionResult` 与 `flow.command.toolPermissionResult` 语义一致但入口不同。
+- run 结束时未回答的 pending 权限由 `clearPendings` 自动标记为拒绝。
+- 工具类型判定必须用 `.includes('CompleteTask'/'ExitPlanMode'/'AskUserQuestion')`，兼容 `mcp__AgentControllerMcp__X`（canUseTool 收到）与 `AgentControllerMcp::X`（parseToolName 转换）两种格式，禁止使用严格等值判断（与 `::` 格式永不相等）。
