@@ -99,8 +99,14 @@ export const ToolPermissionCard: FC<Props> = ({
   const handleSelectionChange = (value: string) => {
     setSelection(value)
     match(value)
-      .with(ALLOW_VALUE, () => { setSubmitted(true); onAllow?.() })
-      .with(DENY_VALUE, () => { setSubmitted(true); onDeny?.() })
+      .with(ALLOW_VALUE, () => {
+        setSubmitted(true)
+        onAllow?.()
+      })
+      .with(DENY_VALUE, () => {
+        setSubmitted(true)
+        onDeny?.()
+      })
       .otherwise(() => {})
   }
 

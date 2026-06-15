@@ -465,7 +465,8 @@ export const AgentEditor: FC = () => {
               <div className='flex items-center gap-2 px-3 py-2'>
                 <span className='text-base font-medium'>代码</span>
                 <span className='text-[11px] text-[#a6adc8]'>
-                  入参 input / values / runCommand / cwd,返回 {'{ output_name?, content?, values?, cwd?: string | null }'}
+                  入参 input / values / runCommand / cwd,返回{' '}
+                  {'{ output_name?, content?, values?, cwd?: string | null }'}
                 </span>
               </div>
               {/* 外层签名只读装饰 + code 编辑区 + 闭合括号 —— 让用户只写函数体。
