@@ -231,11 +231,6 @@ export const FlowEditor: FC = () => {
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={(e) => e.stopPropagation()}
         onFinish={handleFinish}
-        onValuesChange={(changedValues: Partial<FormValues>) => {
-          if ('cwd' in changedValues) {
-            setCwd(flow.id, (changedValues.cwd ?? '').trim())
-          }
-        }}
       >
         <div className='flex w-150 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
