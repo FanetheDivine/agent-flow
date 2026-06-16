@@ -147,7 +147,11 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
               id: crypto.randomUUID(),
               agent_name: 'code-node',
               node_type: 'code',
-              code: "return { output_name: '输出', content: input }",
+              code: [
+                'async function run(input, values, runCommand, cwd) {',
+                "  return { output_name: '输出', content: input }",
+                '}',
+              ].join('\n'),
               outputs: [{ output_name: '输出', output_desc: '代码节点输出' }],
             }
           : {
