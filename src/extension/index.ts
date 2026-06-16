@@ -148,22 +148,6 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   )
 
-  // 全局监听：tab 关闭时检查是否为 Code 编辑器临时文件，若是则自动清理
-  context.subscriptions.push(
-    vscode.window.tabGroups.onDidChangeTabs((e) => {
-      for (const tab of e.closed) {
-        const tabUri = (tab.input as vscode.TabInputText | undefined)?.uri
-        if (!tabUri) continue
-        for (const [key, uri] of codeEditorFiles) {
-          if (tabUri.toString() === uri.toString()) {
-            cleanupCodeEditor(key, uri)
-            break
-          }
-        }
-      }
-    }),
-  )
-
   async function openFileInEditor(data: {
     filename: string
     line?: [number, number]
