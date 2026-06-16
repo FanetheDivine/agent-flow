@@ -16,5 +16,9 @@ const flows = eval(arrayLiteral)
 const presetFlows = join(root, 'preset-flows.json')
 writeFileSync(presetFlows, JSON.stringify(flows, null, 2), 'utf-8')
 const agentFlows = join(root, '.agent-flows.json')
-writeFileSync(agentFlows, JSON.stringify({ flows }, null, 2), 'utf-8')
+writeFileSync(
+  agentFlows,
+  JSON.stringify({ flows: flows.map((f) => ({ ...f, id: crypto.randomUUID() })) }, null, 2),
+  'utf-8',
+)
 console.log(`预设flow已更新`)
