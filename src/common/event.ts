@@ -69,6 +69,16 @@ export type ExtensionFromWebviewEvents = {
   }
   /** 展示指定 run 的文件变更侧边栏视图 */
   showRunDiff: { flowId: string; runId: string }
+  /** 在 VSCode 编辑器中打开 Code 节点代码 */
+  openCodeEditor: {
+    flowId: string
+    agentId: string
+    code: string
+    shareValueKeys: string[]
+    outputs: string[]
+  }
+  /** 关闭 Code 节点编辑器：删除临时文件并关闭 VS Code editor tab */
+  closeCodeEditor: { flowId: string; agentId: string }
 } & ExtensionFlowCommandEvents
 
 /** extension发出 webview接受的消息 */
@@ -86,6 +96,12 @@ export type ExtensionToWebviewEvents = {
   }
   /** 从 VSCode 通知栏点击后，聚焦到指定 Flow（纯 UI 导航信号，不涉及具体 run） */
   focusFlow: { flowId: string }
+  /** VSCode 编辑器中 Code 节点代码变更 */
+  codeEditorUpdate: {
+    flowId: string
+    agentId: string
+    code: string
+  }
   /** 批量消息 */
   batchMessages: ExtensionFlowSignalMessage[]
 } & ExtensionFlowSignalEvents
@@ -149,7 +165,7 @@ type FlowSignalPayload = {
      */
     result?: AIMessageType
   }
-  /** Agent被中断了 */
+  /** Agent被中断 */
   agentInterrupted: { runId: string }
   /** agent错误 */
   agentError: { runId: string; agentId: string; err: string }

@@ -97,8 +97,8 @@ function validateCodeOutput(
 
 /**
  * 代码节点执行器 —— 与 ClaudeExecutor 同构 ExecutorEvents,但不调 AI、不挂 MCP、
- * 不走 SDK。把 agent.code 视为 `async function (input: string | ContentBlockParam[], values, runCommand, cwd) { ... }` 函数体执行,
- * 返回值映射为 ExecutorResult。
+ * 不走 SDK。把 agent.code 视为完整 async function 表达式执行
+ * （向后兼容旧的函数体格式），返回值映射为 ExecutorResult。
  *
  * 严格只产出 agentComplete 信号:
  * - 不发 assistant 文本气泡(onMessage 不携任何 assistant message)
@@ -201,7 +201,10 @@ export class CodeExecutor {
 
     let raw: unknown
     try {
-      const fn = new AsyncFunction('input', 'values', 'runCommand', 'cwd', codeBody)
+      // 兼容新旧格式：完整 async function 表达式用 new Function return 求值；旧函数体走 AsyncFunction 构造器
+      const fn = /^\s*async\s+function/.test(codeBody)
+        ? (new Function(`return (${codeBody})`)() as (...args: unknown[]) => Promise<unknown>)
+        : new AsyncFunction('input', 'values', 'runCommand', 'cwd', codeBody)
       raw = await fn(inputContent, valuesArg, this.runCommand, this.currentCwd)
     } catch (err) {
       // 严格只产出 agentComplete 信号:错误路径不发 assistant 错误气泡、不发 result onMessage,

@@ -268,6 +268,10 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
           })
           return
         }
+        if (msg.type === 'codeEditorUpdate') {
+          // 由 AgentEditor 直接订阅处理,store 不参与
+          return
+        }
         // fork signal：源 Flow 状态不变，需要在 store 中复制 sourceFlow 定义、
         // 写入新 RunState、切到新 Flow、打开 ChatDrawer，并触发 save 持久化。
         if (msg.type === 'flow.signal.fork') {

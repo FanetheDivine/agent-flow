@@ -13,6 +13,8 @@ export type CodeEditorProps = {
   outputs?: string[]
   /** 只读模式：禁止编辑，用于 webview 内展示（实际编辑在 VSCode 中完成） */
   readOnly?: boolean
+  /** 跳过内部 JSDoc 拼接：外部已单独展示 JSDoc 类型声明时使用 */
+  hideJSDoc?: boolean
 }
 
 /**
@@ -24,15 +26,17 @@ export const CodeEditor: FC<CodeEditorProps> = ({
   value = '',
   shareValueKeys,
   outputs,
+  hideJSDoc,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [html, setHtml] = useState('')
   const reqId = useRef(0)
 
   const displayValue = useMemo(() => {
+    if (hideJSDoc) return value
     const jsdoc = buildCodeJSDoc(shareValueKeys ?? [], outputs ?? [])
     return jsdoc + '\n' + value
-  }, [value, shareValueKeys, outputs])
+  }, [value, shareValueKeys, outputs, hideJSDoc])
 
   useEffect(() => {
     const id = ++reqId.current

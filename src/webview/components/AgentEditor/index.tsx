@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import type { FC } from 'react'
 import {
   Drawer,
@@ -18,14 +18,18 @@ import {
   EditOutlined,
   EyeOutlined,
   CloseOutlined,
+  CodeOutlined,
 } from '@ant-design/icons'
 import type { Agent, Code } from '@/common'
-import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, MODELS, buildAgentSystemPrompt } from '@/common'
+import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, MODELS, buildAgentSystemPrompt, buildCodeJSDoc } from '@/common'
 import { useSilentTaskModeNotification } from '@/webview/hooks/useSilentTaskModeNotification'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
+import { postMessageToExtension, subscribeExtensionMessage } from '@/webview/utils/ExtensionMessage'
 import { CodeEditor } from '../CodeEditor'
 import { Md } from '../text-components'
+import { codeToHtml } from 'shiki'
+import '../CodeEditor/code-editor.css'
 
 type CodeNodeFormValue = Omit<Code, 'id'>
 type AgentNodeFormValue = Omit<Agent, 'id'>
@@ -42,6 +46,39 @@ const TOOL_OPTIONS = [
   { label: `${MCP_WILDCARD} — 匹配所有 mcp__* 工具`, value: MCP_WILDCARD },
   ...BUILTIN_TOOL_NAMES.map((n) => ({ label: n, value: n })),
 ]
+
+/** Code 节点 JSDoc 类型声明 — 只读展示，不写入 form */
+const JsDocDisplay: FC<{ shareValueKeys: string[]; outputs: string[] }> = ({
+  shareValueKeys,
+  outputs,
+}) => {
+  const reqId = useRef(0)
+  const [html, setHtml] = useState('')
+
+  const jsdoc = useMemo(
+    () => buildCodeJSDoc(shareValueKeys, outputs),
+    [shareValueKeys, outputs],
+  )
+
+  useEffect(() => {
+    const id = ++reqId.current
+    codeToHtml(jsdoc, { lang: 'javascript', theme: 'dark-plus' }).then((h) => {
+      if (id === reqId.current) setHtml(h)
+    })
+  }, [jsdoc])
+
+  return (
+    <div
+      className='code-editor-shiki max-h-[40%] shrink-0 overflow-auto border-b border-[#313244]'
+      style={{
+        backgroundColor: 'var(--vscode-editor-background)',
+        color: 'var(--vscode-editor-foreground)',
+      }}
+    >
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  )
+}
 
 export const AgentEditor: FC = () => {
   const editingAgent = useFlowStore((s) => s.editingAgent)
@@ -78,6 +115,23 @@ export const AgentEditor: FC = () => {
     }
   }, [open, agent, form])
 
+  // 监听 VSCode 编辑器中 Code 节点代码变更
+  useEffect(() => {
+    return subscribeExtensionMessage((msg) => {
+      if (msg.type !== 'codeEditorUpdate') return
+      if (!editingAgent) return
+      if (msg.data.flowId !== editingAgent.flowId) return
+      if (msg.data.agentId !== editingAgent.agentId) return
+      form.setFieldValue('code', msg.data.code)
+      save((draftFlows) => {
+        const f = draftFlows.find((f) => f.id === editingAgent!.flowId)
+        if (!f) return
+        const a = f.agents?.find((a) => a.id === editingAgent!.agentId)
+        if (a && a.node_type === 'code') a.code = msg.data.code
+      })
+    })
+  }, [editingAgent, form, save])
+
   const isValidAgent = (v: any): v is Agent => v && typeof v.agent_name === 'string'
 
   // 从 Flow 定义中提取全部可用 key 选项
@@ -101,7 +155,15 @@ export const AgentEditor: FC = () => {
       title={null}
       placement='left'
       open={open}
-      onClose={() => setEditingAgent(undefined)}
+      onClose={() => {
+        if (agent?.node_type === 'code' && editingAgent) {
+          postMessageToExtension({
+            type: 'closeCodeEditor',
+            data: { flowId: editingAgent.flowId, agentId: editingAgent.agentId },
+          })
+        }
+        setEditingAgent(undefined)
+      }}
       defaultSize={1300}
       resizable
       styles={{
@@ -179,7 +241,7 @@ export const AgentEditor: FC = () => {
                       filterOption={(inputValue, option) =>
                         (option?.label as string)
                           ?.toLowerCase()
-                          .includes(inputValue.toLowerCase()) ??
+                          ?.includes(inputValue.toLowerCase()) ??
                         option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ??
                         false
                       }
@@ -252,7 +314,7 @@ export const AgentEditor: FC = () => {
                     options={[
                       {
                         value: 'chat',
-                        label: '对话模式 永不终止的多轮对话',
+                        label: '对话模式  永不终止的多轮对话',
                       },
                       {
                         value: 'task',
@@ -455,7 +517,7 @@ export const AgentEditor: FC = () => {
           </div>
         </div>
 
-        {/* 右侧面板:agent → 提示词预览/编辑;code → JS 函数体编辑器(外层签名只读样板) */}
+        {/* 右侧面板:agent → 提示词预览/编辑;code → 完整 async function 只读展示（实际编辑在 VSCode 中完成） */}
         <div
           className={cn('flex h-full flex-1 flex-col overflow-hidden border-l border-[#313244]')}
         >
@@ -463,54 +525,48 @@ export const AgentEditor: FC = () => {
             <>
               <div className='flex items-center gap-2 px-3 py-2'>
                 <span className='text-base font-medium'>代码</span>
-                <span className='text-[11px] text-[#a6adc8]'>
-                  入参 input / values / runCommand / cwd,返回{' '}
-                  {'{ output_name?, content?, values?, cwd?: string | null }'}
-                </span>
+                <Button
+                  type='text'
+                  size='small'
+                  icon={<CodeOutlined />}
+                  onClick={() => {
+                    if (!editingAgent) return
+                    postMessageToExtension({
+                      type: 'openCodeEditor',
+                      data: {
+                        flowId: editingAgent.flowId,
+                        agentId: editingAgent.agentId,
+                        code: form.getFieldValue('code') ?? '',
+                        shareValueKeys: shareValueKeys.map((k) => k.key),
+                        outputs: (watchedValues?.outputs ?? [])
+                          .map((o: any) => o?.output_name)
+                          .filter(Boolean),
+                      },
+                    })
+                  }}
+                >
+                  编辑
+                </Button>
               </div>
-              {/* 外层签名只读装饰 + code 编辑区 + 闭合括号 —— 让用户只写函数体。
-                  装饰条动态罗列当前 Flow 的 shareValues key 与本 Agent 的 outputs,
-                  随表单变化实时更新,作为给用户的样板说明。 */}
-              <div className='flex flex-1 flex-col overflow-hidden bg-[#181825] font-mono text-[12px]'>
-                <div className='border-b border-[#313244] px-3 py-1 text-[#a6adc8] select-none'>
-                  <div className='whitespace-pre-wrap text-[#6c7086]'>
-                    {[
-                      `// values 可读写 key (Flow shareValues): ${
-                        shareValueKeys.length === 0
-                          ? '(无)'
-                          : shareValueKeys
-                              .map((k) => (k.desc ? `${k.key}(${k.desc})` : k.key))
-                              .join(', ')
-                      }`,
-                      `// 可选 output_name (本节点 outputs): ${
-                        (watchedValues?.outputs ?? []).length === 0
-                          ? '(无)'
-                          : (watchedValues?.outputs ?? [])
-                              .map((o: any) => o?.output_name)
-                              .filter(Boolean)
-                              .map((n: string) => `'${n}'`)
-                              .join(', ')
-                      }`,
-                      '// runCommand: async (cmd: string, timeout?: number) => Promise<string> 始终在 VSCode workspace root 执行；',
-                      '//   如需在当前 Flow cwd 执行，请在命令内自行 cd "${cwd}" && ...',
-                      '// cwd: string | undefined  当前工作目录（FlowRunState.cwd；未设置时为 undefined，不回退 workspaceFolder）',
-                    ].join('\n')}
-                  </div>
-                  <div className='text-[#94e2d5]'>
-                    async function (input, values, runCommand, cwd) {'{'}
-                  </div>
-                </div>
+              {/* JSDoc 类型声明 — 只读展示，与 VSCode 临时文件头一致 */}
+              <JsDocDisplay
+                shareValueKeys={shareValueKeys.map((k) => k.key)}
+                outputs={(watchedValues?.outputs ?? [])
+                  .map((o: any) => o?.output_name)
+                  .filter(Boolean)}
+              />
+              {/* code 字段为完整 async function 表达式，直接只读展示。实际编辑在 VSCode 中完成。 */}
+              <div className='flex flex-1 flex-col overflow-hidden font-mono text-[12px]'>
                 <FormItem name='code' noStyle>
                   <CodeEditor
+                    readOnly
+                    hideJSDoc
                     shareValueKeys={shareValueKeys.map((k) => k.key)}
                     outputs={(watchedValues?.outputs ?? [])
                       .map((o: any) => o?.output_name)
                       .filter(Boolean)}
                   />
                 </FormItem>
-                <div className='border-t border-[#313244] px-3 py-1 text-[#94e2d5] select-none'>
-                  {'}'}
-                </div>
               </div>
             </>
           ) : (
