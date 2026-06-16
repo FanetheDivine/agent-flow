@@ -147,12 +147,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
               id: crypto.randomUUID(),
               agent_name: 'code-node',
               node_type: 'code',
-              code: [
-                '// 入参 input，用户输入，富文本对象数组;',
-                '// values: 当前 shareValues 全量;runCommand: 在 VSCode workspace root 执行 shell 命令（需在 cwd 路径执行时自行 cd "${cwd}" && ...）;cwd: 当前工作目录（未设置时为 undefined）',
-                '// 返回 { output_name?, content?, values?, cwd?: string | null } —— output_name 决定下一跳,values 写回 shareValues,cwd 写入当前工作目录（null=清空）',
-                "return { output_name: '输出', content: input }",
-              ].join('\n'),
+              code: "return { output_name: '输出', content: input }",
               outputs: [{ output_name: '输出', output_desc: '代码节点输出' }],
             }
           : {
