@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type { FC } from 'react'
 import {
   Drawer,
@@ -144,6 +144,16 @@ export const AgentEditor: FC = () => {
 
   const isCodeNode = (watchedValues?.node_type ?? agent?.node_type) === 'code'
 
+  const handleClose = useCallback(() => {
+    if (agent?.node_type === 'code' && editingAgent) {
+      postMessageToExtension({
+        type: 'closeCodeEditor',
+        data: { flowId: editingAgent.flowId, agentId: editingAgent.agentId },
+      })
+    }
+    setEditingAgent(undefined)
+  }, [agent, editingAgent, setEditingAgent])
+
   const fullPrompt =
     !isCodeNode && isValidAgent(watchedValues)
       ? buildAgentSystemPrompt(watchedValues, shareValueKeys)
@@ -155,15 +165,7 @@ export const AgentEditor: FC = () => {
       title={null}
       placement='left'
       open={open}
-      onClose={() => {
-        if (agent?.node_type === 'code' && editingAgent) {
-          postMessageToExtension({
-            type: 'closeCodeEditor',
-            data: { flowId: editingAgent.flowId, agentId: editingAgent.agentId },
-          })
-        }
-        setEditingAgent(undefined)
-      }}
+      onClose={handleClose}
       defaultSize={1300}
       resizable
       styles={{
@@ -197,13 +199,13 @@ export const AgentEditor: FC = () => {
               a.id === editingAgent!.agentId ? ({ ...val, id: a.id } as typeof a) : a,
             )
           })
-          setEditingAgent(undefined)
+          handleClose()
         }}
       >
         {/* 左侧表单 — 独立滚动 */}
         <div className='flex w-140 grow-0 flex-col'>
           <div className='border-b border-[#313244] px-3 py-2 text-xs font-bold'>
-            <CloseOutlined onClick={() => setEditingAgent(undefined)} className='mr-2' />
+            <CloseOutlined onClick={handleClose} className='mr-2' />
             <span>编辑节点</span>
           </div>
           <div className='flex-1 overflow-auto'>
