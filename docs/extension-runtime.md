@@ -47,11 +47,15 @@ extension 运行时层级：
 
 ## CodeExecutor
 
-`node_type='code'` 时，FlowRunner.runAgent 分流到 CodeExecutor。CodeExecutor 把 `agent.code` 当以下函数体执行：
+`node_type='code'` 时，FlowRunner.runAgent 分流到 CodeExecutor。`agent.code` 存储完整的 async function 表达式：
 
 ```ts
-async function (input, values, runCommand, cwd) {}
+async function run(input, values, runCommand, cwd) { /* body */ }
 ```
+
+CodeExecutor 通过 `new Function('return (...)')()` 求值执行。向后兼容旧的函数体格式（不以 `async function` 开头时回退为 `AsyncFunction` 构造器）。
+
+代码编辑器的 JSDoc 类型声明由 common 层 `buildCodeJSDoc(shareValueKeys, outputs)` 统一生成，extension 临时 `.js` 文件头与 webview CodeEditor 只读展示共用同一函数。
 
 参数：
 

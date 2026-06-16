@@ -91,7 +91,7 @@ export type Agent = z.infer<typeof AgentSchema>
 
 /**
  * Code 节点 —— 从 {@link AgentSchema} 派生,仅保留有向图所需字段 + 代码体。
- * 走 CodeExecutor:把 `code` 当作 `async function (input, values, runCommand, cwd) { ... }` 函数体执行,
+ * 走 CodeExecutor:把 `code` 当作完整 async function 表达式执行,
  * 不调用 AI、不挂 MCP、不走 SDK,运行时不读 model/effort/agent_prompt/work_mode/tools 等字段。
  */
 export const CodeSchema = AgentSchema.pick({
@@ -107,15 +107,8 @@ export const CodeSchema = AgentSchema.pick({
     .string()
     .describe(
       [
-        '代码节点的 JS 函数体.',
-        '/**',
-        '* @param input string 上游或用户的输入',
-        '* @param values Record<string,string> 当前shareValues的全部数据',
-        '* @param runCommand (command: string, timeout?: number)=>Promise<string> 始终在 VSCode workspace root 执行shell命令；需在 cwd 路径执行时请在 command 内自行 cd "${cwd}" && ...',
-        '* @param cwd string|undefined 当前工作目录（FlowRunState.cwd，无则为 VSCode workspaceFolder）',
-        '* @return Promise<{output_name?:string, content?:string, values?:Record<string,string>, cwd?:string|null}> 输出分支/输出内容，values合并到shareValues，cwd写入FlowRunState.cwd（null=清空为主工作区）',
-        '*/',
-        'async function (input, values, runCommand, cwd) { /** code的值在这里 */ }',
+        '代码节点的完整 async function 表达式。',
+        'async function run(input, values, runCommand, cwd) { /* body */ }',
       ].join('\n'),
     ),
 })
@@ -688,6 +681,37 @@ export function buildAgentSystemPrompt(
       lines.push('# 具体数据', '```json', JSON.stringify(visibleValues, null, 2), '```')
     }
   }
+
+  return lines.join('\n')
+}
+
+/**
+ * 为 Code 节点生成 JSDoc 类型声明块。
+ * extension 端用于临时 .js 文件头注释，webview 端用于只读展示——两端必须一致。
+ */
+export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): string {
+  const keysDesc = shareValueKeys.length > 0 ? shareValueKeys.join(', ') : '无可用 key'
+
+  const lines: string[] = [
+    '/**',
+    ` * @param {string | import('@anthropic-ai/claude-agent-sdk').SDKUserMessage['message']['content']} input - 上游 CompleteTask.content 注入的原始富文本内容`,
+    ` * @param {Record<string, string>} values - 可用 key: ${keysDesc}`,
+    ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在 VSCode workspace root 执行，timeout 默认 600000 毫秒',
+    ' * @param {string | undefined} cwd - 当前 Flow 工作目录，未设置为 undefined',
+  ]
+
+  lines.push(' * @typedef {Object} CodeResult')
+  if (outputs.length > 0) {
+    const outputUnion = outputs.map((n) => `'${n}'`).join(' | ')
+    lines.push(` * @property {${outputUnion} | undefined} [output_name]`)
+  }
+  lines.push(
+    ' * @property {string} [content]',
+    ' * @property {Record<string, string>} [values]',
+    ' * @property {string | null} [cwd]',
+  )
+
+  lines.push(' * @returns {Promise<CodeResult | string | void>}', ' */')
 
   return lines.join('\n')
 }

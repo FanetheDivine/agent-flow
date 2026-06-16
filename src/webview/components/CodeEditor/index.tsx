@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FC } from 'react'
 import { codeToHtml } from 'shiki'
+import { buildCodeJSDoc } from '@/common'
 import './code-editor.css'
 
 export type CodeEditorProps = {
@@ -19,17 +20,26 @@ export type CodeEditorProps = {
  * 使用 Shiki（底层 vscode-textmate + dark-plus 主题）渲染，
  * 与 VSCode 编辑器语法高亮像素级一致。
  */
-export const CodeEditor: FC<CodeEditorProps> = ({ value = '' }) => {
+export const CodeEditor: FC<CodeEditorProps> = ({
+  value = '',
+  shareValueKeys,
+  outputs,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [html, setHtml] = useState('')
   const reqId = useRef(0)
 
+  const displayValue = useMemo(() => {
+    const jsdoc = buildCodeJSDoc(shareValueKeys ?? [], outputs ?? [])
+    return jsdoc + '\n' + value
+  }, [value, shareValueKeys, outputs])
+
   useEffect(() => {
     const id = ++reqId.current
-    codeToHtml(value, { lang: 'javascript', theme: 'dark-plus' }).then((h) => {
+    codeToHtml(displayValue, { lang: 'javascript', theme: 'dark-plus' }).then((h) => {
       if (id === reqId.current) setHtml(h)
     })
-  }, [value])
+  }, [displayValue])
 
   return (
     <div

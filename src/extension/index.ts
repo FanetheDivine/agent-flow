@@ -15,7 +15,7 @@ import {
   type PersistedData,
   stripFlowRuntimeFields,
 } from '@/common'
-import { markInterrupted, normalizeRestoredFlowRunState } from '@/common'
+import { buildCodeJSDoc, markInterrupted, normalizeRestoredFlowRunState } from '@/common'
 import {
   FileChangeTreeProvider,
   type RunChangedFile,
@@ -113,6 +113,56 @@ export function activate(context: vscode.ExtensionContext) {
   const flowRunStateManager = new FlowRunStateManager()
   let currentFlows: PersistedData = { flows: [] }
   const diffVirtualDocs = new Map<string, string>()
+  /** Code 节点临时编辑器文件：key = `${flowId}:${agentId}` */
+  const codeEditorFiles = new Map<string, vscode.Uri>()
+
+  /** 剥离文件开头的 JSDoc 块注释，返回注释之后的代码内容 */
+  const stripJSDocHeader = (text: string): string => {
+    const trimmed = text.trimStart()
+    if (!trimmed.startsWith('/**')) return text
+    const endIdx = trimmed.indexOf('*/')
+    if (endIdx === -1) return text
+    return trimmed.slice(endIdx + 2).replace(/^\r?\n/, '')
+  }
+
+  /** 清理 Code 编辑器临时文件及 map 记录 */
+  const cleanupCodeEditor = async (key: string, uri: vscode.Uri) => {
+    codeEditorFiles.delete(key)
+    try {
+      await vscode.workspace.fs.delete(uri)
+    } catch (err) {
+      logError('[closeCodeEditor] delete temp file failed', err)
+    }
+  }
+
+  // 全局监听：文件保存时检查是否为 Code 编辑器临时文件，剥离 JSDoc 头部并同步回 webview
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      for (const [key, uri] of codeEditorFiles) {
+        if (doc.uri.toString() !== uri.toString()) continue
+        const [flowId, agentId] = key.split(':')
+        const code = stripJSDocHeader(doc.getText())
+        postMessageToWebview({ type: 'codeEditorUpdate', data: { flowId, agentId, code } })
+        break
+      }
+    }),
+  )
+
+  // 全局监听：tab 关闭时检查是否为 Code 编辑器临时文件，若是则自动清理
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((e) => {
+      for (const tab of e.closed) {
+        const tabUri = (tab.input as vscode.TabInputText | undefined)?.uri
+        if (!tabUri) continue
+        for (const [key, uri] of codeEditorFiles) {
+          if (tabUri.toString() === uri.toString()) {
+            cleanupCodeEditor(key, uri)
+            break
+          }
+        }
+      }
+    }),
+  )
 
   async function openFileInEditor(data: {
     filename: string
@@ -690,6 +740,56 @@ export function activate(context: vscode.ExtensionContext) {
           }
           fileChangeTreeProvider.setChanges([...map.values()])
           await vscode.commands.executeCommand('agent-flow.runChanges.focus')
+        })
+        .with({ type: 'openCodeEditor' }, async ({ data }) => {
+          const { flowId, agentId, code, shareValueKeys, outputs } = data
+          const key = `${flowId}:${agentId}`
+
+          try {
+            // 生成临时 .js 文件路径
+            const dirUri = vscode.Uri.joinPath(context.globalStorageUri, 'code-editor')
+            await vscode.workspace.fs.createDirectory(dirUri)
+            const uri = vscode.Uri.joinPath(dirUri, `${flowId}-${agentId}.js`)
+
+            // 生成 JSDoc 类型声明头
+            const jsdocHeader = buildCodeJSDoc(shareValueKeys, outputs)
+
+            const content = `${jsdocHeader}\n${code}`
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(content))
+
+            // 打开编辑器
+            await vscode.window.showTextDocument(uri, {
+              preview: false,
+              viewColumn: vscode.ViewColumn.One,
+            })
+
+            // 存入 map
+            codeEditorFiles.set(key, uri)
+          } catch (err) {
+            logError('[openCodeEditor] failed', err)
+          }
+        })
+        .with({ type: 'closeCodeEditor' }, async ({ data }) => {
+          const { flowId, agentId } = data
+          const key = `${flowId}:${agentId}`
+          const uri = codeEditorFiles.get(key)
+          if (!uri) return
+
+          // 关闭对应的 VSCode editor tab
+          try {
+            for (const group of vscode.window.tabGroups.all) {
+              for (const tab of group.tabs) {
+                const tabUri = (tab.input as vscode.TabInputText | undefined)?.uri
+                if (tabUri?.toString() === uri.toString()) {
+                  await vscode.window.tabGroups.close(tab)
+                }
+              }
+            }
+          } catch (err) {
+            logError('[closeCodeEditor] close tab failed', err)
+          }
+
+          await cleanupCodeEditor(key, uri)
         })
         .with({ type: P.string.startsWith('flow.command.') }, async (e) => {
           // fork 是特殊命令：不走 runner，由 extension 自己处理 SDK forkSession
