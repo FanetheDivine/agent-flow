@@ -91,6 +91,19 @@ const FILE_EXTENSIONS = new Set([
 const parseFileRef = (text: string): { filename: string; line?: [number, number] } | null => {
   const trimmed = text.trim()
   if (!trimmed || trimmed.startsWith('http://') || trimmed.startsWith('https://')) return null
+  // GitHub anchor format: path#L639 or path#L639-L644
+  const gm = trimmed.match(/^(.+?)#L(\d+)(?:-L(\d+))?$/)
+  if (gm) {
+    const path = gm[1]
+    const hasSeparator = path.includes('/') || path.includes('\\')
+    const dotIdx = path.lastIndexOf('.')
+    const ext = dotIdx > 0 ? path.slice(dotIdx + 1).toLowerCase() : ''
+    if (hasSeparator || FILE_EXTENSIONS.has(ext)) {
+      const lineStart = Number(gm[2])
+      const lineEnd = gm[3] ? Number(gm[3]) : lineStart
+      return { filename: path, line: [lineStart, lineEnd] }
+    }
+  }
   const m = trimmed.match(/^(.+?)(?::(\d+)(?:-(\d+))?)?$/)
   if (!m) return null
   const path = m[1]
