@@ -53,7 +53,7 @@ extension 运行时层级：
 async function run(input, values, runCommand, cwd) { /* body */ }
 ```
 
-CodeExecutor 通过 `new Function('return (...)')()` 求值执行。向后兼容旧的函数体格式（不以 `async function` 开头时回退为 `AsyncFunction` 构造器）。
+CodeExecutor 通过 `new Function('return (...)')()` 求值后调用。
 
 代码编辑器的 JSDoc 类型声明由 common 层 `buildCodeJSDoc(shareValueKeys, outputs)` 统一生成，extension 临时 `.js` 文件头与 webview 只读展示共用同一函数。webview 右侧面板以独立 `JsDocDisplay` 块展示 JSDoc（Shiki 渲染），下方 `CodeEditor` 传 `hideJSDoc` 跳过内部 JSDoc 拼接，两者分区滚动。
 
