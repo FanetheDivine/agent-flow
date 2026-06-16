@@ -17,7 +17,7 @@
 - `openFile.cwd` 用于 webview 行内 code 文件引用的相对路径解析；extension 端优先按绝对路径打开，否则以 `cwd` 或 workspace root 拼接。
 - `flow.command.fork` 由 extension 顶层 `handleFork` 处理；`flow.signal.fork` 由 webview 创建新 Flow 并切换视图，详见 [fork.md](fork.md)。
 - `openCodeEditor`（webview → extension）在 VSCode 编辑器中打开 Code 节点代码（生成 `.js` 临时文件 + JSDoc 类型声明）；`codeEditorUpdate`（extension → webview）文件保存时同步代码回表单。webview 右侧面板顶部以独立 `JsDocDisplay` 块只读展示 JSDoc 类型声明，下方 `CodeEditor`（`hideJSDoc`）只读展示代码，两者分区滚动。JSDoc 由 common 层 `buildCodeJSDoc` 统一生成，extension 临时文件头与 webview 只读展示共用同一函数。
-- `closeCodeEditor`（webview → extension）编辑器关闭时（Drawer 关闭、关闭按钮、保存）删除临时文件并关闭 VS Code editor tab。
+- `closeCodeEditor`（webview → extension）仅在 Drawer 关闭时清理临时文件并关闭 VSCode editor tab；extension 仅监听 `onDidSaveTextDocument`（不监听 tab 关闭与文件编辑）。
 
 ## 硬约束
 
