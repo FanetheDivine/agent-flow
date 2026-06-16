@@ -524,8 +524,8 @@ export function activate(context: vscode.ExtensionContext) {
           let projectFlowsRaw: typeof globalData.flows
           let restoredRunStates: Record<string, FlowRunState>
 
-          if (workspaceData === null) {
-            // workspaceStore 文件不存在：fallback 到 projectStore 只读 flows，runStates 视为空
+          if (!workspaceData?.flows.length) {
+            // workspaceStore 文件不存在或没有flow：fallback 到 projectStore 只读 flows，runStates 视为空
             const projectData = await (projectStore?.load() ??
               Promise.resolve({ flows: [] } as PersistedData))
             projectFlowsRaw = projectData.flows
