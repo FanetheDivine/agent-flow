@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.0.75
+
+- 优化fallback逻辑
+
 ## v0.0.74
 
 - feat: 重构工具鉴权链路——`preToolUseHook` 只做硬拒绝，`canUseTool` 承接 AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_tools 等 Agent Flow 确认逻辑；silent_task 自动拒绝纳入自动回复上限统计
