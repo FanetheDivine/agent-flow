@@ -787,7 +787,11 @@ export function updateFlowRunState(
       startAgent?.node_type === 'code'
         ? { ...baseValues }
         : startAgent
-          ? pickInjectedShareValues(startAgent.allowed_read_values_keys ?? [], baseValues).inlined
+          ? Object.fromEntries(
+              (startAgent.allowed_read_values_keys ?? [])
+                .filter((k) => baseValues[k] !== undefined && baseValues[k] !== '')
+                .map((k) => [k, baseValues[k]]),
+            )
           : undefined
     const newRun: AgentRun = {
       runId: msg.data.runId,
