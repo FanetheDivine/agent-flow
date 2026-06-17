@@ -6,6 +6,7 @@ import * as vscode from 'vscode'
 import {
   type Agent,
   type AIMessageType,
+  buildNoInputInitMessage,
   type Code,
   type FlowRunnerCommandEvents,
   type Flow,
@@ -292,7 +293,7 @@ export class FlowRunner {
     const effectiveInitMessage = agent.no_input
       ? {
           type: 'user' as const,
-          message: { role: 'user' as const, content: '执行任务' },
+          message: { role: 'user' as const, content: buildNoInputInitMessage(agent) },
           parent_tool_use_id: null,
         }
       : initMessage
@@ -507,7 +508,7 @@ export class FlowRunner {
           role: 'user' as const,
           content:
             nextAgent.no_input || !content || (Array.isArray(content) && content.length === 0)
-              ? '执行任务'
+              ? buildNoInputInitMessage(nextAgent)
               : content,
         },
         parent_tool_use_id: null,

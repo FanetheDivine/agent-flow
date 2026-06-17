@@ -26,6 +26,7 @@
 - `TerminateTask`：task / silent_task 可用的中止工具。
 - `validateFlow`：校验 Flow 定义。
 - `getFlowJSONSchema`：暴露 Flow JSON Schema。
+- `ReadShareValue`：仅 `node_type='agent'`、存在大值（>500 字符）可读 key 时挂载；从 `init()` 时点快照只读；subagent 经 `preToolUseHook` 自动被拒。
 
 运行时挂载与 `work_mode` 差异见 [extension-runtime.md](extension-runtime.md)；values 读写链路见 [share-values.md](share-values.md)。
 

@@ -6,6 +6,7 @@ import {
   AgentPhase,
   AgentChatInputState,
   AgentRun,
+  buildNoInputInitMessage,
   ExtensionFlowCommandMessage,
   Flow,
   FlowPhase,
@@ -354,7 +355,7 @@ export const useFlowStore = create<FlowStoreType>((set, get) => {
       const effectiveInitMessage: UserMessageType = agent?.no_input
         ? {
             type: 'user',
-            message: { role: 'user', content: '执行任务' },
+            message: { role: 'user', content: buildNoInputInitMessage(agent) },
             parent_tool_use_id: null,
           }
         : initMessage

@@ -13,7 +13,7 @@ import type {
   UserMessageType,
 } from './event'
 import type { Agent, Code, Flow } from './index'
-import { pickInjectedShareValues } from './index'
+import { buildNoInputInitMessage, pickInjectedShareValues } from './index'
 
 // ── TokenUsage ────────────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ export type UserMessage = Base & {
   kind: 'user'
   rawContent: UserContent
   /** 首条用户消息注入的共享存储 */
-  injectedShareValues?: Record<string, string | null>
+  injectedShareValues?: Record<string, string>
 }
 /** 普通回合结束 —— 替代原始 SDK result 信号,携带本回合 token 增量与窗口占用 */
 export type TurnEndMessage = Base & {
@@ -544,7 +544,7 @@ const isToolResultBlock = (b: unknown): boolean =>
 function appendSdkMessage(
   run: AgentRun,
   sdkMsg: AIMessageType,
-  injectedShareValues?: Record<string, string | null>,
+  injectedShareValues?: Record<string, string>,
 ): void {
   match(sdkMsg)
     // ── 流式事件 ──────────────────────────────────────────────
@@ -776,7 +776,7 @@ export function updateFlowRunState(
       startAgent?.node_type === 'code'
         ? { ...baseValues }
         : startAgent
-          ? pickInjectedShareValues(startAgent.allowed_read_values_keys ?? [], baseValues)
+          ? pickInjectedShareValues(startAgent.allowed_read_values_keys ?? [], baseValues).inlined
           : undefined
     const newRun: AgentRun = {
       runId: msg.data.runId,
@@ -965,8 +965,7 @@ export function updateFlowRunState(
         const nextAgent = output ? flow?.agents?.find((a) => a.id === output.next_agent) : undefined
         if (nextAgent && data.output.newRunId) {
           // 追加新 AgentRun(由 extension 端生成的 newRunId),把 CompleteTask 的 content 作为
-          // 下一个 Agent 的首条用户消息回显（no_input 的 next agent 用 '执行任务',与
-          // FlowRunner.doOnCompleteTask 的 nextInitMessage 同源）。
+          // 下一个 Agent 的首条用户消息回显（与 FlowRunner 经 common.buildNoInputInitMessage 同源，按 work_mode 区分）。
           const nextInitMessage: UserMessageType = {
             type: 'user',
             message: {
@@ -975,7 +974,7 @@ export function updateFlowRunState(
                 nextAgent.no_input ||
                 !data.content ||
                 (Array.isArray(data.content) && data.content.length === 0)
-                  ? '执行任务'
+                  ? buildNoInputInitMessage(nextAgent)
                   : data.content,
             },
             parent_tool_use_id: null,
@@ -997,7 +996,7 @@ export function updateFlowRunState(
               : pickInjectedShareValues(
                   nextAgent.allowed_read_values_keys ?? [],
                   draft.shareValues,
-                ),
+                ).inlined,
           )
           draft.runs.push(newRun)
         } else {
