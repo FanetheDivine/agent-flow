@@ -337,7 +337,7 @@ export const PresetFlows: Flow[] = [
           'async function run(input, values, runCommand, cwd) {',
           '  try {',
           '    const parsed = JSON.parse(values.tasks)',
-          "    if(!Array.isArray(parsed) || parsed.some(v => typeof v !== 'string')){",
+          "    if (!Array.isArray(parsed) || parsed.some(v => typeof v !== 'string')) {",
           "      throw new Error('')",
           '    }',
           '    return {',
