@@ -704,14 +704,16 @@ export function buildAgentSystemPrompt(
   return lines.join('\n')
 }
 
-export function buildNoInputInitMessage(agent: Pick<Agent, 'work_mode'> | Code): string {
+export function buildNoInputInitMessage(
+  agent: Pick<Agent, 'work_mode' | 'agent_prompt'> | Code,
+): string {
   const workMode = 'work_mode' in agent ? agent.work_mode : undefined
+  const hasPrompt = 'agent_prompt' in agent && !!agent.agent_prompt
   return match(workMode)
-    .with(
-      P.union('task', 'silent_task'),
-      () => '请回顾系统提示中 <task_description> 的目标，开始工作',
+    .with(P.union('task', 'silent_task'), () =>
+      hasPrompt ? '依据<task_description>执行任务' : '按系统提示开始执行',
     )
-    .with('chat', () => '请回顾系统提示中的对话规则，开始对话')
+    .with('chat', () => '依据对话规则开始对话')
     .otherwise(() => '执行任务')
 }
 

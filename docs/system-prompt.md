@@ -40,8 +40,9 @@
 
 | work_mode | 引导语 |
 |-----------|--------|
-| `task` / `silent_task` | 请回顾系统提示中 `<task_description>` 的目标，开始工作 |
-| `chat` | 请回顾系统提示中的对话规则，开始对话（chat 模式无 `<task_description>`） |
+| `task` / `silent_task`（有 agent_prompt） | 执行 `<task_description>`。 |
+| `task` / `silent_task`（无 agent_prompt） | 按系统提示开始执行。 |
+| `chat` | 依据对话规则开始对话。（chat 模式无 `<task_description>`） |
 | code 节点（无 work_mode） | 执行任务 |
 
 ## shareValues 分层注入
