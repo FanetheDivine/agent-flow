@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { Flow } from '.'
+import type { AgentOverwrite, Flow } from '.'
 import type { FlowRunState } from './flowRunState'
 
 /**
@@ -164,6 +164,10 @@ type FlowSignalPayload = {
      * CompleteTask 调用成功后,ClaudeExecutor 不再把这条 result 单独透传为 aiMessage
      */
     result?: AIMessageType
+    /**
+     * 上游 code 节点返回的临时改写，reducer 据此写入新 AgentRun.overwrite。
+     */
+    overwrite?: AgentOverwrite
   }
   /** Agent被中断 */
   agentInterrupted: { runId: string }
