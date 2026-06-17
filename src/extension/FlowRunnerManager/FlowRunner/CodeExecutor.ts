@@ -1,4 +1,5 @@
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import * as vscode from 'vscode'
 import {
   AgentOverwrite,
   AgentOverwriteSchema,
@@ -301,7 +302,14 @@ export class CodeExecutor {
     let raw: unknown
     try {
       const fn = new Function(`return (${codeBody})`)() as (...args: unknown[]) => Promise<unknown>
-      raw = await fn(inputContent, valuesArg, this.runCommand, this.currentCwd, askUserQuestion)
+      raw = await fn(
+        inputContent,
+        valuesArg,
+        this.runCommand,
+        this.currentCwd,
+        askUserQuestion,
+        vscode,
+      )
     } catch (err) {
       // 严格只产出 agentComplete 信号:错误路径不发 assistant 错误气泡、不发 result onMessage,
       // 错误详情走日志,直接 onError 让 reducer 切 error 终态。

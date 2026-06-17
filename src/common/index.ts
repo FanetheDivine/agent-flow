@@ -131,7 +131,7 @@ export const CodeSchema = AgentSchema.pick({
     .describe(
       [
         '代码节点的完整 async function 表达式。',
-        'async function run(input, values, runCommand, cwd, askUserQuestion) { /* body */ }',
+        'async function run(input, values, runCommand, cwd, askUserQuestion, vscode) { /* body */ }',
       ].join('\n'),
     ),
 })
@@ -822,6 +822,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在主工作区执行',
     ' * @param {string | undefined} cwd - 当前 Flow 工作目录 undefined表示主工作区',
     ' * @param {AskUserQuestion} askUserQuestion - 向用户提问',
+    " * @param {typeof import('vscode')} vscode - 可以直接使用vscode的能力 ",
   ]
 
   lines.push(' * @typedef {Object} CodeResult')
