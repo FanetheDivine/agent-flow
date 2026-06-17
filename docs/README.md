@@ -27,6 +27,7 @@
 - [extension-runtime.md](extension-runtime.md) — extension 运行层级、ClaudeExecutor、CodeExecutor、`work_mode`。
 - [tool-permission.md](tool-permission.md) — 统一 tool permission 链路、`preToolUseHook`、权限卡片展示。
 - [share-values.md](share-values.md) — `shareValues` / `values` 声明、授权读写、事件合并、运行时取值。
+- [system-prompt.md](system-prompt.md) — `buildAgentSystemPrompt` 区块顺序、XML 标签集、shareValues 分层注入、ReadShareValue 硬约束。
 - [persistence.md](persistence.md) — 全局/项目/workspaceStore 持久化、默认 flow 注入、`project` 字段。
 - [webview-state.md](webview-state.md) — `useFlowStore`、ChatDrawer、active run/agent、通知与挂载约束。
 - [fork.md](fork.md) — fork command/signal、`handleFork`、transcript uuid 映射与限制。

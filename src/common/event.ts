@@ -150,7 +150,7 @@ type FlowSignalPayload = {
     runId: string
     content?: SDKUserMessage['message']['content']
     output: { name?: string; newRunId?: string }
-    /** Agent 通过 CompleteTask 写入的增量 values，由 reducer 合并到 FlowRunState.shareValues */
+    /** Agent 通过 CompleteTask 写入的 values（key 级增量、单个 value 整值替换），由 reducer 合并到 FlowRunState.shareValues */
     values?: Record<string, string>
     /**
      * Code 节点返回的工作目录：

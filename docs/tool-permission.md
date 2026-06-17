@@ -61,6 +61,7 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 ## 硬约束
 
 - 只有一套 tool permission 机制，禁止为特殊工具新增旁路。
+- `ReadShareValue` 走 `canUseTool` 第 5 条兜底放行（"其余工具直接放行"），不新增任何旁路；subagent 调用时 `preToolUseHook` 第 1 条（subAgent 调用 AgentControllerMcp）直接拒绝。
 - `flow.signal.toolPermissionResult` 与 `flow.command.toolPermissionResult` 语义一致但入口不同。
 - run 结束时未回答的 pending 权限由 `clearPendings` 自动标记为拒绝。
 - 工具类型判定必须用 `.includes('CompleteTask'/'ExitPlanMode'/'AskUserQuestion')`，兼容 `mcp__AgentControllerMcp__X`（canUseTool 收到）与 `AgentControllerMcp::X`（parseToolName 转换）两种格式，禁止使用严格等值判断（与 `::` 格式永不相等）。

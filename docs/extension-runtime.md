@@ -39,7 +39,7 @@ extension 运行时层级：
 
 ## CompleteTask
 
-- `CompleteTask.content` 是 next agent 首条 user 消息来源；`no_input` 或 `no_output` 时使用 `执行任务`。
+- `CompleteTask.content` 是 next agent 首条 user 消息来源；no_input 或 content 为空时，首条引导由 common 的 `buildNoInputInitMessage(agent)` 按 `work_mode` 生成，extension/reducer/webview 同源：`task`/`silent_task` → 有 agent_prompt 执行 `<task_description>`，无则按系统提示开始执行；`chat` → 依据对话规则开始对话；code 节点 → `执行任务`。
 - CompleteTask 已暂存时，SDK result 不走 `onMessage`，由 `onComplete` 上抛给 reducer 累计 token。
 - `pendingCompleteResult` + `interruptAndAwaitResult` 是 CompleteTask 固有逻辑，用于保证 token 统计完整，**绝不改动**；require_confirm 的完成前确认与之正交，不要混改。
 - require_confirm 的完成前确认走统一 tool permission 链路，详见 [tool-permission.md](tool-permission.md)。
@@ -98,5 +98,6 @@ per-Agent MCP server 由 [`../src/common/extension.ts`](../src/common/extension.
 - `TerminateTask`：task / silent_task 挂载。
 - `validateFlow`
 - `getFlowJSONSchema`
+- `ReadShareValue`：仅 agent、有大值 key 时挂载；从 `init()` 时点快照只读。
 
 `plan_mode=true` 时以 `permissionMode: 'plan'` 传 SDK，SDK 内置 ExitPlanMode。subAgent 不挂 `AgentControllerMcp`，禁止 subAgent 通过 CompleteTask / TerminateTask 干扰宿主 Flow 控制链路。

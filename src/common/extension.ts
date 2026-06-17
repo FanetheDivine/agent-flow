@@ -19,6 +19,10 @@ import {
 
 export type AgentMcpServerOptions = {
   agent: Agent
+  /** init 时点固化的 shareValues 快照，与 systemPrompt 注入值同源 */
+  snapshot: Record<string, string>
+  /** >500 字符的可读 key 集合；非空时挂载 ReadShareValue 工具 */
+  deferredKeys: string[]
   onComplete: (output: {
     content?: string
     outputName?: string
@@ -62,8 +66,15 @@ function withErrorBoundary<TArgs>(
  * - `TerminateTask` — 极端情况(确定无法完成)时中止任务
  * - `ValidateFlow` — 校验工作流定义是否合法
  * - `GetFlowJSONSchema` — 获取 Flow 的 JSON Schema 定义
+ * - `ReadShareValue` — 从 init 时点快照读取大值共享数据（仅 deferredKeys 非空时挂载）
  */
-export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcpServerOptions) {
+export function buildAgentMcpServer({
+  agent,
+  snapshot,
+  deferredKeys,
+  onComplete,
+  onTerminate,
+}: AgentMcpServerOptions) {
   const tools: SdkMcpToolDefinition<any>[] = []
   if (agent.work_mode !== 'chat') {
     const outputs = agent.outputs ?? []
@@ -105,6 +116,7 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
             ...writeKeys.map((k) => `  - "${k}"`),
             '- 仅可写入上述列出的 key',
             '- 部分写入即可：未变化的 key 省略不传；省略不等于清空（要清空请显式传空字符串）',
+            '- 提交某个 key 时须给出该 key 的完整新值，会整体覆盖旧值，不做 value 内部增量',
             '- `content` 是本次任务的结果文本；`values` 用于按 key 记录用户要求保存的值',
           ].join('\n')
         : ''
@@ -279,6 +291,20 @@ export function buildAgentMcpServer({ agent, onComplete, onTerminate }: AgentMcp
   )
 
   tools.push(validateFlowTool, getFlowJSONSchemaTool)
+
+  if (deferredKeys.length > 0) {
+    const readShareValueTool = tool(
+      'ReadShareValue',
+      '当 shared_data 中提示某 key 值较长时，使用此工具按需读取完整内容。这个tool是幂等的，对同一 key 多次调用返回相同结果。',
+      {
+        key: z.enum(deferredKeys as [string, ...string[]]).describe('要读取的共享数据 key'),
+      },
+      withErrorBoundary('ReadShareValue', async ({ key }) => ({
+        content: [{ type: 'text', text: snapshot[key] ?? '<无数据>' }],
+      })),
+    )
+    tools.push(readShareValueTool)
+  }
 
   return createSdkMcpServer({
     name: 'AgentControllerMcp',

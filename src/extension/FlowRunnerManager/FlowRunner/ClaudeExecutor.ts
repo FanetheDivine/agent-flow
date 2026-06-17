@@ -14,6 +14,7 @@ import {
   AskUserQuestionInput,
   buildAgentSystemPrompt,
   matchToolRule,
+  pickInjectedShareValues,
   ShareValueKey,
   UserMessageType,
 } from '@/common'
@@ -106,6 +107,11 @@ export class ClaudeExecutor {
    * SDK 子进程启动时固定,运行中改 agent / shareValues 不会重算(切下一 agent 才生效)。
    */
   private prompt!: string
+  /**
+   * init 时点固化的 shareValues 快照，与 prompt 注入值同源。
+   * 供 createQuery 构建 ReadShareValue 工具使用；init 后不再更新。
+   */
+  private promptValues: Record<string, string> = {}
   private mcpServer: ReturnType<typeof buildAgentMcpServer> | null = null
   private readonly userInputStream: ReturnType<typeof createMessageChannel<SDKUserMessage>>
   /**
@@ -187,6 +193,7 @@ export class ClaudeExecutor {
   private init(): void {
     if (this.initialized) return
     const opts = this.getOptions()
+    this.promptValues = opts.currentValues
     this.prompt = buildAgentSystemPrompt(opts.agent, opts.shareValueKeys, opts.currentValues)
     if (opts.resumeSessionId) {
       // resume 模式：sessionId 已知;fork 路径(lazy)不透传 initMessage
@@ -483,8 +490,14 @@ export class ClaudeExecutor {
         logError('[ClaudeExecutor] previous mcp server close failed:', err)
       }
     }
+    const { deferred } = pickInjectedShareValues(
+      agent.allowed_read_values_keys ?? [],
+      this.promptValues,
+    )
     this.mcpServer = buildAgentMcpServer({
       agent,
+      snapshot: this.promptValues,
+      deferredKeys: deferred.map((d) => d.key),
       onComplete: (result) => {
         // CompleteTask 触发后不立即通知上层。等 SDK 的 result 消息到达后再 fire，
         // 否则上层会立刻 killCurrentExecutor，把后续的 result（含 modelUsage /

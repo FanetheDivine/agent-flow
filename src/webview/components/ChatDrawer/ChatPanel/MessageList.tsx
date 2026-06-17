@@ -155,7 +155,7 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
         }
         modal.confirm({
           title: '从历史会话 fork',
-          content: '该会话已完成，shareValues 在 fork 后可能与原值不一致。是否继续？',
+          content: '该会话已完成，但共享数据会使用会话开始时的快照。是否继续？',
           okText: 'fork',
           cancelText: '取消',
           onOk: doFork,

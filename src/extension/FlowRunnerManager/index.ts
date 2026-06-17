@@ -6,6 +6,7 @@ type PostMessage = (msg: ExtensionToWebviewMessage) => void
 type GetLatestShareValues = (flowId: string) => Record<string, string>
 type GetLatestFlow = (flowId: string) => Flow | undefined
 type GetLatestCwd = (flowId: string) => string | undefined | null
+type GetRunSnapshot = (flowId: string, runId: string) => Record<string, string> | undefined
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
@@ -13,17 +14,20 @@ export class FlowRunnerManager {
   private getLatestShareValues: GetLatestShareValues
   private getLatestFlow: GetLatestFlow
   private getLatestCwd: GetLatestCwd
+  private getRunSnapshot: GetRunSnapshot
 
   constructor(
     postMessage: PostMessage,
     getLatestShareValues: GetLatestShareValues,
     getLatestFlow: GetLatestFlow,
     getLatestCwd: GetLatestCwd,
+    getRunSnapshot: GetRunSnapshot,
   ) {
     this.postMessage = postMessage
     this.getLatestShareValues = getLatestShareValues
     this.getLatestFlow = getLatestFlow
     this.getLatestCwd = getLatestCwd
+    this.getRunSnapshot = getRunSnapshot
   }
 
   /**
@@ -40,6 +44,7 @@ export class FlowRunnerManager {
         return flow
       },
       getLatestCwd: () => this.getLatestCwd(flowId),
+      getRunSnapshot: (runId) => this.getRunSnapshot(flowId, runId),
     })
     runner.listenAllSignals((eventType, signalData) => {
       this.postMessage({

@@ -539,12 +539,12 @@ const CompleteTaskConfirmCard: FC<{
 
 /**
  * run 级注入快照展示小节 —— 附加在首条 user 气泡底部。
- * 默认折叠，展开后按 key → value 列表展示（value 为 null 显示灰色「(空)」）。
+ * 默认折叠，展开后按 key → value 列表展示。
  * 样式参考 CompleteTaskBody「共享数据写入」块。
- * title 由调用方按 node_type 区分:agent 节点「注入数据」(按 allowed_read 过滤、值空记 null),
+ * title 由调用方按 node_type 区分:agent 节点「注入数据」(按 allowed_read 过滤),
  * code 节点「共享数据」(全量 shareValues)。
  */
-const InjectedShareValuesSection: FC<{ values: Record<string, string | null>; title: string }> = ({
+const InjectedShareValuesSection: FC<{ values: Record<string, string>; title: string }> = ({
   values,
   title,
 }) => {
@@ -566,11 +566,7 @@ const InjectedShareValuesSection: FC<{ values: Record<string, string | null>; ti
               <Tag color='blue' className='m-0 mr-1 self-start text-[10px]'>
                 {k}
               </Tag>
-              {v === null ? (
-                <span className='ml-4 text-[#6c7086]'>(空)</span>
-              ) : (
-                <Md className='ml-4' content={v} />
-              )}
+              <Md className='ml-4' content={v} />
             </div>
           ))}
         </div>
@@ -585,7 +581,7 @@ export function chatMessageToBubble(
   sessionCompleted: boolean,
   runId: string | undefined,
   forkUuid: string | undefined,
-  injectedShareValues?: Record<string, string | null>,
+  injectedShareValues?: Record<string, string>,
   injectedTitle = '注入数据',
 ): RenderedBubble | RenderedBubble[] | null {
   const fromSubAgent = !!message.parentToolUseId
