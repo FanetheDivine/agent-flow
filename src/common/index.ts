@@ -19,6 +19,29 @@ export const OutputSchema = z.object({
 /** @see {@link OutputSchema} */
 export type Output = z.infer<typeof OutputSchema>
 
+/**
+ * Code 节点返回值中的 overwrite 对象 —— 临时改写「下一个 agent 节点」配置，仅本次运行生效。
+ * 深度合并语义：work_mode 覆盖顶层；outputs 按 output_name 匹配覆盖对应分支的 require_confirm。
+ */
+export const AgentOverwriteSchema = z.object({
+  work_mode: z
+    .enum(['task', 'chat', 'silent_task'])
+    .optional()
+    .describe('临时改写下一个 agent 的 work_mode'),
+  outputs: z
+    .array(
+      z.object({
+        output_name: z.string().describe('要改写的输出分支名称'),
+        require_confirm: z.boolean().optional().describe('覆盖该分支的 require_confirm'),
+      }),
+    )
+    .optional()
+    .describe('按 output_name 匹配覆盖输出分支的 require_confirm'),
+})
+
+/** @see {@link AgentOverwriteSchema} */
+export type AgentOverwrite = z.infer<typeof AgentOverwriteSchema>
+
 /** Agent，具有多轮对话能力的独立任务执行单元 */
 export const AgentSchema = z.object({
   id: z.string().describe('节点ID'),
@@ -716,6 +739,57 @@ export function buildNoInputInitMessage(
 }
 
 /**
+ * 将 AgentOverwrite 深度合并到 Agent 配置，返回新对象（不可变原 agent）。
+ * - work_mode 存在则覆盖顶层
+ * - outputs 按 output_name 匹配覆盖 require_confirm（不匹配分支不变，多余 output_name 忽略）
+ * - overwrite 为空或无任何有效字段则原样返回
+ */
+export function applyAgentOverwrite(agent: Agent, overwrite?: AgentOverwrite): Agent {
+  if (!overwrite) return agent
+
+  const newAgent = overwrite.work_mode ? { ...agent, work_mode: overwrite.work_mode } : { ...agent }
+
+  if (overwrite.outputs && overwrite.outputs.length > 0 && agent.outputs) {
+    const overwriteMap = new Map(overwrite.outputs.map((o) => [o.output_name, o.require_confirm]))
+    newAgent.outputs = agent.outputs.map((output) => {
+      const newRequireConfirm = overwriteMap.get(output.output_name)
+      return newRequireConfirm !== undefined ? { ...output, require_confirm: newRequireConfirm } : { ...output }
+    })
+  } else if (agent.outputs) {
+    newAgent.outputs = agent.outputs.map((o) => ({ ...o }))
+  }
+
+  return newAgent
+}
+
+/**
+ * 将 AgentOverwrite 格式化为人类可读文本，用于展示。
+ * 无有效内容时返回 undefined。
+ */
+export function formatAgentOverwriteText(overwrite?: AgentOverwrite): string | undefined {
+  if (!overwrite) return undefined
+
+  const parts: string[] = []
+
+  if (overwrite.work_mode) {
+    const modeText = match(overwrite.work_mode)
+      .with('task', () => '任务模式')
+      .with('silent_task', () => '静默模式')
+      .with('chat', () => '对话模式')
+      .exhaustive()
+    parts.push(`本次会话以${modeText}进行`)
+  }
+
+  if (overwrite.outputs) {
+    for (const output of overwrite.outputs) {
+      parts.push(`输出分支「${output.output_name}」${output.require_confirm ? '需要' : '无需'}确认`)
+    }
+  }
+
+  return parts.length > 0 ? parts.join('；') : undefined
+}
+
+/**
  * 为 Code 节点生成 JSDoc 类型声明块。
  * extension 端用于临时 .js 文件头注释，webview 端用于只读展示——两端必须一致。
  */
@@ -739,6 +813,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' * @property {string} [content]',
     ' * @property {Record<string, string>} [values]',
     ' * @property {string | null} [cwd]',
+    ' * @property {{ work_mode?: \'task\' | \'chat\' | \'silent_task\', outputs?: { output_name: string, require_confirm?: boolean }[] }} [overwrite] - 临时改写下一个 agent 节点配置，仅本次运行生效',
   )
 
   lines.push(' * @returns {Promise<CodeResult | string | void>}', ' */')

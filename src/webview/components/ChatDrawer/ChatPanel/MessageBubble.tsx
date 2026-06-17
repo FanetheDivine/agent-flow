@@ -583,6 +583,7 @@ export function chatMessageToBubble(
   forkUuid: string | undefined,
   injectedShareValues?: Record<string, string>,
   injectedTitle = '注入数据',
+  overwriteText?: string,
 ): RenderedBubble | RenderedBubble[] | null {
   const fromSubAgent = !!message.parentToolUseId
   /** 构造 fork icon —— 仅当 ctx.onFork 与 forkUuid 都存在时返回按钮元素。 */
@@ -608,6 +609,9 @@ export function chatMessageToBubble(
         content: (
           <div className='flex max-w-full'>
             <div className='flex max-w-full flex-col gap-1'>
+              {overwriteText && (
+                <div className='text-xs text-[#a6adc8]'>{overwriteText}</div>
+              )}
               {node}
               {hasInjected && (
                 <InjectedShareValuesSection values={injectedShareValues} title={injectedTitle} />

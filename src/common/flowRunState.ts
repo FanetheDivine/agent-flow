@@ -12,7 +12,7 @@ import type {
   ExtensionFlowSignalMessage,
   UserMessageType,
 } from './event'
-import type { Agent, Code, Flow } from './index'
+import type { Agent, AgentOverwrite, Code, Flow } from './index'
 import { buildNoInputInitMessage, pickInjectedShareValues } from './index'
 
 // ── TokenUsage ────────────────────────────────────────────────────────────
@@ -316,6 +316,11 @@ export type AgentRun = {
    * 区分:此处存完整原始 map。历史持久化数据可能无此字段,消费处兜底 getLatestShareValues。
    */
   shareValuesSnapshot?: Record<string, string>
+  /**
+   * 上游 code 节点返回的 overwrite —— 临时改写本 agent 配置，仅本次运行生效。
+   * 随 run 持久化，供恢复/fork 与 webview 展示复用。
+   */
+  overwrite?: AgentOverwrite
 }
 
 export type PendingToolPermission = {
@@ -997,6 +1002,8 @@ export function updateFlowRunState(
             // draft.shareValues 已在前面合并 data.values,与 doOnCompleteTask 传给
             // nextAgent executor 的 nextValues 同值
             shareValuesSnapshot: { ...draft.shareValues },
+            // 上游 code 节点返回的 overwrite —— 临时改写本 agent 配置
+            overwrite: data.overwrite,
           }
           appendSdkMessage(
             newRun,

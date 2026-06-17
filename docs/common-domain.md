@@ -17,6 +17,10 @@
 - `PersistedDataSchema` / `WorkspacePersistedDataSchema` 定义磁盘持久化结构。
 - `validateFlow` 校验 Flow 定义。
 - `buildAgentSystemPrompt` 基于 agent、flow、`values` 快照构建系统提示词。
+- `AgentOverwriteSchema` 定义 code 节点返回值的 `overwrite` 对象结构：`work_mode` 可选枚举（`task` / `chat` / `silent_task`）、`outputs` 可选数组按 `output_name` 匹配覆盖 `require_confirm`。
+- `applyAgentOverwrite(agent, overwrite?)` 深度合并 overwrite 到 agent 配置，返回新对象（不可变原 agent）。
+- `formatAgentOverwriteText(overwrite?)` 格式化为人类可读文本，无有效内容时返回 `undefined`。
+- `buildCodeJSDoc` 生成的 JSDoc 类型声明包含 `overwrite` 可选字段，供 code 节点编辑器与只读展示共用。
 
 ## MCP server
 

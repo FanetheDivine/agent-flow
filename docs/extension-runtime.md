@@ -64,10 +64,11 @@ CodeExecutor 通过 `new Function('return (...)')()` 求值后调用。
 - `runCommand`：`async (command: string, timeout?: number) => Promise<string>`，始终在 VSCode workspace root 执行；如需在 cwd 路径执行，用户代码须自行 `cd "${cwd}" && ...`（注意 shell 转义）；timeout 默认 600000 毫秒（10 分钟）。
 - `cwd`：`FlowRunState.cwd`，未设置时为 `undefined`。
 
-返回值 `{ output_name?, content?, values?, cwd?: string | null }` 直接驱动下一跳：
+返回值 `{ output_name?, content?, values?, cwd?: string | null, overwrite? }` 直接驱动下一跳：
 
 - `values` 仅提交代码显式修改的 key，delta 合并到 shareValues。
 - 返回 `cwd` string / null / 空串时原样写入 FlowRunState；省略时沿用当前值。
+- `overwrite` 为 `AgentOverwrite` 对象，临时改写下一个 agent 节点的 `work_mode` 与 `outputs[].require_confirm`，仅本次运行生效；CodeExecutor 用 `AgentOverwriteSchema.safeParse` 校验，校验失败时降级为 `undefined`；FlowRunner 在下一 agent 的 ClaudeExecutor `getOptions` 闭包内经 `applyAgentOverwrite` 应用。
 - 下一 code 节点收到 null / 空串时按 `undefined` 处理。
 - 下一 claude 节点收到 null / 空串 / `undefined` 时回退 workspace root。
 - 上述按 node_type 的回退分流在 `FlowRunner.runAgent` 内完成，**不依赖 reducer 时序**。
@@ -82,7 +83,7 @@ CodeExecutor 严格只产出 `agentComplete` signal：不发 assistant 文本气
 
 ## work_mode
 
-仅 `node_type='agent'` 节点适用：
+仅 `node_type='agent'` 节点适用。可被上游 code 节点返回的 `overwrite.work_mode` 临时改写，改写仅影响当次 run，不修改 Flow 定义：
 
 - `task`：常规推进；系统提示词注入任务描述、完成任务、输出分支；AskUserQuestion **允许**、CompleteTask **必须**、TerminateTask **极端情况下可中止任务**。
 - `chat`：长期对话；CompleteTask 不挂载，可写 values 节不注入，`agent_prompt` 视为长期规则。

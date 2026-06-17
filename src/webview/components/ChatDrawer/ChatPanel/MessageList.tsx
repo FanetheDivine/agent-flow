@@ -15,7 +15,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useMemoizedFn } from 'ahooks'
 import { match } from 'ts-pattern'
 import type { ChatMessage } from '@/common'
-import { getAnsweredToolPermissions, getPendingToolPermissionsFor, getRunPhase } from '@/common'
+import { getAnsweredToolPermissions, getPendingToolPermissionsFor, getRunPhase, formatAgentOverwriteText } from '@/common'
 import type { AgentRun, AgentPhase } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
 import { postMessageToExtension } from '@/webview/utils'
@@ -450,6 +450,15 @@ const Message = memo(function ({
     const fs = s.flowRunStates[flowId]
     return fs.runs.find((r) => r.runId === runId)?.completed ?? false
   })
+  const overwriteText = useFlowStore((s) => {
+    const fs = s.flowRunStates[flowId]
+    const run = fs.runs.find((r) => r.runId === runId)
+    if (!run?.overwrite) return undefined
+    // 仅首条 user 消息展示 overwrite
+    const firstUserId = run.messages.find((m) => m.kind === 'user' && !m.parentToolUseId)?.id
+    if (firstUserId !== message.id) return undefined
+    return formatAgentOverwriteText(run.overwrite)
+  })
   if (message.kind === 'divider') {
     return (
       <ConfigProvider theme={{ components: { Divider: { colorSplit: '#fa541c' } } }}>
@@ -506,6 +515,7 @@ const Message = memo(function ({
     message.uuid,
     message.kind === 'user' ? message.injectedShareValues : undefined,
     injectedTitle,
+    overwriteText,
   )
   if (!raw) return null
   const bubbles: RenderedBubble[] = Array.isArray(raw) ? raw : [raw]
