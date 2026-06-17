@@ -547,7 +547,6 @@ export class FlowRunner {
       const effectiveCwd = result.cwd
       // extension 端为下一个 agent 生成新 runId
       const newRunId = crypto.randomUUID()
-      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd)
       this.fire('flow.signal.agentComplete', {
         runId,
         content,
@@ -556,6 +555,7 @@ export class FlowRunner {
         cwd: result.cwd,
         result: result.resultMessage,
       })
+      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd)
     } else {
       // Flow 结束
       this.killExecutor(runId)

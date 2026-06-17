@@ -14,7 +14,7 @@ type UserContent = SDKUserMessage['message']['content']
  * 如需在当前 Flow cwd 执行，用户代码应自行 cd "${cwd}" && ... （注意 shell 转义）。
  * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd；**未设置时为 undefined，不回退 workspace root**），透传给代码函数作为第四个入参。
  * askUserQuestion: 异步向用户提问的函数，透传给代码函数作为第五个入参；入参为
- *   {question, options: {label, desc}[], needOther?}[]，返回 string[]（每个 question 对应的答案，
+ *   {question, options: {label, desc}[], showOther?}[]，返回 string[]（每个 question 对应的答案，
  *   用户拒绝时返回空数组）。内部走 toolPermissionRequest 信号 + answerToolPermission 回调。
  */
 export type CodeExecutorOptions = {
@@ -222,12 +222,12 @@ export class CodeExecutor {
 
     /**
      * askUserQuestion —— 代码函数第五入参。
-     * 入参: {question, options: {label, desc}[], needOther?}[]
+     * 入参: {question, options: {label, desc}[], showOther?}[]
      * 返回: string[]（每个 question 对应的答案；用户拒绝时返回空数组；interrupt/kill 触发时 reject 异常（调用方 catch 可感知））
      * 内部走 toolPermissionRequest 信号 → webview AskUserQuestionCard → answerToolPermission 回调。
      */
     const askUserQuestion = async (
-      items: { question: string; options: { label: string; desc: string }[]; needOther?: boolean }[],
+      items: { question: string; options: { label: string; desc: string }[]; showOther?: boolean }[],
     ): Promise<string[]> => {
       if (this.disposed) return []
 
@@ -237,7 +237,7 @@ export class CodeExecutor {
           question: item.question,
           header: item.question.slice(0, 12),
           options: item.options.map((o) => ({ label: o.label, description: o.desc })),
-          ...(item.needOther !== undefined ? { needOther: item.needOther } : {}),
+          ...(item.showOther !== undefined ? { showOther: item.showOther } : {}),
         })),
       }
 

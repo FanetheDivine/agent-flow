@@ -172,8 +172,8 @@ export type AskUserQuestionItem = {
   header: string
   multiSelect?: boolean
   options: AskUserQuestionOption[]
-  /** 是否展示"Other"选项让用户输入自定义文本；省略时默认 true */
-  needOther?: boolean
+  /** 是否展示"Other"选项让用户输入自定义文本；省略时默认 false */
+  showOther?: boolean
 }
 export type AskUserQuestionInput = {
   questions: AskUserQuestionItem[]
@@ -726,11 +726,26 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
 
   const lines: string[] = [
     '/**',
+    ' * @typedef {Object} AskOption',
+    ' * @property {string} label',
+    ' * @property {string} description',
+    ' *',
+    ' * @typedef {Object} AskItem',
+    ' * @property {string} question',
+    ' * @property {string} header',
+    ' * @property {boolean} [multiSelect]',
+    ' * @property {AskOption[]} options',
+    ' * @property {boolean} [showOther] - 是否展示"Other"选项让用户输入自定义文本；省略时默认 false',
+    ' *',
+    ' * @callback AskUserQuestion',
+    ' * @param {AskItem[]} items',
+    ' * @returns {Promise<string[]>} 每个 question 对应的答案，多选以 \\x1F 分隔；中断时抛出异常',
+    ' *',
     ` * @param {string | import('@anthropic-ai/claude-agent-sdk').SDKUserMessage['message']['content']} input - 上游 CompleteTask.content 注入的原始富文本内容`,
     ` * @param {Record<string, string>} values - 可用 key: ${keysDesc}`,
     ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在 VSCode workspace root 执行，timeout 默认 600000 毫秒',
     ' * @param {string | undefined} cwd - 当前 Flow 工作目录，未设置为 undefined',
-    ' * @param {({question: string, options: {label: string, description: string}[], needOther?: boolean}[]) => Promise<string[]>} askUserQuestion - 弹出用户选择卡片；每个元素对应一个问题的答案，多选以 \\x1F 分隔；中断时抛出异常',
+    ' * @param {AskUserQuestion} askUserQuestion - 弹出用户选择卡片',
   ]
 
   lines.push(' * @typedef {Object} CodeResult')
