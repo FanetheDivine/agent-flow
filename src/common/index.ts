@@ -169,7 +169,7 @@ export type AskUserQuestionOption = {
 }
 export type AskUserQuestionItem = {
   question: string
-  header: string
+  header?: string
   multiSelect?: boolean
   options: AskUserQuestionOption[]
   /** 是否展示"Other"选项让用户输入自定义文本；省略时默认 false */
@@ -722,7 +722,8 @@ export function buildNoInputInitMessage(
  * extension 端用于临时 .js 文件头注释，webview 端用于只读展示——两端必须一致。
  */
 export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): string {
-  const keysDesc = shareValueKeys.length > 0 ? shareValueKeys.join(', ') : '无可用 key'
+  const keysDesc =
+    shareValueKeys.length > 0 ? shareValueKeys.map((k) => `'${k}'`).join('|') : 'string'
 
   const lines: string[] = [
     '/**',
@@ -732,20 +733,18 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' *',
     ' * @typedef {Object} AskItem',
     ' * @property {string} question',
-    ' * @property {string} header',
-    ' * @property {boolean} [multiSelect]',
     ' * @property {AskOption[]} options',
-    ' * @property {boolean} [showOther] - 是否展示"Other"选项让用户输入自定义文本；省略时默认 false',
+    ' * @property {boolean} showOther - 是否展示"Other"选项让用户输入自定义文本；省略时默认 false',
     ' *',
     ' * @callback AskUserQuestion',
     ' * @param {AskItem[]} items',
-    ' * @returns {Promise<string[]>} 每个 question 对应的答案，多选以 \\x1F 分隔；中断时抛出异常',
+    ' * @returns {Promise<string[]>} 每个 question 对应的答案 暂不支持多选',
     ' *',
     ` * @param {string | import('@anthropic-ai/claude-agent-sdk').SDKUserMessage['message']['content']} input - 上游 CompleteTask.content 注入的原始富文本内容`,
-    ` * @param {Record<string, string>} values - 可用 key: ${keysDesc}`,
-    ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在 VSCode workspace root 执行，timeout 默认 600000 毫秒',
-    ' * @param {string | undefined} cwd - 当前 Flow 工作目录，未设置为 undefined',
-    ' * @param {AskUserQuestion} askUserQuestion - 弹出用户选择卡片',
+    ` * @param {Record<${keysDesc}, string | undefined>} values - 可用 key`,
+    ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在主工作区执行',
+    ' * @param {string | undefined} cwd - 当前 Flow 工作目录 undefined表示主工作区',
+    ' * @param {AskUserQuestion} askUserQuestion - 向用户提问',
   ]
 
   lines.push(' * @typedef {Object} CodeResult')
@@ -754,12 +753,12 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     lines.push(` * @property {${outputUnion}} [output_name]`)
   }
   lines.push(
-    ' * @property {string} [content]',
-    ' * @property {Record<string, string>} [values]',
-    ' * @property {string | null} [cwd]',
+    ' * @property {string | undefined} [content]',
+    ' * @property {Record<${keysDesc}, string | undefined>} [values]',
+    ' * @property {string | null | undefined} [cwd]',
   )
 
-  lines.push(' * @returns {Promise<CodeResult | string | void>}', ' */')
+  lines.push(' * @returns {Promise<CodeResult>}', ' */')
 
   return lines.join('\n')
 }
