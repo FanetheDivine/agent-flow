@@ -22,7 +22,8 @@
 `buildAgentSystemPrompt` 注入「可读写数据」与「可用数据」节。可读值是 prompt 时点快照，运行中更新值需要切到下一 agent 后生效。
 
 - 小值（≤ 500 字符）：内联 JSON 块直接注入 `<shared_data>`，零工具往返。
-- 大值（> 500 字符）：仅列摘要行（key + 字符数），完整值通过 `ReadShareValue(key)` MCP 工具按需读取。`ReadShareValue` 读取的是 `init()` 时点固化的 prompt 快照，与内联值同源一致。`ReadShareValue` 仅在有大值 key 时挂载到 `AgentControllerMcp`，无大值时不挂载。
+- 大值（> 500 字符）：仅列摘要行（key + 字符数），完整值通过 `ReadShareValue(key)` MCP 工具按需读取。`ReadShareValue` 读取的是 `init()` 时点固化的 prompt 快照，与内联值同源一致。`ReadShareValue` 仅在有大值 key 时挂载到 `AgentControllerMcp`，无大值时不挂载。对同一 key 多次调用返回相同结果（幂等），系统提示词与工具描述均声明此约束。
+- 普通启动 / 切 agent 的 executor 取 `getLatestShareValues()`；fork / restore 的 lazy executor 取源 run 的 `AgentRun.shareValuesSnapshot`（会话开始时点快照），复现起点的 system prompt 与 ReadShareValue，与历史自洽，不受 fork 后 `setShareValues` 变更影响。两路取值同源于 `FlowRunStateManager`。
 
 ## 写
 

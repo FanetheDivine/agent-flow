@@ -290,6 +290,9 @@ export function activate(context: vscode.ExtensionContext) {
     (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.shareValues ?? {},
     (flowId) => currentFlows.flows.find((f) => f.id === flowId),
     (flowId) => flowRunStateManager.getFlowRunStates()[flowId]?.cwd,
+    (flowId, runId) =>
+      flowRunStateManager.getFlowRunStates()[flowId]?.runs.find((r) => r.runId === runId)
+        ?.shareValuesSnapshot,
   )
 
   /**

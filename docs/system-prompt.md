@@ -49,7 +49,7 @@
 由 `pickInjectedShareValues(allowedReadKeys, currentValues)` 产出 `{ inlined, deferred }`：
 
 - **inlined**（≤500 字符）：直接注入 `<shared_data>` 内的 JSON 块，零工具往返。
-- **deferred**（>500 字符）：只生成摘要行 `- key（N 字符）`，提示用 ReadShareValue 按需读取。
+- **deferred**（>500 字符）：只生成摘要行 `- key（N 字符）`，提示用 ReadShareValue 按需读取，并声明 ReadShareValue 对同一 key 幂等（取自会话开始时点固定快照），无需重复读取。
 - 空值（undefined / ''）跳过，不注入任何分层。
 - `currentValues` 为 `undefined`（webview 预览态）时，所有可读 key 均填 `<运行时替换>` 占位。
 

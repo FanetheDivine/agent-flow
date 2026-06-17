@@ -685,6 +685,7 @@ export function buildAgentSystemPrompt(
         for (const { key, length } of deferred) {
           lines.push(`- ${key}（${length} 字符）`)
         }
+        lines.push('ReadShareValue 是幂等的，对同一 key 多次调用返回相同结果，无需重复读取。')
       }
     } else {
       // webview 预览态：用占位符保持结构可见

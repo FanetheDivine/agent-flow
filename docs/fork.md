@@ -26,6 +26,8 @@ fork 走 `handleFork`：
 6. `spawnForFork` 启动 FlowRunner + lazy executor。
 7. 发送 `flow.signal.fork`。
 
+新 run 由 `structuredClone(targetRun)` 复制，继承源 run 的 `shareValuesSnapshot`（会话开始时点快照）。lazy executor 首次启动经 `getRunSnapshot(runId)` 从 state 读此快照作 `currentValues`，复现 fork 起点的 system prompt 与 ReadShareValue，与历史自洽；旧持久化 run 无此字段时兜底 `getLatestShareValues()`。restore 路径（`spawnForRestore`）同源共用此机制。
+
 ## webview 路径
 
 webview 收到 `flow.signal.fork` 后：

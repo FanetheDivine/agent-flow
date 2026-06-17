@@ -94,6 +94,13 @@ export type FlowRunnerOptions = {
    * 返回 undefined 时回退到 VSCode workspaceFolder。
    */
   getLatestCwd: () => string | undefined | null
+  /**
+   * 取指定 run 会话开始时点的 shareValues 快照（AgentRun.shareValuesSnapshot）。
+   * fork / restore 的 lazy executor 用它复现源 run 启动时的 system prompt 与
+   * ReadShareValue,保证与历史自洽,不受 fork 后 shareValues 变更影响;返回 undefined
+   * (旧持久化数据无此字段)时由调用方兜底 getLatestShareValues()。
+   */
+  getRunSnapshot: (runId: string) => Record<string, string> | undefined
 }
 
 /**
@@ -115,11 +122,13 @@ export class FlowRunner {
   private readonly getLatestShareValues: () => Record<string, string>
   private readonly getLatestFlow: () => Flow
   private readonly getLatestCwd: () => string | undefined | null
+  private readonly getRunSnapshot: (runId: string) => Record<string, string> | undefined
 
   constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
     this.getLatestFlow = options.getLatestFlow
     this.getLatestCwd = options.getLatestCwd
+    this.getRunSnapshot = options.getRunSnapshot
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -237,7 +246,9 @@ export class FlowRunner {
       return {
         initMessage: dummyInit,
         agent: latestAgent,
-        currentValues: this.getLatestShareValues(),
+        // 用源 run 会话开始时的快照而非最新值,复现 fork/restore 起点的 system prompt 与
+        // ReadShareValue,保证与历史自洽;旧持久化 run 无快照时兜底取最新值。
+        currentValues: this.getRunSnapshot(runId) ?? this.getLatestShareValues(),
         cwd: this.getLatestCwd() || vscode.workspace.workspaceFolders?.[0].uri.fsPath,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
         events: this.buildExecutorEvents(runId, latestAgent, () => executor),

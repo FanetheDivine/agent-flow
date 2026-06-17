@@ -309,6 +309,13 @@ export type AgentRun = {
     lastTotalCost: number
     lastTurnContextUsage?: ContextUsage
   }
+  /**
+   * 会话开始(run 创建)时点的完整 shareValues 快照。fork / restore 的 lazy executor
+   * 复用源 run 此快照重建 system prompt 与 ReadShareValue,保证与历史自洽,不受运行中
+   * shareValues 变更影响。与首条 user 消息上的 injectedShareValues(过滤后小值,仅展示)
+   * 区分:此处存完整原始 map。历史持久化数据可能无此字段,消费处兜底 getLatestShareValues。
+   */
+  shareValuesSnapshot?: Record<string, string>
 }
 
 export type PendingToolPermission = {
@@ -785,6 +792,7 @@ export function updateFlowRunState(
       messages: [],
       completed: false,
       acc: emptyAcc(),
+      shareValuesSnapshot: baseValues,
     }
     // 把 initMessage 累加为首条 user 项（替代直接塞 raw signal）
     appendSdkMessage(newRun, msg.data.initMessage, injectedShareValues)
@@ -987,16 +995,17 @@ export function updateFlowRunState(
             completed: false,
 
             acc: emptyAcc(),
+            // draft.shareValues 已在前面合并 data.values,与 doOnCompleteTask 传给
+            // nextAgent executor 的 nextValues 同值
+            shareValuesSnapshot: { ...draft.shareValues },
           }
           appendSdkMessage(
             newRun,
             nextInitMessage,
             nextAgent.node_type === 'code'
               ? { ...draft.shareValues }
-              : pickInjectedShareValues(
-                  nextAgent.allowed_read_values_keys ?? [],
-                  draft.shareValues,
-                ).inlined,
+              : pickInjectedShareValues(nextAgent.allowed_read_values_keys ?? [], draft.shareValues)
+                  .inlined,
           )
           draft.runs.push(newRun)
         } else {

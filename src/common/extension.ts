@@ -295,7 +295,7 @@ export function buildAgentMcpServer({
   if (deferredKeys.length > 0) {
     const readShareValueTool = tool(
       'ReadShareValue',
-      '当 shared_data 中提示某 key 值较长时，使用此工具按需读取完整内容。',
+      '当 shared_data 中提示某 key 值较长时，使用此工具按需读取完整内容。这个tool是幂等的，对同一 key 多次调用返回相同结果。',
       {
         key: z.enum(deferredKeys as [string, ...string[]]).describe('要读取的共享数据 key'),
       },
