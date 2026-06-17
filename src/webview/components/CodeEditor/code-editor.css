@@ -1,0 +1,35 @@
+.code-editor-shiki {
+  background-color: var(--vscode-editor-background) !important;
+}
+
+.code-editor-shiki .shiki {
+  padding: 12px 0;
+  margin: 0;
+  min-height: 100%;
+  background-color: var(--vscode-editor-background) !important;
+  color: var(--vscode-editor-foreground);
+}
+.code-editor-shiki .shiki code {
+  counter-reset: line;
+  display: block;
+}
+.code-editor-shiki .shiki .line {
+  display: inline-block;
+  width: 100%;
+  min-height: 1em;
+  padding: 0 16px 0 48px;
+  position: relative;
+  box-sizing: border-box;
+}
+.code-editor-shiki .shiki .line::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: 0;
+  width: 36px;
+  text-align: right;
+  color: var(--vscode-editorLineNumber-foreground, #6e7681);
+  font-size: 12px;
+  user-select: none;
+  pointer-events: none;
+}

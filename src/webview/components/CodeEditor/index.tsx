@@ -1,15 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FC } from 'react'
-import {
-  autocompletion,
-  type CompletionContext,
-  type CompletionSource,
-} from '@codemirror/autocomplete'
-import { javascript } from '@codemirror/lang-javascript'
-import { indentRange } from '@codemirror/language'
-import { Compartment, type Extension } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView, keymap } from '@codemirror/view'
+import { codeToHtml } from 'shiki'
+import { buildCodeJSDoc } from '@/common'
+import './code-editor.css'
 
 export type CodeEditorProps = {
   value?: string
@@ -18,187 +11,50 @@ export type CodeEditorProps = {
   shareValueKeys?: string[]
   /** 当前节点的输出分支名称列表 —— 注入到 CodeResult 返回值类型 */
   outputs?: string[]
-}
-
-// ── 主题：oneDark + 填满父容器（覆盖 CodeMirror 默认 height:auto / maxHeight:500px）──
-const theme = [
-  oneDark,
-  EditorView.theme({
-    '&': { height: '100%' },
-    '.cm-scroller': { overflow: 'auto' },
-  }),
-]
-
-// ── 补全源工厂：根据 shareValueKeys / outputs 动态生成 input / values / runCommand 补全 ──
-function createCompletionSource(shareValueKeys: string[], outputs: string[]): CompletionSource {
-  const outputType = outputs.length > 0 ? outputs.map((n) => `'${n}'`).join(' | ') : 'undefined'
-
-  return (ctx: CompletionContext) => {
-    // values.xxx → 补全 shareValueKeys
-    const valuesDot = ctx.matchBefore(/values\.\w*/)
-    if (valuesDot) {
-      return {
-        from: valuesDot.from + 'values.'.length,
-        options: shareValueKeys.map((k) => ({
-          label: k,
-          type: 'property',
-          detail: 'string',
-        })),
-      }
-    }
-
-    // 普通标识符 → 补全 input / values / runCommand / CodeResult
-    const word = ctx.matchBefore(/\w*/)
-    if (!word || (word.from === word.to && !ctx.explicit)) return null
-
-    return {
-      from: word.from,
-      options: [
-        {
-          label: 'input',
-          type: 'variable',
-          detail: 'string',
-          info: '上游节点 CompleteTask.content 传入的文本，或者用户输入',
-        },
-        {
-          label: 'values',
-          type: 'variable',
-          detail: 'Record<string, string>',
-          info: 'Flow 级共享存储（按 key 授权读写）。Code 节点可全量读写所有 shareValues。',
-        },
-        {
-          label: 'runCommand',
-          type: 'function',
-          detail: '(command: string, timeout?: number) => Promise<string>',
-          info: '始终在 VSCode workspace root 下执行 shell 命令，返回 stdout + stderr 拼接的字符串；需在当前 Flow cwd 执行时请在 command 内自行 cd "${cwd}" && ...',
-        },
-        {
-          label: 'cwd',
-          type: 'variable',
-          detail: 'string | undefined',
-          info: '当前工作目录（FlowRunState.cwd；未设置时为 undefined，不回退 workspaceFolder）',
-        },
-        {
-          label: 'CodeResult',
-          type: 'type',
-          detail: `{ output_name?: ${outputType}; content?: string; values?: Record<string, string>; cwd?: string | null }`,
-          info: 'Code 节点返回值类型 — 返回对象 / 字符串 / void',
-        },
-        ...shareValueKeys.map((k) => ({
-          label: k,
-          type: 'property',
-          detail: 'values key',
-        })),
-      ],
-    }
-  }
+  /** 只读模式：禁止编辑，用于 webview 内展示（实际编辑在 VSCode 中完成） */
+  readOnly?: boolean
+  /** 跳过内部 JSDoc 拼接：外部已单独展示 JSDoc 类型声明时使用 */
+  hideJSDoc?: boolean
 }
 
 /**
- * Code 节点的 CodeMirror 编辑器，提供：
- * - JavaScript 语法高亮（oneDark 主题）
- * - Shift+Alt+F 全量缩进格式化
- * - 基于 shareValueKeys / outputs 的补全（input / values.* / runCommand / CodeResult）
- *
- * 生命周期：mount 时创建 → unmount 时 destroy，中间通过 ref 同步 value。
+ * Code 节点的代码展示组件。
+ * 使用 Shiki（底层 vscode-textmate + dark-plus 主题）渲染，
+ * 与 VSCode 编辑器语法高亮像素级一致。
  */
 export const CodeEditor: FC<CodeEditorProps> = ({
   value = '',
-  onChange,
-  shareValueKeys = [],
-  outputs = [],
+  shareValueKeys,
+  outputs,
+  hideJSDoc,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef<EditorView | null>(null)
-  // 防止 editor → onChange → form → value prop → editor.setValue 形成回环
-  const suppressNextChangeRef = useRef(false)
-  // 补全源随 props 变化重建，通过 Compartment 热替换
-  const completionRef = useRef<Extension>([])
-  const compRef = useRef(new Compartment())
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
+  const [html, setHtml] = useState('')
+  const reqId = useRef(0)
 
-  // ── 初始化编辑器 ──
+  const displayValue = useMemo(() => {
+    if (hideJSDoc) return value
+    const jsdoc = buildCodeJSDoc(shareValueKeys ?? [], outputs ?? [])
+    return jsdoc + '\n' + value
+  }, [value, shareValueKeys, outputs, hideJSDoc])
+
   useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    // 用 mount 时刻的 props 构建初始补全扩展
-    completionRef.current = autocompletion({
-      override: [createCompletionSource(shareValueKeys, outputs)],
+    const id = ++reqId.current
+    codeToHtml(displayValue, { lang: 'javascript', theme: 'dark-plus' }).then((h) => {
+      if (id === reqId.current) setHtml(h)
     })
-
-    const view = new EditorView({
-      doc: value,
-      extensions: [
-        theme,
-        javascript(),
-        compRef.current.of(completionRef.current),
-        // Shift+Alt+F = 全量缩进
-        keymap.of([
-          {
-            key: 'Shift-Alt-f',
-            run: (view) => {
-              view.dispatch({
-                changes: indentRange(view.state, 0, view.state.doc.length),
-              })
-              return true
-            },
-          },
-        ]),
-        // editor → onChange：用户编辑时通知外部（Form）
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            if (suppressNextChangeRef.current) {
-              suppressNextChangeRef.current = false
-              return
-            }
-            onChangeRef.current?.(update.state.doc.toString())
-          }
-        }),
-      ],
-      parent: container,
-    })
-    viewRef.current = view
-
-    return () => {
-      view.destroy()
-      viewRef.current = null
-    }
-    // 仅 mount 时执行一次；value / shareValueKeys / outputs 变化由下面的 effect 处理
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // ── 外部 value → editor（form.setFieldsValue / 切换 agent 时）──
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    const current = view.state.doc.toString()
-    if (current !== value) {
-      // 标记：接下来 replace 触发的 updateListener 不回调 onChange
-      suppressNextChangeRef.current = true
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: value ?? '' },
-      })
-    }
-  }, [value])
-
-  // ── shareValueKeys / outputs 变化 → 重建补全源并热替换 ──
-  useEffect(() => {
-    completionRef.current = autocompletion({
-      override: [createCompletionSource(shareValueKeys, outputs)],
-    })
-    viewRef.current?.dispatch({
-      effects: compRef.current.reconfigure(completionRef.current),
-    })
-  }, [shareValueKeys, outputs])
+  }, [displayValue])
 
   return (
     <div
       ref={containerRef}
-      className='flex-1 overflow-hidden'
-      // 阻止 Form 的全局 onKeyDown 拦截 Tab（CodeMirror 需要 Tab 做缩进）
-      onKeyDown={(e) => e.stopPropagation()}
-    />
+      className='code-editor-shiki flex-1 overflow-auto font-mono text-[14px] leading-relaxed'
+      style={{
+        backgroundColor: 'var(--vscode-editor-background)',
+        color: 'var(--vscode-editor-foreground)',
+      }}
+    >
+      <div className='h-full' dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
   )
 }
