@@ -268,11 +268,6 @@ export function activate(context: vscode.ExtensionContext) {
         const projectFlows = currentFlows.flows.filter((f) => f.project)
         const strippedProject = projectFlows.map(stripFlowRuntimeFields)
         const allStates = flowRunStateManager.getFlowRunStates()
-        const globalFlows = currentFlows.flows.filter((f) => !f.project).map(stripFlowRuntimeFields)
-        // 全局文件只写全局 flows（不再写 workspaceRunStates）
-        globalStore
-          .save({ flows: globalFlows })
-          .catch((err) => logError('[flushMessages] globalStore.save failed', err))
         // workspaceStore 写项目 flows + 全量 runStates（含全局 flow 在该 cwd 的运行态）
         if (workspaceStore) {
           workspaceStore
