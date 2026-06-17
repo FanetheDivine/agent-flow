@@ -703,7 +703,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
   lines.push(' * @typedef {Object} CodeResult')
   if (outputs.length > 0) {
     const outputUnion = outputs.map((n) => `'${n}'`).join(' | ')
-    lines.push(` * @property {${outputUnion} | undefined} [output_name]`)
+    lines.push(` * @property {${outputUnion}} [output_name]`)
   }
   lines.push(
     ' * @property {string} [content]',

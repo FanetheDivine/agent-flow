@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { FC } from 'react'
 import {
   Drawer,
@@ -21,15 +21,14 @@ import {
   CodeOutlined,
 } from '@ant-design/icons'
 import type { Agent, Code } from '@/common'
-import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, MODELS, buildAgentSystemPrompt, buildCodeJSDoc } from '@/common'
+import { BUILTIN_TOOL_NAMES, MCP_WILDCARD, MODELS, buildAgentSystemPrompt } from '@/common'
 import { useSilentTaskModeNotification } from '@/webview/hooks/useSilentTaskModeNotification'
 import { useFlowStore } from '@/webview/store/flow'
 import { cn } from '@/webview/utils'
 import { postMessageToExtension, subscribeExtensionMessage } from '@/webview/utils/ExtensionMessage'
 import { CodeEditor } from '../CodeEditor'
-import { Md } from '../text-components'
-import { codeToHtml } from 'shiki'
 import '../CodeEditor/code-editor.css'
+import { Md } from '../text-components'
 
 type CodeNodeFormValue = Omit<Code, 'id'>
 type AgentNodeFormValue = Omit<Agent, 'id'>
@@ -46,39 +45,6 @@ const TOOL_OPTIONS = [
   { label: `${MCP_WILDCARD} — 匹配所有 mcp__* 工具`, value: MCP_WILDCARD },
   ...BUILTIN_TOOL_NAMES.map((n) => ({ label: n, value: n })),
 ]
-
-/** Code 节点 JSDoc 类型声明 — 只读展示，不写入 form */
-const JsDocDisplay: FC<{ shareValueKeys: string[]; outputs: string[] }> = ({
-  shareValueKeys,
-  outputs,
-}) => {
-  const reqId = useRef(0)
-  const [html, setHtml] = useState('')
-
-  const jsdoc = useMemo(
-    () => buildCodeJSDoc(shareValueKeys, outputs),
-    [shareValueKeys, outputs],
-  )
-
-  useEffect(() => {
-    const id = ++reqId.current
-    codeToHtml(jsdoc, { lang: 'javascript', theme: 'dark-plus' }).then((h) => {
-      if (id === reqId.current) setHtml(h)
-    })
-  }, [jsdoc])
-
-  return (
-    <div
-      className='code-editor-shiki max-h-[40%] shrink-0 overflow-auto border-b border-[#313244]'
-      style={{
-        backgroundColor: 'var(--vscode-editor-background)',
-        color: 'var(--vscode-editor-foreground)',
-      }}
-    >
-      <div dangerouslySetInnerHTML={{ __html: html }} />
-    </div>
-  )
-}
 
 export const AgentEditor: FC = () => {
   const editingAgent = useFlowStore((s) => s.editingAgent)
@@ -550,19 +516,11 @@ export const AgentEditor: FC = () => {
                   编辑
                 </Button>
               </div>
-              {/* JSDoc 类型声明 — 只读展示，与 VSCode 临时文件头一致 */}
-              <JsDocDisplay
-                shareValueKeys={shareValueKeys.map((k) => k.key)}
-                outputs={(watchedValues?.outputs ?? [])
-                  .map((o: any) => o?.output_name)
-                  .filter(Boolean)}
-              />
               {/* code 字段为完整 async function 表达式，直接只读展示。实际编辑在 VSCode 中完成。 */}
               <div className='flex flex-1 flex-col overflow-hidden font-mono text-[12px]'>
                 <FormItem name='code' noStyle>
                   <CodeEditor
                     readOnly
-                    hideJSDoc
                     shareValueKeys={shareValueKeys.map((k) => k.key)}
                     outputs={(watchedValues?.outputs ?? [])
                       .map((o: any) => o?.output_name)
