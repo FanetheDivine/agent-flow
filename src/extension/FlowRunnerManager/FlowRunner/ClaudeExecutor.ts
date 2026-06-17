@@ -10,6 +10,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import {
   Agent,
+  AgentOverwrite,
   AIMessageType,
   AskUserQuestionInput,
   buildAgentSystemPrompt,
@@ -30,6 +31,10 @@ export type ExecutorResult = {
    * string=设置路径 / null或空串=清空为主工作区 / undefined=不更改
    */
   cwd?: string | null
+  /**
+   * 仅 code 节点使用，透传至 agentComplete 后改写下一个 agent 配置
+   */
+  overwrite?: AgentOverwrite
   /**
    * 本回合 SDK 最后一条 result 消息。CompleteTask 暂存后,result 不再走 onMessage
    * 透传(否则 reducer 会触发 phase='result' 的"生成完毕"通知),改随 onComplete
