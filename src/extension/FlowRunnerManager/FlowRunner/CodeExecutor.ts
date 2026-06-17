@@ -223,7 +223,7 @@ export class CodeExecutor {
     /**
      * askUserQuestion —— 代码函数第五入参。
      * 入参: {question, options: {label, desc}[], needOther?}[]
-     * 返回: string[]（每个 question 对应的答案；用户拒绝或 disposed 时返回空数组）
+     * 返回: string[]（每个 question 对应的答案；用户拒绝时返回空数组；interrupt/kill 触发时 reject 异常（调用方 catch 可感知））
      * 内部走 toolPermissionRequest 信号 → webview AskUserQuestionCard → answerToolPermission 回调。
      */
     const askUserQuestion = async (

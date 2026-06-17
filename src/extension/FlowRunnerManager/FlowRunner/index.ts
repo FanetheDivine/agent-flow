@@ -117,6 +117,7 @@ export type FlowRunnerOptions = {
  */
 export class FlowRunner {
   private executors = new Map<string, Executor>()
+  private stopped = false
   private signalListeners = new Map<keyof FlowRunnerSignalEvents, Set<SignalHandler<any>>>()
   private wildcardListeners = new Set<WildcardSignalHandler>()
   private readonly getLatestShareValues: () => Record<string, string>
@@ -193,6 +194,7 @@ export class FlowRunner {
 
   /** 销毁 FlowRunner，终止全部 executor */
   dispose(): void {
+    this.stopped = true
     for (const [, executor] of this.executors) {
       executor.kill()
     }
@@ -292,6 +294,7 @@ export class FlowRunner {
     agentId,
     initMessage,
   }: FlowRunnerCommandEvents['flow.command.flowStart']): void {
+    this.stopped = false
     // 本期单 executor 约束:flowStart 前清掉所有现存 executor
     this.killAllExecutors()
 
@@ -321,8 +324,16 @@ export class FlowRunner {
   }
 
   private async handleInterrupt({ runId }: FlowRunnerCommandEvents['flow.command.interrupt']) {
+    this.stopped = true
     const executor = this.executors.get(runId)
-    if (!executor) return
+    if (!executor) {
+      // runId 精确匹配失败 —— code 节点环形快速执行时旧 runId 已被 kill 并替换为新 runId,
+      // webview IPC(macrotask)来不及拦截,此时降级 interrupt 全部活跃 executor
+      for (const [, exec] of this.executors) {
+        await exec.interrupt()
+      }
+      return
+    }
     await executor.interrupt()
     // code 节点:interrupt 已在 CodeExecutor 内 fire onError 切 error 终态,不再 fire
     // agentInterrupted —— interrupted 是非终态,code 节点 sendUserMessage 是 noop 无法续轮会卡死。
@@ -502,6 +513,7 @@ export class FlowRunner {
     const nextAgentId = selectedOutput?.next_agent
 
     if (nextAgentId) {
+      if (this.stopped) return
       const nextAgent = this.findAgentById(nextAgentId)
       if (!nextAgent) {
         this.fire('flow.signal.error', { msg: `Next agent "${nextAgentId}" not found` })

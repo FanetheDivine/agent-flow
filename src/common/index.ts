@@ -108,7 +108,7 @@ export const CodeSchema = AgentSchema.pick({
     .describe(
       [
         '代码节点的完整 async function 表达式。',
-        'async function run(input, values, runCommand, cwd) { /* body */ }',
+        'async function run(input, values, runCommand, cwd, askUserQuestion) { /* body */ }',
       ].join('\n'),
     ),
 })

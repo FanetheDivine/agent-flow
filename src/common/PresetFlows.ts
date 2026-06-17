@@ -18,7 +18,7 @@ export const PresetFlows: Flow[] = [
         is_entry: true,
         node_type: 'code',
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  const suffix = Math.random().toString(36).slice(2, 10)',
           '  const branchName = `agent-flow-dev/${suffix}`',
           '  const worktreePath = `.claude/worktrees/${suffix}`',
@@ -146,7 +146,7 @@ export const PresetFlows: Flow[] = [
           },
         ],
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           "  return { output_name: '验证需求', content: '验证用户需求是否实现' }",
           '}',
         ].join('\n'),
@@ -168,7 +168,7 @@ export const PresetFlows: Flow[] = [
           },
         ],
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  if (!cwd) {',
           '    const branchName = await runCommand(`git branch --show-current`)',
           '    return {',
@@ -212,7 +212,7 @@ export const PresetFlows: Flow[] = [
         agent_desc: '输出新分支名称，清理worktree',
         no_input: true,
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  // 新分支名称',
           '  const branchName = await runCommand(`git -C "${cwd}" branch --show-current`)',
           '  // 清理worktree',
@@ -252,7 +252,7 @@ export const PresetFlows: Flow[] = [
         is_entry: true,
         node_type: 'code',
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  const suffix = Math.random().toString(36).slice(2, 10)',
           '  const branchName = `agent-flow-dev/${suffix}`',
           '  const worktreePath = `.claude/worktrees/${suffix}`',
@@ -334,7 +334,7 @@ export const PresetFlows: Flow[] = [
         no_input: true,
         node_type: 'code',
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  try {',
           '    const parsed = JSON.parse(values.tasks)',
           "    if (!Array.isArray(parsed) || parsed.some(v => typeof v !== 'string')) {",
@@ -400,7 +400,7 @@ export const PresetFlows: Flow[] = [
         no_input: true,
         node_type: 'code',
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  const next = parseInt(values.next)',
           '  const tasks = JSON.parse(values.tasks)',
           '  if(next === tasks.length || tasks.length === 0){',
@@ -493,7 +493,7 @@ export const PresetFlows: Flow[] = [
           },
         ],
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  if (!cwd) {',
           '    const branchName = await runCommand(`git branch --show-current`)',
           '    return {',
@@ -537,7 +537,7 @@ export const PresetFlows: Flow[] = [
         agent_desc: '输出新分支名称，清理worktree',
         no_input: true,
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           '  // 新分支名称',
           '  const branchName = await runCommand(`git -C "${cwd}" branch --show-current`)',
           '  // 清理worktree',
@@ -638,7 +638,7 @@ export const PresetFlows: Flow[] = [
         agent_name: '发版',
         node_type: 'code',
         code: [
-          'async function run(input, values, runCommand, cwd) {',
+          'async function run(input, values, runCommand, cwd, askUserQuestion) {',
           "  return { content: await runCommand('npm run release') }",
           '}',
         ].join('\n'),
