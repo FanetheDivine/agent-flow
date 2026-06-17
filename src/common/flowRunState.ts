@@ -765,7 +765,6 @@ export function updateFlowRunState(
 ): { state: FlowRunState | undefined; effects: MessageEffect[] } {
   const effects: MessageEffect[] = []
   const { flows, state } = options
-
   // ── command.flowStart：追加新 run（可在任何 state 下进入，包括 undefined / 终态） ──
   if (msg.type === 'flow.command.flowStart') {
     const baseValues = state?.shareValues ?? {}

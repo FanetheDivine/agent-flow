@@ -10,9 +10,9 @@ type UserContent = SDKUserMessage['message']['content']
  * 延迟到首次 createQuery 时再取(尽管本期 lazy 路径不会走到 CodeExecutor —— fork
  * 不支持 code 节点)。
  *
- * runCommand: 始终在 VSCode workspace root 下执行 shell 命令的函数，由上层 FlowRunner 注入,透传给 AsyncFunction 作为第三个入参;
+ * runCommand: 始终在 VSCode workspace root 下执行 shell 命令的函数，由上层 FlowRunner 注入,透传给代码函数作为第三个入参;
  * 如需在当前 Flow cwd 执行，用户代码应自行 cd "${cwd}" && ... （注意 shell 转义）。
- * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd；**未设置时为 undefined，不回退 workspace root**），透传给 AsyncFunction 作为第四个入参。
+ * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd；**未设置时为 undefined，不回退 workspace root**），透传给代码函数作为第四个入参。
  */
 export type CodeExecutorOptions = {
   initMessage: UserMessageType
@@ -22,11 +22,6 @@ export type CodeExecutorOptions = {
   runCommand: (command: string, timeout?: number) => Promise<string>
   events: ExecutorEvents
   cwd?: string
-}
-
-/** AsyncFunction 构造器 —— 用 new 调用以包装 async function 体 */
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as {
-  new (...args: string[]): (...a: any[]) => Promise<any>
 }
 
 /**
@@ -97,8 +92,8 @@ function validateCodeOutput(
 
 /**
  * 代码节点执行器 —— 与 ClaudeExecutor 同构 ExecutorEvents,但不调 AI、不挂 MCP、
- * 不走 SDK。把 agent.code 视为 `async function (input: string | ContentBlockParam[], values, runCommand, cwd) { ... }` 函数体执行,
- * 返回值映射为 ExecutorResult。
+ * 不走 SDK。把 agent.code 视为完整 async function 表达式，
+ * 通过 new Function('return (...)')() 求值后调用，返回值映射为 ExecutorResult。
  *
  * 严格只产出 agentComplete 信号:
  * - 不发 assistant 文本气泡(onMessage 不携任何 assistant message)
@@ -158,7 +153,7 @@ export class CodeExecutor {
   }
 
   /** 用户主动中断 —— code 函数无可中断 promise,只能标记 disposed 让后续 onComplete 被吞掉。
-   * AsyncFunction 仍会跑完,但本回合 onComplete / onMessage 不再透传到上层。
+   * 函数仍会跑完,但本回合 onComplete / onMessage 不再透传到上层。
    * 与 ClaudeExecutor 不同:code 节点 sendUserMessage 是 noop 无法续轮,若停在 interrupted
    * (非终态)会卡死,故 interrupt 直接 fire onError 让 reducer 切 error 终态;
    * FlowRunner.handleInterrupt 对 code 节点不再 fire agentInterrupted。
@@ -201,7 +196,7 @@ export class CodeExecutor {
 
     let raw: unknown
     try {
-      const fn = new AsyncFunction('input', 'values', 'runCommand', 'cwd', codeBody)
+      const fn = new Function(`return (${codeBody})`)() as (...args: unknown[]) => Promise<unknown>
       raw = await fn(inputContent, valuesArg, this.runCommand, this.currentCwd)
     } catch (err) {
       // 严格只产出 agentComplete 信号:错误路径不发 assistant 错误气泡、不发 result onMessage,
