@@ -128,7 +128,7 @@ export class CodeExecutor {
   private readonly _sessionId: string = globalThis.crypto.randomUUID()
   private pendingToolPermissions = new Map<
     string,
-    (result: { allow: boolean; updatedInput?: unknown }) => void
+    { resolve: (result: { allow: boolean; updatedInput?: unknown }) => void; reject: (err: Error) => void }
   >()
 
   /** SDK 兼容字段 —— Code 节点无真实 session,这里只是给上层日志/路由占位 */
@@ -177,10 +177,11 @@ export class CodeExecutor {
     this.rejectAllPendingPermissions()
   }
 
-  /** 清理所有挂起的 askUserQuestion Promise —— 以空数组返回让调用方不阻塞 */
+  /** 清理所有挂起的 askUserQuestion Promise —— reject 异常让调用方 catch 感知中断 */
   private rejectAllPendingPermissions(): void {
-    for (const [, resolver] of this.pendingToolPermissions) {
-      resolver({ allow: false })
+    const err = new Error('代码节点执行被中断')
+    for (const [, { reject }] of this.pendingToolPermissions) {
+      reject(err)
     }
     this.pendingToolPermissions.clear()
   }
@@ -195,10 +196,10 @@ export class CodeExecutor {
     allow: boolean,
     opts?: { updatedInput?: unknown; message?: string },
   ): void {
-    const resolver = this.pendingToolPermissions.get(toolUseId)
-    if (resolver) {
+    const entry = this.pendingToolPermissions.get(toolUseId)
+    if (entry) {
       this.pendingToolPermissions.delete(toolUseId)
-      resolver({ allow, updatedInput: opts?.updatedInput })
+      entry.resolve({ allow, updatedInput: opts?.updatedInput })
     }
   }
 
@@ -236,25 +237,29 @@ export class CodeExecutor {
           question: item.question,
           header: item.question.slice(0, 12),
           options: item.options.map((o) => ({ label: o.label, description: o.desc })),
+          ...(item.needOther !== undefined ? { needOther: item.needOther } : {}),
         })),
       }
 
       this.events.onToolPermissionRequest({ toolUseId, toolName: 'AskUserQuestion', input })
 
-      return new Promise<string[]>((resolve) => {
-        this.pendingToolPermissions.set(toolUseId, (result) => {
-          if (!result.allow) {
-            resolve([])
-            return
-          }
-          const output = result.updatedInput as AskUserQuestionOutput | undefined
-          if (!output?.answers) {
-            resolve([])
-            return
-          }
-          // 按 questions 顺序取每个 question 对应的 answers 值
-          const answers = input.questions.map((q) => output.answers[q.question] ?? '')
-          resolve(answers)
+      return new Promise<string[]>((resolve, reject) => {
+        this.pendingToolPermissions.set(toolUseId, {
+          resolve: (result) => {
+            if (!result.allow) {
+              resolve([])
+              return
+            }
+            const output = result.updatedInput as AskUserQuestionOutput | undefined
+            if (!output?.answers) {
+              resolve([])
+              return
+            }
+            // 按 questions 顺序取每个 question 对应的 answers 值
+            const answers = input.questions.map((q) => output.answers[q.question] ?? '')
+            resolve(answers)
+          },
+          reject,
         })
       })
     }

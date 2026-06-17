@@ -251,9 +251,11 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Checkbox value={opt.label} />
                   </OptionRow>
                 ))}
-                <OptionRow option={OTHER_OPTION}>
-                  <Checkbox value={OTHER_LABEL} />
-                </OptionRow>
+                {(q.needOther ?? true) && (
+                  <OptionRow option={OTHER_OPTION}>
+                    <Checkbox value={OTHER_LABEL} />
+                  </OptionRow>
+                )}
               </Checkbox.Group>
             ) : (
               <Radio.Group
@@ -267,9 +269,11 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Radio value={opt.label} />
                   </OptionRow>
                 ))}
-                <OptionRow option={OTHER_OPTION}>
-                  <Radio value={OTHER_LABEL} />
-                </OptionRow>
+                {(q.needOther ?? true) && (
+                  <OptionRow option={OTHER_OPTION}>
+                    <Radio value={OTHER_LABEL} />
+                  </OptionRow>
+                )}
               </Radio.Group>
             )}
             {otherSelected && (

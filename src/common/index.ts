@@ -172,6 +172,8 @@ export type AskUserQuestionItem = {
   header: string
   multiSelect?: boolean
   options: AskUserQuestionOption[]
+  /** 是否展示"Other"选项让用户输入自定义文本；省略时默认 true */
+  needOther?: boolean
 }
 export type AskUserQuestionInput = {
   questions: AskUserQuestionItem[]
