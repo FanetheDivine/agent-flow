@@ -222,13 +222,13 @@ export class CodeExecutor {
 
     /**
      * askUserQuestion —— 代码函数第五入参。
-     * 入参: {question, options: {label, desc}[], showOther?}[]
-     * 返回: string[]（每个 question 对应的答案；用户拒绝时返回空数组；interrupt/kill 触发时 reject 异常（调用方 catch 可感知））
+     * 入参: {question, options: {label, desc}[], multiSelect?, showOther?}[]
+     * 返回: string[][]（每个 question 对应的答案数组；用户拒绝时返回空数组；interrupt/kill 触发时 reject 异常（调用方 catch 可感知））
      * 内部走 toolPermissionRequest 信号 → webview AskUserQuestionCard → answerToolPermission 回调。
      */
     const askUserQuestion = async (
-      items: { question: string; options: { label: string; desc: string }[]; showOther?: boolean }[],
-    ): Promise<string[]> => {
+      items: { question: string; options: { label: string; desc: string }[]; multiSelect?: boolean; showOther?: boolean }[],
+    ): Promise<string[][]> => {
       if (this.disposed) return []
 
       const toolUseId = globalThis.crypto.randomUUID()
@@ -237,13 +237,14 @@ export class CodeExecutor {
           question: item.question,
           header: item.question.slice(0, 12),
           options: item.options.map((o) => ({ label: o.label, description: o.desc })),
+          ...(item.multiSelect !== undefined ? { multiSelect: item.multiSelect } : {}),
           ...(item.showOther !== undefined ? { showOther: item.showOther } : {}),
         })),
       }
 
       this.events.onToolPermissionRequest({ toolUseId, toolName: 'AskUserQuestion', input })
 
-      return new Promise<string[]>((resolve, reject) => {
+      return new Promise<string[][]>((resolve, reject) => {
         this.pendingToolPermissions.set(toolUseId, {
           resolve: (result) => {
             if (!result.allow) {
@@ -255,8 +256,11 @@ export class CodeExecutor {
               resolve([])
               return
             }
-            // 按 questions 顺序取每个 question 对应的 answers 值
-            const answers = input.questions.map((q) => output.answers[q.question] ?? '')
+            const ANSWER_SEP = '\x1F'
+            const answers = input.questions.map((q) => {
+              const raw = output.answers[q.question] ?? ''
+              return raw ? raw.split(ANSWER_SEP) : []
+            })
             resolve(answers)
           },
           reject,
