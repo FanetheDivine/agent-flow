@@ -1,5 +1,5 @@
 import { match } from 'ts-pattern'
-import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage } from '@/common'
+import type { Flow, ExtensionFlowCommandEvents, ExtensionToWebviewMessage, AgentOverwrite } from '@/common'
 import { FlowRunner } from './FlowRunner'
 
 type PostMessage = (msg: ExtensionToWebviewMessage) => void
@@ -7,6 +7,7 @@ type GetLatestShareValues = (flowId: string) => Record<string, string>
 type GetLatestFlow = (flowId: string) => Flow | undefined
 type GetLatestCwd = (flowId: string) => string | undefined | null
 type GetRunSnapshot = (flowId: string, runId: string) => Record<string, string> | undefined
+type GetRunOverwrite = (flowId: string, runId: string) => AgentOverwrite | undefined
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
@@ -15,6 +16,7 @@ export class FlowRunnerManager {
   private getLatestFlow: GetLatestFlow
   private getLatestCwd: GetLatestCwd
   private getRunSnapshot: GetRunSnapshot
+  private getRunOverwrite: GetRunOverwrite
 
   constructor(
     postMessage: PostMessage,
@@ -22,12 +24,14 @@ export class FlowRunnerManager {
     getLatestFlow: GetLatestFlow,
     getLatestCwd: GetLatestCwd,
     getRunSnapshot: GetRunSnapshot,
+    getRunOverwrite: GetRunOverwrite,
   ) {
     this.postMessage = postMessage
     this.getLatestShareValues = getLatestShareValues
     this.getLatestFlow = getLatestFlow
     this.getLatestCwd = getLatestCwd
     this.getRunSnapshot = getRunSnapshot
+    this.getRunOverwrite = getRunOverwrite
   }
 
   /**
@@ -45,6 +49,7 @@ export class FlowRunnerManager {
       },
       getLatestCwd: () => this.getLatestCwd(flowId),
       getRunSnapshot: (runId) => this.getRunSnapshot(flowId, runId),
+      getRunOverwrite: (runId) => this.getRunOverwrite(flowId, runId),
     })
     runner.listenAllSignals((eventType, signalData) => {
       this.postMessage({
