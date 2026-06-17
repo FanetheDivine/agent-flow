@@ -35,8 +35,9 @@ load 时并行读取 globalStore 与 workspaceStore：
 
 - `Flow.project?: boolean` 是内存/UI 标记，标识 flow 属于项目作用域。
 - 保存前必须调用 `stripFlowRuntimeFields` 剥离 `project`。
-- extension save handler 按 `project` 路由到全局或 workspaceStore。
+- extension save handler 按 `project` 路由到全局或 workspaceStore；全局 flows 仅在用户主动触发 `save` command 时写入 globalStore。
 - workspaceStore 持久化 runStates，`~/.agent-flows.json` 只保存全局 flows。
+- flushMessages 节流回调不自动写全局 flows，只持久化 workspaceStore 的 runStates 与项目 flows。
 
 ## project 标记
 

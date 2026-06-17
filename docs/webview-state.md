@@ -50,6 +50,8 @@ store 负责：
 
 首条非子 agent user 消息上方展示 `formatAgentOverwriteText(run.overwrite)` 返回的改写提示文本（灰色小字），从 `AgentRun.overwrite` 取值；无 overwrite 时不渲染。
 
+首条 user 消息还展示 reducer 写入的 `injectedShareValues`：agent 节点展示全部可读 shareValues 的全量值，code 节点展示完整 shareValues。该内容仅用于 UI 可读性，不影响 executor prompt。
+
 ## 通知
 
 webview 根据 reducer 返回的 `MessageEffect` 触发通知：

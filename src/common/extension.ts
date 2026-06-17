@@ -262,9 +262,7 @@ export function buildAgentMcpServer({
         agents: z
           .array(LiteAgent)
           .optional()
-          .describe(
-            '当前 Flow 内的 agent，其 outputs 定义了连接边。',
-          ),
+          .describe('当前 Flow 内的 agent，其 outputs 定义了连接边。'),
       }) satisfies z.ZodType<Flow>
       return {
         content: [

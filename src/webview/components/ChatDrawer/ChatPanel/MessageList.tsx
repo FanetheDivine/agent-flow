@@ -15,7 +15,12 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useMemoizedFn } from 'ahooks'
 import { match } from 'ts-pattern'
 import type { ChatMessage } from '@/common'
-import { getAnsweredToolPermissions, getPendingToolPermissionsFor, getRunPhase, formatAgentOverwriteText } from '@/common'
+import {
+  getAnsweredToolPermissions,
+  getPendingToolPermissionsFor,
+  getRunPhase,
+  formatAgentOverwriteText,
+} from '@/common'
 import type { AgentRun, AgentPhase } from '@/webview/store/flow'
 import { useFlowStore } from '@/webview/store/flow'
 import { postMessageToExtension } from '@/webview/utils'

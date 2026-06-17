@@ -609,9 +609,7 @@ export function chatMessageToBubble(
         content: (
           <div className='flex max-w-full'>
             <div className='flex max-w-full flex-col gap-1'>
-              {overwriteText && (
-                <div className='text-xs text-[#a6adc8]'>{overwriteText}</div>
-              )}
+              {overwriteText && <div className='text-xs text-[#a6adc8]'>{overwriteText}</div>}
               {node}
               {hasInjected && (
                 <InjectedShareValuesSection values={injectedShareValues} title={injectedTitle} />

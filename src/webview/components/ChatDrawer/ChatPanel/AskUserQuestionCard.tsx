@@ -52,7 +52,7 @@ function isQuestionAnswered(
   others: Record<number, OtherState>,
 ): boolean {
   if (q.options.length === 0) {
-    return !!(others[idx]?.text?.trim())
+    return !!others[idx]?.text?.trim()
   }
   const sel = sels[idx] ?? []
   if (q.multiSelect && sel.length === 0) return true
@@ -71,7 +71,7 @@ function isQuestionExplicitlyAnswered(
   sels: Selections,
   others: Record<number, OtherState>,
 ): boolean {
-  if (q.options.length === 0) return !!(others[idx]?.text?.trim())
+  if (q.options.length === 0) return !!others[idx]?.text?.trim()
   const sel = sels[idx] ?? []
   if (sel.length === 0) return false
   if (sel.includes(OTHER_LABEL)) {

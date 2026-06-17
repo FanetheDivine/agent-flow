@@ -573,7 +573,15 @@ export class FlowRunner {
         result: result.resultMessage,
         overwrite: result.overwrite,
       })
-      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd, result.overwrite)
+      this.runAgent(
+        newRunId,
+        nextInitMessage,
+        nextAgent,
+        nextValues,
+        false,
+        effectiveCwd,
+        result.overwrite,
+      )
     } else {
       // Flow 结束
       this.killExecutor(runId)

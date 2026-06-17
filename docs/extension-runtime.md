@@ -50,7 +50,7 @@ extension 运行时层级：
 `node_type='code'` 时，FlowRunner.runAgent 分流到 CodeExecutor。`agent.code` 存储完整的 async function 表达式：
 
 ```ts
-async function run(input, values, runCommand, cwd) { /* body */ }
+async function run(input, values, runCommand, cwd, askUserQuestion, vscode) { /* body */ }
 ```
 
 CodeExecutor 通过 `new Function('return (...)')()` 求值后调用。
@@ -63,6 +63,8 @@ CodeExecutor 通过 `new Function('return (...)')()` 求值后调用。
 - `values`：完整 shareValues，全量可读。
 - `runCommand`：`async (command: string, timeout?: number) => Promise<string>`，始终在 VSCode workspace root 执行；如需在 cwd 路径执行，用户代码须自行 `cd "${cwd}" && ...`（注意 shell 转义）；timeout 默认 600000 毫秒（10 分钟）。
 - `cwd`：`FlowRunState.cwd`，未设置时为 `undefined`。
+- `askUserQuestion`：`async (questions: AskItem[]) => Promise<string[][]>`，向用户异步提问；每个问题返回一个答案数组，用户拒绝时返回空数组；内部复用统一 tool permission 请求 / 回答事件，interrupt / kill 时 reject 异常，调用方需自行 catch。
+- `vscode`：VSCode API，可直接调用 extension 宿主侧 `vscode` 模块能力。
 
 返回值 `{ output_name?, content?, values?, cwd?: string | null, overwrite? }` 直接驱动下一跳：
 
@@ -77,8 +79,8 @@ CodeExecutor 严格只产出 `agentComplete` signal：不发 assistant 文本气
 
 中断与结束：
 
-- interrupt：CodeExecutor 标记 disposed 并 fire onError，进入 `error` 终态。**不发 agentInterrupted** —— interrupted 是非终态，code 节点 `sendUserMessage` 是 noop 无法续轮会卡死，故 `FlowRunner.handleInterrupt` 对 code 节点 early return。
-- kill：disposed + reducer `killed=true`，进入 `stopped`。
+- interrupt：CodeExecutor 标记 disposed、调用 `rejectAllPendingPermissions` 清理所有挂起的 `askUserQuestion` Promise（reject 异常），并 fire onError，进入 `error` 终态。**不发 agentInterrupted** —— interrupted 是非终态，code 节点 `sendUserMessage` 是 noop 无法续轮会卡死，故 `FlowRunner.handleInterrupt` 对 code 节点 early return。
+- kill：disposed + `rejectAllPendingPermissions` + reducer `killed=true`，进入 `stopped`。
 - disposed 后的 onComplete 被吞掉，阻止跳下一节点与完成卡片。
 
 ## work_mode
@@ -98,7 +100,7 @@ per-Agent MCP server 由 [`../src/common/extension.ts`](../src/common/extension.
 - `CompleteTask`：chat 不挂载。
 - `TerminateTask`：task / silent_task 挂载。
 - `validateFlow`
-- `getFlowJSONSchema`
+- `getFlowJSONSchema`：暴露 Flow JSON Schema，`agents` 仅含 `LiteAgent`（`node_type='agent'` 节点），Code 节点 schema 不对 AI 暴露。
 - `ReadShareValue`：仅 agent、有大值 key 时挂载；从 `init()` 时点快照只读。
 
 `plan_mode=true` 时以 `permissionMode: 'plan'` 传 SDK，SDK 内置 ExitPlanMode。subAgent 不挂 `AgentControllerMcp`，禁止 subAgent 通过 CompleteTask / TerminateTask 干扰宿主 Flow 控制链路。

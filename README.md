@@ -58,7 +58,7 @@ pnpm build-extension   # 生成 .vsix 文件
 - **Flow 分组折叠**：工作流列表支持折叠全局 / 项目分组，复杂项目中可减少列表干扰。
 - **API 端点分层配置**：Flow 和 Agent 层级都可以单独设置 `base_url` / `api_key`，Agent 的配置覆盖 Flow 默认值，两端都不填时使用系统环境变量。同一工作流内不同 Agent 可以走不同的模型服务。
 - **完成前确认（按分支独立配置）**：在某个输出分支上开启后，Agent 选择该分支完成时不会立即推进，而是先弹出确认卡片。你可以同意继续，也可以填写拒绝原因让 Agent 重新修正。不同分支可以单独配置。
-- **Code 节点**：不走 AI，直接执行你写的 JavaScript 代码——可用于数据转换、调用外部命令、格式化输出等纯逻辑处理，结果驱动后续节点。函数接收 `input`（上游输出，支持纯文本或富文本内容）、`values`（共享数据）、`runCommand`（执行 shell 命令）、`cwd`（当前工作目录，未设置时为 undefined）四个参数；返回 `cwd` 可更新后续节点的工作目录，后续 Code 节点的 `runCommand` 自动在该目录下执行。编辑器支持代码补全（`input` / `values.*` / `runCommand` / `cwd`）和 `Shift+Alt+F` 格式化。
+- **Code 节点**：不走 AI，直接执行你写的 JavaScript 代码——可用于数据转换、调用外部命令、格式化输出等纯逻辑处理，结果驱动后续节点。函数接收 `input`（上游输出，支持纯文本或富文本内容）、`values`（共享数据）、`runCommand`（执行 shell 命令）、`cwd`（当前工作目录，未设置时为 undefined）、`askUserQuestion`（向用户提问，返回 `string[][]`）、`vscode`（VSCode API）六个参数；返回 `cwd` 可更新后续节点的工作目录，后续 Code 节点的 `runCommand` 自动在该目录下执行。编辑器支持代码补全（`input` / `values.*` / `runCommand` / `cwd` / `askUserQuestion` / `vscode`）和 `Shift+Alt+F` 格式化。
 - **共享数据按权限读写**：工作流级别可声明一组共享数据（key-value），每个 Agent 分别配置哪些 key 可读、哪些 key 可写。可读的 key 及当前值会注入到 Agent 的上下文中；写入仅在 Agent 完成时一次性提交。
 - **工具权限控制**：每个 Agent 可配置哪些工具自动放行、哪些必须用户确认。Bash 命令支持精细到前缀级别的控制——可以只允许特定命令而不是放开整个 Shell。
 - **禁用工具**：为每个 Agent 配置 `deny_tools` 禁止工具清单，被禁止的工具不会出现在 Agent 的工具列表中，适合限制 Agent 能力边界。

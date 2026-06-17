@@ -5,17 +5,17 @@
     "agents": [
       {
         "id": "1",
-        "agent_name": "在worktree处理需求",
-        "agent_desc": "创建随机分支和worktree，设置工作目录",
+        "agent_name": "输入需求",
+        "agent_desc": "如果需要在worktree执行任务，创建随机分支并设置工作目录",
         "outputs": [
           {
-            "output_name": "worktree已创建",
+            "output_name": "准备完成",
             "next_agent": "2"
           }
         ],
         "is_entry": true,
         "node_type": "code",
-        "code": "async function run(input, values, runCommand, cwd) {\n  const suffix = Math.random().toString(36).slice(2, 10)\n  const branchName = `agent-flow-dev/${suffix}`\n  const worktreePath = `.claude/worktrees/${suffix}`\n  await runCommand(`git worktree add --no-track -b ${branchName} ${worktreePath}`)\n  const absPath = (await runCommand(`git -C ${worktreePath} rev-parse --show-toplevel`)).trim()\n  return {\n    output_name: 'worktree已创建',\n    content: input,\n    cwd: absPath\n  }\n}"
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  const [[env]] = await askUserQuestion([\n    {\n      question: '工作流执行环境',\n      options: [\n        { label: '主工作区', desc: '在当前目录执行' },\n        { label: 'worktree', desc: '创建worktree执行' },\n      ],\n    },\n  ])\n  let absPath = undefined\n  if (env === 'worktree') {\n    let [[base]] = await askUserQuestion([\n      {\n        question: 'worktree基准分支，将创建worktree和新分支',\n        options: [{ label: '当前分支' }, { label: 'main' }, { label: 'develop' }],\n        showOther: true,\n      },\n    ])\n    base = base === '当前分支' ? '' : ' ' + base\n    const suffix = Math.random().toString(36).slice(2, 10)\n    const branchName = `agent-flow-dev/${suffix}`\n    const worktreePath = `.claude/worktrees/${suffix}`\n    await runCommand(`git worktree add --no-track -b ${branchName} ${worktreePath}` + base)\n    absPath = (await runCommand(`git -C ${worktreePath} rev-parse --show-toplevel`)).trim()\n  }\n  return {\n    output_name: '准备完成',\n    content: input,\n    cwd: absPath,\n    overwrite: {\n      work_mode: 'task',\n      outputs: [{ output_name: '分析完成', require_confirm: true }],\n    },\n  }\n}"
       },
       {
         "node_type": "agent",
@@ -31,7 +31,6 @@
         ],
         "work_mode": "silent_task",
         "no_output": true,
-        "is_entry": true,
         "allowed_read_values_keys": [
           "requirement"
         ],
@@ -118,7 +117,7 @@
             "next_agent": "2"
           }
         ],
-        "code": "async function run(input, values, runCommand, cwd) {\n  return { output_name: '验证需求', content: '验证用户需求是否实现' }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  return { output_name: '验证需求', content: '验证用户需求是否实现' }\n}",
         "id": "5"
       },
       {
@@ -136,7 +135,7 @@
             "output_name": "需求已完成"
           }
         ],
-        "code": "async function run(input, values, runCommand, cwd) {\n  if (!cwd) {\n    const branchName = await runCommand(`git branch --show-current`)\n    return {\n      output_name: '需求已完成',\n      content: `分支: ${branchName}  \\n代码修改已完成`\n    }\n  }\n  return {  output_name: '处理分支和worktree' }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  if (!cwd) {\n    const branchName = await runCommand(`git branch --show-current`)\n    return {\n      output_name: '需求已完成',\n      content: `分支: ${branchName}  \\n代码修改已完成`\n    }\n  }\n  return {  output_name: '处理分支和worktree' }\n}",
         "id": "6"
       },
       {
@@ -174,7 +173,7 @@
         "agent_name": "清理worktree",
         "agent_desc": "输出新分支名称，清理worktree",
         "no_input": true,
-        "code": "async function run(input, values, runCommand, cwd) {\n  // 新分支名称\n  const branchName = await runCommand(`git -C \"${cwd}\" branch --show-current`)\n  // 清理worktree\n  await runCommand(`git worktree remove \"${cwd}\"`)\n  return { content: `分支: ${branchName}  \\n代码修改已完成` }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  // 新分支名称\n  const branchName = await runCommand(`git -C \"${cwd}\" branch --show-current`)\n  // 清理worktree\n  await runCommand(`git worktree remove \"${cwd}\"`)\n  return { content: `分支: ${branchName}  \\n代码修改已完成` }\n}",
         "outputs": [],
         "id": "8"
       }
@@ -196,17 +195,17 @@
     "agents": [
       {
         "id": "1",
-        "agent_name": "在worktree处理需求",
-        "agent_desc": "创建随机分支和worktree，设置工作目录",
+        "agent_name": "输入需求",
+        "agent_desc": "如果需要在worktree执行任务，创建随机分支并设置工作目录",
         "outputs": [
           {
-            "output_name": "worktree已创建",
+            "output_name": "准备完成",
             "next_agent": "2"
           }
         ],
         "is_entry": true,
         "node_type": "code",
-        "code": "async function run(input, values, runCommand, cwd) {\n  const suffix = Math.random().toString(36).slice(2, 10)\n  const branchName = `agent-flow-dev/${suffix}`\n  const worktreePath = `.claude/worktrees/${suffix}`\n  await runCommand(`git worktree add --no-track -b ${branchName} ${worktreePath}`)\n  const absPath = (await runCommand(`git -C ${worktreePath} rev-parse --show-toplevel`)).trim()\n  return {\n    output_name: 'worktree已创建',\n    content: input,\n    cwd: absPath\n  }\n}"
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  const [[env]] = await askUserQuestion([\n    {\n      question: '工作流执行环境',\n      options: [\n        { label: '主工作区', desc: '在当前目录执行' },\n        { label: 'worktree', desc: '创建worktree执行' },\n      ],\n    },\n  ])\n  let absPath = undefined\n  if (env === 'worktree') {\n    let [[base]] = await askUserQuestion([\n      {\n        question: 'worktree基准分支，将创建worktree和新分支',\n        options: [{ label: '当前分支' }, { label: 'main' }, { label: 'develop' }],\n        showOther: true,\n      },\n    ])\n    base = base === '当前分支' ? '' : ' ' + base\n    const suffix = Math.random().toString(36).slice(2, 10)\n    const branchName = `agent-flow-dev/${suffix}`\n    const worktreePath = `.claude/worktrees/${suffix}`\n    await runCommand(`git worktree add --no-track -b ${branchName} ${worktreePath}` + base)\n    absPath = (await runCommand(`git -C ${worktreePath} rev-parse --show-toplevel`)).trim()\n  }\n  return {\n    output_name: '准备完成',\n    content: input,\n    cwd: absPath,\n    overwrite: {\n      work_mode: 'task',\n      outputs: [{ output_name: '分析完成', require_confirm: true }],\n    },\n  }\n}"
       },
       {
         "node_type": "agent",
@@ -220,9 +219,8 @@
           "Bash(git push)",
           "Edit"
         ],
-        "work_mode": "task",
+        "work_mode": "silent_task",
         "no_output": true,
-        "is_entry": true,
         "allowed_read_values_keys": [
           "requirement",
           "remark"
@@ -236,8 +234,7 @@
           {
             "output_name": "分析完成",
             "output_desc": "分析用户需求，用子任务列表的方式描述实现需求的方式",
-            "next_agent": "3",
-            "require_confirm": true
+            "next_agent": "3"
           },
           {
             "output_name": "需求已实现",
@@ -264,7 +261,7 @@
         ],
         "no_input": true,
         "node_type": "code",
-        "code": "async function run(input, values, runCommand, cwd) {\n  try {\n    const parsed = JSON.parse(values.tasks)\n    if (!Array.isArray(parsed) || parsed.some(v => typeof v !== 'string')) {\n      throw new Error('')\n    }\n    return {\n      output_name:'初始化完成',\n      values: { tasks: JSON.stringify(parsed, null, 2), next: '0'}\n    }\n  } catch {\n    return {\n      output_name: '格式错误'\n    }\n  }\n}"
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  try {\n    const parsed = JSON.parse(values.tasks)\n    if (!Array.isArray(parsed) || parsed.some(v => typeof v !== 'string')) {\n      throw new Error('')\n    }\n    return {\n      output_name:'初始化完成',\n      values: { tasks: JSON.stringify(parsed, null, 2), next: '0'}\n    }\n  } catch {\n    return {\n      output_name: '格式错误'\n    }\n  }\n}"
       },
       {
         "id": "4",
@@ -312,7 +309,7 @@
         ],
         "no_input": true,
         "node_type": "code",
-        "code": "async function run(input, values, runCommand, cwd) {\n  const next = parseInt(values.next)\n  const tasks = JSON.parse(values.tasks)\n  if(next === tasks.length || tasks.length === 0){\n    return {\n      output_name: '全部子任务执行完毕',\n      content: '验证用户需求是否实现'\n    }\n  }\n  const current_task = tasks[next>=0 && next<tasks.length ? next: 0]\n  return {\n    content: '执行任务',\n    output_name: '执行子任务',\n    values: { current_task, next: `${next + 1}` }\n  }\n}"
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  const next = parseInt(values.next)\n  const tasks = JSON.parse(values.tasks)\n  if(next === tasks.length || tasks.length === 0){\n    return {\n      output_name: '全部子任务执行完毕',\n      content: '验证用户需求是否实现'\n    }\n  }\n  const current_task = tasks[next>=0 && next<tasks.length ? next: 0]\n  return {\n    content: '依据<task_description>执行任务',\n    output_name: '执行子任务',\n    values: { current_task, next: `${next + 1}` }\n  }\n}"
       },
       {
         "id": "6",
@@ -384,7 +381,7 @@
             "output_name": "需求已完成"
           }
         ],
-        "code": "async function run(input, values, runCommand, cwd) {\n  if (!cwd) {\n    const branchName = await runCommand(`git branch --show-current`)\n    return {\n      output_name: '需求已完成',\n      content: `分支: ${branchName}  \\n代码修改已完成`\n   }\n  }\n  return {  output_name: '处理分支和worktree' }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  if (!cwd) {\n    const branchName = await runCommand(`git branch --show-current`)\n    return {\n      output_name: '需求已完成',\n      content: `分支: ${branchName}  \\n代码修改已完成`\n   }\n  }\n  return {  output_name: '处理分支和worktree' }\n}",
         "id": "8"
       },
       {
@@ -422,7 +419,7 @@
         "agent_name": "清理worktree",
         "agent_desc": "输出新分支名称，清理worktree",
         "no_input": true,
-        "code": "async function run(input, values, runCommand, cwd) {\n  // 新分支名称\n  const branchName = await runCommand(`git -C \"${cwd}\" branch --show-current`)\n  // 清理worktree\n  await runCommand(`git worktree remove \"${cwd}\"`)\n  return { content: `分支: ${branchName}  \\n代码修改已完成` }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  // 新分支名称\n  const branchName = await runCommand(`git -C \"${cwd}\" branch --show-current`)\n  // 清理worktree\n  await runCommand(`git worktree remove \"${cwd}\"`)\n  return { content: `分支: ${branchName}  \\n代码修改已完成` }\n}",
         "outputs": [],
         "id": "10"
       }
@@ -515,7 +512,7 @@
         "id": "7",
         "agent_name": "发版",
         "node_type": "code",
-        "code": "async function run(input, values, runCommand, cwd) {\n  return { content: await runCommand('npm run release') }\n}",
+        "code": "async function run(input, values, runCommand, cwd, askUserQuestion, vscode) {\n  return { content: await runCommand('npm run release') }\n}",
         "no_input": true
       }
     ]

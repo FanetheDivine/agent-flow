@@ -5,6 +5,7 @@
 - [`../src/common/event.ts`](../src/common/event.ts) — `toolPermissionRequest` / `toolPermissionResult` 事件。
 - [`../src/common/flowRunState.ts`](../src/common/flowRunState.ts) — pending / answered 队列与 phase 推断。
 - [`../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts`](../src/extension/FlowRunnerManager/FlowRunner/ClaudeExecutor.ts) — `preToolUseHook`（硬拒绝）与 `canUseTool`（Agent Flow 确认 / silent 自动应答）。
+- [`../src/extension/FlowRunnerManager/FlowRunner/CodeExecutor.ts`](../src/extension/FlowRunnerManager/FlowRunner/CodeExecutor.ts) — code 节点 `askUserQuestion` 的 permission 请求 / 回答。
 - [`../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) — tool_use 气泡与权限卡片路由。
 - [`../src/webview/components/ChatDrawer/ChatPanel/ToolUseDetails.tsx`](../src/webview/components/ChatDrawer/ChatPanel/ToolUseDetails.tsx) — toolName 展示转换。
 
@@ -18,7 +19,7 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 - 一对 `toolPermissionRequest` / `toolPermissionResult` 事件。
 - 一个 `answerToolPermission(toolUseId, allow, opts?)` 方法。
 
-挂起、回答、回显统一走 reducer 通道；工具是否挂起由下方决策链决定。
+挂起、回答、回显统一走 reducer 通道；CodeExecutor 内的 `askUserQuestion` 也复用同一组 `toolPermissionRequest` / `toolPermissionResult` 事件与 `answerToolPermission` 回答入口；工具是否挂起由下方决策链决定。
 
 ## 工具鉴权决策链
 
@@ -27,7 +28,7 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 **preToolUseHook**：
 
 1. subAgent 调用 AgentControllerMcp：直接拒绝。
-2. `deny_tools`：`matchToolRule` 黑名单语义，任一子命令命中即拒绝。
+2. `deny_tools`：`matchToolRule` 黑名单语义，任一子命令命中即拒绝；拒绝理由为 `禁止使用 <denyDesc>，依据<task_description>执行任务`（有 `agent_prompt` 且非 chat 模式）或 `禁止使用 <denyDesc>，执行用户指定的任务`（其他情况）。
 3. 其余 `{ continue: true }`，交给 Claude Code 原生鉴权。
 
 **canUseTool**（Claude Code 原生鉴权未决策时）：
@@ -55,7 +56,7 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 - pending 阶段：消息队列返回 null，由底部固定卡片渲染。
 - CompleteTask pending：确认卡片直接挂在消息队列内。
 - 失败且无 answered：展示默认 tool_use 气泡，不展示权限卡片；此时气泡可挂 fork(Edit/CompleteTask)。
-- 成功或用户已回答：展示 ToolPermissionCard 的已回答形态；已回答但 result 未到达时 loading。
+- 成功或用户已回答：展示 ToolPermissionCard 的已回答形态；已回答但 result 未到达时 loading。`answered.message` 存拒绝理由，传给 `ToolPermissionCard` 时映射为 `reason` 字段。
 - AskUserQuestion：必须存在 answered 才展示已回答卡片；无 answered 时返回 null。
 
 ## 硬约束
