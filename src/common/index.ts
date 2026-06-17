@@ -755,7 +755,9 @@ export function applyAgentOverwrite(agent: Agent, overwrite?: AgentOverwrite): A
     const overwriteMap = new Map(overwrite.outputs.map((o) => [o.output_name, o.require_confirm]))
     newAgent.outputs = agent.outputs.map((output) => {
       const newRequireConfirm = overwriteMap.get(output.output_name)
-      return newRequireConfirm !== undefined ? { ...output, require_confirm: newRequireConfirm } : { ...output }
+      return newRequireConfirm !== undefined
+        ? { ...output, require_confirm: newRequireConfirm }
+        : { ...output }
     })
   } else if (agent.outputs) {
     newAgent.outputs = agent.outputs.map((o) => ({ ...o }))
@@ -803,7 +805,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     '/**',
     ' * @typedef {Object} AskOption',
     ' * @property {string} label',
-    ' * @property {string} description',
+    ' * @property {string} desc',
     ' *',
     ' * @typedef {Object} AskItem',
     ' * @property {string} question',
@@ -813,7 +815,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' *',
     ' * @callback AskUserQuestion',
     ' * @param {AskItem[]} items',
-    ' * @returns {Promise<Array<string[]>>} 每个 question 对应的答案数组（单选/input 返回 length=1，多选返回所有已选项；拒绝时返回空数组）',
+    ' * @returns {Promise<Array<string[]>>} 每个 question 对应的答案数组（单选/input 返回 length=1，多选返回所有已选项）',
     ' *',
     ` * @param {string | import('@anthropic-ai/claude-agent-sdk').SDKUserMessage['message']['content']} input - 上游 CompleteTask.content 注入的原始富文本内容`,
     ` * @param {Record<${keysDesc}, string | undefined>} values - 可用 key`,
@@ -831,7 +833,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' * @property {string | undefined} [content]',
     ` * @property {Record<${keysDesc}, string | undefined>} [values]`,
     ' * @property {string | null | undefined} [cwd]',
-    ' * @property {{ work_mode?: \'task\' | \'chat\' | \'silent_task\', outputs?: { output_name: string, require_confirm?: boolean }[] }} [overwrite] - 临时改写下一个 agent 节点配置，仅本次运行生效',
+    " * @property {{ work_mode?: 'task' | 'chat' | 'silent_task', outputs?: { output_name: string, require_confirm?: boolean }[] }} [overwrite] - 临时改写下一个 agent 节点配置，仅本次运行生效",
   )
 
   lines.push(' * @returns {Promise<CodeResult>}', ' */')

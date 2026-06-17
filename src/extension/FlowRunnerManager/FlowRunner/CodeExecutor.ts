@@ -54,7 +54,12 @@ function normalizeCodeResult(raw: unknown): {
   if (typeof raw === 'string') return { content: raw }
   if (typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
-    const hasShape = 'output_name' in obj || 'content' in obj || 'values' in obj || 'cwd' in obj || 'overwrite' in obj
+    const hasShape =
+      'output_name' in obj ||
+      'content' in obj ||
+      'values' in obj ||
+      'cwd' in obj ||
+      'overwrite' in obj
     if (hasShape) {
       const rawContent = obj.content
       const content: UserContent =
@@ -145,7 +150,10 @@ export class CodeExecutor {
   private readonly _sessionId: string = globalThis.crypto.randomUUID()
   private pendingToolPermissions = new Map<
     string,
-    { resolve: (result: { allow: boolean; updatedInput?: unknown }) => void; reject: (err: Error) => void }
+    {
+      resolve: (result: { allow: boolean; updatedInput?: unknown }) => void
+      reject: (err: Error) => void
+    }
   >()
 
   /** SDK 兼容字段 —— Code 节点无真实 session,这里只是给上层日志/路由占位 */
@@ -244,7 +252,12 @@ export class CodeExecutor {
      * 内部走 toolPermissionRequest 信号 → webview AskUserQuestionCard → answerToolPermission 回调。
      */
     const askUserQuestion = async (
-      items: { question: string; options: { label: string; desc: string }[]; multiSelect?: boolean; showOther?: boolean }[],
+      items: {
+        question: string
+        options: { label: string; desc: string }[]
+        multiSelect?: boolean
+        showOther?: boolean
+      }[],
     ): Promise<string[][]> => {
       if (this.disposed) return []
 
@@ -254,8 +267,8 @@ export class CodeExecutor {
           question: item.question,
           header: item.question.slice(0, 12),
           options: item.options.map((o) => ({ label: o.label, description: o.desc })),
-          ...(item.multiSelect !== undefined ? { multiSelect: item.multiSelect } : {}),
-          ...(item.showOther !== undefined ? { showOther: item.showOther } : {}),
+          multiSelect: item.multiSelect,
+          showOther: item.showOther,
         })),
       }
 
