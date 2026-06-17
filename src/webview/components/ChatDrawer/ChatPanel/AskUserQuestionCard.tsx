@@ -34,8 +34,12 @@ function buildOutput(
   questions.forEach((q, i) => {
     const sel = selections[i] ?? []
     const o = otherStates[i]
-    const effective = sel.map((s) => (s === OTHER_LABEL && o?.text ? o.text : s))
-    answers[q.question] = effective.join(ANSWER_SEP)
+    if (q.options.length === 0) {
+      answers[q.question] = otherStates[i]?.text ?? ''
+    } else {
+      const effective = sel.map((s) => (s === OTHER_LABEL && o?.text ? o.text : s))
+      answers[q.question] = effective.join(ANSWER_SEP)
+    }
   })
   return { questions, answers }
 }
@@ -47,6 +51,9 @@ function isQuestionAnswered(
   sels: Selections,
   others: Record<number, OtherState>,
 ): boolean {
+  if (q.options.length === 0) {
+    return !!(others[idx]?.text?.trim())
+  }
   const sel = sels[idx] ?? []
   if (q.multiSelect && sel.length === 0) return true
   if (sel.length === 0) return false
@@ -59,10 +66,12 @@ function isQuestionAnswered(
 
 /** 自动导航判定：必须显式交互过——多选空数组也视为未答，避免自动跳过用户没看过的题 */
 function isQuestionExplicitlyAnswered(
+  q: AskUserQuestionItem,
   idx: number,
   sels: Selections,
   others: Record<number, OtherState>,
 ): boolean {
+  if (q.options.length === 0) return !!(others[idx]?.text?.trim())
   const sel = sels[idx] ?? []
   if (sel.length === 0) return false
   if (sel.includes(OTHER_LABEL)) {
@@ -117,7 +126,7 @@ export const AskUserQuestionCard: FC<Props> = ({
       const curSels = sels ?? selections
       const curOthers = others ?? otherStates
       const firstUnanswered = questions.findIndex(
-        (_q, i) => !isQuestionExplicitlyAnswered(i, curSels, curOthers),
+        (q, i) => !isQuestionExplicitlyAnswered(q, i, curSels, curOthers),
       )
       if (firstUnanswered === -1) {
         setSubmitted(true)
@@ -217,7 +226,7 @@ export const AskUserQuestionCard: FC<Props> = ({
         const multi = !!q.multiSelect
         const historical = !isActive ? getHistoricalDisplay(q) : null
         const value = isActive ? (selections[qIdx] ?? []) : historical!.values
-        const otherSelected = value.includes(OTHER_LABEL)
+        const otherSelected = q.options.length > 0 && value.includes(OTHER_LABEL)
         const otherText = isActive
           ? (otherStates[qIdx]?.text ?? '')
           : (historical?.customText ?? '')
@@ -239,7 +248,17 @@ export const AskUserQuestionCard: FC<Props> = ({
                 </Tag>
               )}
             </div>
-            {multi ? (
+            {q.options.length === 0 ? (
+              <Input.TextArea
+                autoSize={{ minRows: 1, maxRows: 3 }}
+                value={isActive ? (otherStates[qIdx]?.text ?? '') : (historical?.customText ?? '')}
+                disabled={!isActive || submitted}
+                onChange={(e) => handleOtherTextChange(qIdx, e.target.value)}
+                onKeyDown={(e) => handleTextAreaKeyDown(qIdx, e)}
+                placeholder='输入回答...'
+                className='text-sm'
+              />
+            ) : multi ? (
               <Checkbox.Group
                 value={value}
                 disabled={!isActive || submitted}
@@ -251,9 +270,11 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Checkbox value={opt.label} />
                   </OptionRow>
                 ))}
-                <OptionRow option={OTHER_OPTION}>
-                  <Checkbox value={OTHER_LABEL} />
-                </OptionRow>
+                {(q.showOther ?? false) && (
+                  <OptionRow option={OTHER_OPTION}>
+                    <Checkbox value={OTHER_LABEL} />
+                  </OptionRow>
+                )}
               </Checkbox.Group>
             ) : (
               <Radio.Group
@@ -267,12 +288,14 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Radio value={opt.label} />
                   </OptionRow>
                 ))}
-                <OptionRow option={OTHER_OPTION}>
-                  <Radio value={OTHER_LABEL} />
-                </OptionRow>
+                {(q.showOther ?? false) && (
+                  <OptionRow option={OTHER_OPTION}>
+                    <Radio value={OTHER_LABEL} />
+                  </OptionRow>
+                )}
               </Radio.Group>
             )}
-            {otherSelected && (
+            {q.options.length > 0 && otherSelected && (
               <div className='flex flex-col gap-1 pl-6'>
                 <Input.TextArea
                   autoSize={{ minRows: 1, maxRows: 3 }}

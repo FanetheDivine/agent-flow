@@ -148,7 +148,7 @@ const AgentFlowInner: FC<{ flowId: string; hidden?: boolean }> = memo(({ flowId,
               agent_name: 'code-node',
               node_type: 'code',
               code: [
-                'async function run(input, values, runCommand, cwd) {',
+                'async function run(input, values, runCommand, cwd, askUserQuestion) {',
                 "  return { output_name: '输出', content: input }",
                 '}',
               ].join('\n'),

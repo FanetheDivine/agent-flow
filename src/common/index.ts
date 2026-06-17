@@ -131,7 +131,7 @@ export const CodeSchema = AgentSchema.pick({
     .describe(
       [
         '代码节点的完整 async function 表达式。',
-        'async function run(input, values, runCommand, cwd) { /* body */ }',
+        'async function run(input, values, runCommand, cwd, askUserQuestion) { /* body */ }',
       ].join('\n'),
     ),
 })
@@ -192,9 +192,11 @@ export type AskUserQuestionOption = {
 }
 export type AskUserQuestionItem = {
   question: string
-  header: string
+  header?: string
   multiSelect?: boolean
   options: AskUserQuestionOption[]
+  /** 是否展示"Other"选项让用户输入自定义文本；省略时默认 false */
+  showOther?: boolean
 }
 export type AskUserQuestionInput = {
   questions: AskUserQuestionItem[]
@@ -753,7 +755,9 @@ export function applyAgentOverwrite(agent: Agent, overwrite?: AgentOverwrite): A
     const overwriteMap = new Map(overwrite.outputs.map((o) => [o.output_name, o.require_confirm]))
     newAgent.outputs = agent.outputs.map((output) => {
       const newRequireConfirm = overwriteMap.get(output.output_name)
-      return newRequireConfirm !== undefined ? { ...output, require_confirm: newRequireConfirm } : { ...output }
+      return newRequireConfirm !== undefined
+        ? { ...output, require_confirm: newRequireConfirm }
+        : { ...output }
     })
   } else if (agent.outputs) {
     newAgent.outputs = agent.outputs.map((o) => ({ ...o }))
@@ -794,14 +798,30 @@ export function formatAgentOverwriteText(overwrite?: AgentOverwrite): string | u
  * extension 端用于临时 .js 文件头注释，webview 端用于只读展示——两端必须一致。
  */
 export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): string {
-  const keysDesc = shareValueKeys.length > 0 ? shareValueKeys.join(', ') : '无可用 key'
+  const keysDesc =
+    shareValueKeys.length > 0 ? shareValueKeys.map((k) => `'${k}'`).join('|') : 'string'
 
   const lines: string[] = [
     '/**',
+    ' * @typedef {Object} AskOption',
+    ' * @property {string} label',
+    ' * @property {string} desc',
+    ' *',
+    ' * @typedef {Object} AskItem',
+    ' * @property {string} question',
+    ' * @property {AskOption[] | undefined} options 不传/空数组会让用户输入值',
+    ' * @property {boolean} showOther - 是否展示"Other"选项让用户输入自定义文本；省略时默认 false',
+    ' * @property {boolean} [multiSelect] - 是否多选；省略时默认 false',
+    ' *',
+    ' * @callback AskUserQuestion',
+    ' * @param {AskItem[]} items',
+    ' * @returns {Promise<Array<string[]>>} 每个 question 对应的答案数组（单选/input 返回 length=1，多选返回所有已选项）',
+    ' *',
     ` * @param {string | import('@anthropic-ai/claude-agent-sdk').SDKUserMessage['message']['content']} input - 上游 CompleteTask.content 注入的原始富文本内容`,
-    ` * @param {Record<string, string>} values - 可用 key: ${keysDesc}`,
-    ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在 VSCode workspace root 执行，timeout 默认 600000 毫秒',
-    ' * @param {string | undefined} cwd - 当前 Flow 工作目录，未设置为 undefined',
+    ` * @param {Record<${keysDesc}, string | undefined>} values - 可用 key`,
+    ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在主工作区执行',
+    ' * @param {string | undefined} cwd - 当前 Flow 工作目录 undefined表示主工作区',
+    ' * @param {AskUserQuestion} askUserQuestion - 向用户提问',
   ]
 
   lines.push(' * @typedef {Object} CodeResult')
@@ -810,13 +830,13 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     lines.push(` * @property {${outputUnion}} [output_name]`)
   }
   lines.push(
-    ' * @property {string} [content]',
-    ' * @property {Record<string, string>} [values]',
-    ' * @property {string | null} [cwd]',
-    ' * @property {{ work_mode?: \'task\' | \'chat\' | \'silent_task\', outputs?: { output_name: string, require_confirm?: boolean }[] }} [overwrite] - 临时改写下一个 agent 节点配置，仅本次运行生效',
+    ' * @property {string | undefined} [content]',
+    ` * @property {Record<${keysDesc}, string | undefined>} [values]`,
+    ' * @property {string | null | undefined} [cwd]',
+    " * @property {{ work_mode?: 'task' | 'chat' | 'silent_task', outputs?: { output_name: string, require_confirm?: boolean }[] }} [overwrite] - 临时改写下一个 agent 节点配置，仅本次运行生效",
   )
 
-  lines.push(' * @returns {Promise<CodeResult | string | void>}', ' */')
+  lines.push(' * @returns {Promise<CodeResult>}', ' */')
 
   return lines.join('\n')
 }

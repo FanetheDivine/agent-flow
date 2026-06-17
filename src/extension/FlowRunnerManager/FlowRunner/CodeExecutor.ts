@@ -1,5 +1,14 @@
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import { AgentOverwrite, AgentOverwriteSchema, AIMessageType, Code, ShareValueKey, UserMessageType } from '@/common'
+import {
+  AgentOverwrite,
+  AgentOverwriteSchema,
+  AIMessageType,
+  AskUserQuestionInput,
+  AskUserQuestionOutput,
+  Code,
+  ShareValueKey,
+  UserMessageType,
+} from '@/common'
 import { logError } from '../../logger'
 import { ExecutorEvents, ExecutorMode, ExecutorResult } from './ClaudeExecutor'
 
@@ -13,6 +22,9 @@ type UserContent = SDKUserMessage['message']['content']
  * runCommand: 始终在 VSCode workspace root 下执行 shell 命令的函数，由上层 FlowRunner 注入,透传给代码函数作为第三个入参;
  * 如需在当前 Flow cwd 执行，用户代码应自行 cd "${cwd}" && ... （注意 shell 转义）。
  * cwd: 当前 Flow 工作路径字符串（FlowRunState.cwd；**未设置时为 undefined，不回退 workspace root**），透传给代码函数作为第四个入参。
+ * askUserQuestion: 异步向用户提问的函数，透传给代码函数作为第五个入参；入参为
+ *   {question, options: {label, desc}[], showOther?}[]，返回 string[]（每个 question 对应的答案，
+ *   用户拒绝时返回空数组）。内部走 toolPermissionRequest 信号 + answerToolPermission 回调。
  */
 export type CodeExecutorOptions = {
   initMessage: UserMessageType
@@ -42,7 +54,12 @@ function normalizeCodeResult(raw: unknown): {
   if (typeof raw === 'string') return { content: raw }
   if (typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
-    const hasShape = 'output_name' in obj || 'content' in obj || 'values' in obj || 'cwd' in obj || 'overwrite' in obj
+    const hasShape =
+      'output_name' in obj ||
+      'content' in obj ||
+      'values' in obj ||
+      'cwd' in obj ||
+      'overwrite' in obj
     if (hasShape) {
       const rawContent = obj.content
       const content: UserContent =
@@ -115,8 +132,8 @@ function validateCodeOutput(
  *
  * 第一版限制:
  * - 不支持作为 fork 起点(无 SDK session 可 fork —— spawnForFork 仅用 ClaudeExecutor)
- * - silent_task / AskUserQuestion / require_confirm 不参与
- * - 一次性执行,完成后 onComplete;sendUserMessage / answerToolPermission 是 noop;
+ * - silent_task / require_confirm 不参与
+ * - 一次性执行,完成后 onComplete;sendUserMessage 是 noop;
  *   interrupt 标记 disposed 并 fire onError 切 error 终态(见 interrupt 注释)
  */
 export class CodeExecutor {
@@ -131,6 +148,13 @@ export class CodeExecutor {
   private completed = false
   private disposed = false
   private readonly _sessionId: string = globalThis.crypto.randomUUID()
+  private pendingToolPermissions = new Map<
+    string,
+    {
+      resolve: (result: { allow: boolean; updatedInput?: unknown }) => void
+      reject: (err: Error) => void
+    }
+  >()
 
   /** SDK 兼容字段 —— Code 节点无真实 session,这里只是给上层日志/路由占位 */
   get sessionId(): string | null {
@@ -169,20 +193,39 @@ export class CodeExecutor {
   async interrupt(): Promise<void> {
     if (this.disposed || this.completed) return
     this.disposed = true
+    this.rejectAllPendingPermissions()
     this.events.onError(new Error('代码节点执行被中断'))
   }
 
   kill(): void {
     this.disposed = true
+    this.rejectAllPendingPermissions()
   }
 
-  /** noop —— code 节点不挂 MCP / 不走 SDK,无 tool permission */
+  /** 清理所有挂起的 askUserQuestion Promise —— reject 异常让调用方 catch 感知中断 */
+  private rejectAllPendingPermissions(): void {
+    const err = new Error('代码节点执行被中断')
+    for (const [, { reject }] of this.pendingToolPermissions) {
+      reject(err)
+    }
+    this.pendingToolPermissions.clear()
+  }
+
+  /**
+   * 回答 code 节点内 askUserQuestion 发起的 tool permission 请求:
+   * 从 pendingToolPermissions Map 中取出对应 resolver 并调用，
+   * allow=true 时传入 updatedInput（AskUserQuestionOutput），allow=false 时让 askUserQuestion 返回空数组。
+   */
   answerToolPermission(
-    _toolUseId: string,
-    _allow: boolean,
-    _opts?: { updatedInput?: unknown; message?: string },
+    toolUseId: string,
+    allow: boolean,
+    opts?: { updatedInput?: unknown; message?: string },
   ): void {
-    // noop
+    const entry = this.pendingToolPermissions.get(toolUseId)
+    if (entry) {
+      this.pendingToolPermissions.delete(toolUseId)
+      entry.resolve({ allow, updatedInput: opts?.updatedInput })
+    }
   }
 
   /** 执行 code 节点函数体 —— eager 构造时调一次,异常路径走 onError 终态 */
@@ -202,10 +245,63 @@ export class CodeExecutor {
     const valuesArg: Record<string, string> = { ...this.currentValues }
     const codeBody = this.agent.code ?? ''
 
+    /**
+     * askUserQuestion —— 代码函数第五入参。
+     * 入参: {question, options: {label, desc}[], multiSelect?, showOther?}[]
+     * 返回: string[][]（每个 question 对应的答案数组；用户拒绝时返回空数组；interrupt/kill 触发时 reject 异常（调用方 catch 可感知））
+     * 内部走 toolPermissionRequest 信号 → webview AskUserQuestionCard → answerToolPermission 回调。
+     */
+    const askUserQuestion = async (
+      items: {
+        question: string
+        options?: { label: string; desc: string }[]
+        multiSelect?: boolean
+        showOther?: boolean
+      }[],
+    ): Promise<string[][]> => {
+      if (this.disposed) return []
+
+      const toolUseId = globalThis.crypto.randomUUID()
+      const input: AskUserQuestionInput = {
+        questions: items.map((item) => ({
+          question: item.question,
+          header: '',
+          options: (item.options ?? []).map((o) => ({ label: o.label, description: o.desc })),
+          multiSelect: item.multiSelect,
+          showOther: item.showOther,
+        })),
+      }
+
+      this.events.onToolPermissionRequest({ toolUseId, toolName: 'AskUserQuestion', input })
+
+      return new Promise<string[][]>((resolve, reject) => {
+        this.pendingToolPermissions.set(toolUseId, {
+          resolve: (result) => {
+            if (!result.allow) {
+              resolve([])
+              return
+            }
+            const output = result.updatedInput as AskUserQuestionOutput | undefined
+            if (!output?.answers) {
+              resolve([])
+              return
+            }
+            const ANSWER_SEP = '\x1F'
+            const answers = input.questions.map((q) => {
+              const raw = output.answers[q.question] ?? ''
+              return raw ? raw.split(ANSWER_SEP) : []
+            })
+            resolve(answers)
+          },
+          reject,
+        })
+      })
+    }
+
     let raw: unknown
     try {
       const fn = new Function(`return (${codeBody})`)() as (...args: unknown[]) => Promise<unknown>
-      raw = await fn(inputContent, valuesArg, this.runCommand, this.currentCwd)
+      raw = await fn(inputContent, valuesArg, this.runCommand, this.currentCwd, askUserQuestion)
     } catch (err) {
       // 严格只产出 agentComplete 信号:错误路径不发 assistant 错误气泡、不发 result onMessage,
       // 错误详情走日志,直接 onError 让 reducer 切 error 终态。
