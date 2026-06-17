@@ -730,6 +730,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ` * @param {Record<string, string>} values - 可用 key: ${keysDesc}`,
     ' * @param {(command: string, timeout?: number) => Promise<string>} runCommand - 始终在 VSCode workspace root 执行，timeout 默认 600000 毫秒',
     ' * @param {string | undefined} cwd - 当前 Flow 工作目录，未设置为 undefined',
+    ' * @param {({question: string, options: {label: string, description: string}[], needOther?: boolean}[]) => Promise<string[]>} askUserQuestion - 弹出用户选择卡片；每个元素对应一个问题的答案，多选以 \\x1F 分隔；中断时抛出异常',
   ]
 
   lines.push(' * @typedef {Object} CodeResult')
