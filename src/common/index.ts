@@ -809,7 +809,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
     ' *',
     ' * @typedef {Object} AskItem',
     ' * @property {string} question',
-    ' * @property {AskOption[]} options',
+    ' * @property {AskOption[] | undefined} options 不传/空数组会让用户输入值',
     ' * @property {boolean} showOther - 是否展示"Other"选项让用户输入自定义文本；省略时默认 false',
     ' * @property {boolean} [multiSelect] - 是否多选；省略时默认 false',
     ' *',

@@ -254,7 +254,7 @@ export class CodeExecutor {
     const askUserQuestion = async (
       items: {
         question: string
-        options: { label: string; desc: string }[]
+        options?: { label: string; desc: string }[]
         multiSelect?: boolean
         showOther?: boolean
       }[],
@@ -265,8 +265,8 @@ export class CodeExecutor {
       const input: AskUserQuestionInput = {
         questions: items.map((item) => ({
           question: item.question,
-          header: item.question.slice(0, 12),
-          options: item.options.map((o) => ({ label: o.label, description: o.desc })),
+          header: '',
+          options: (item.options ?? []).map((o) => ({ label: o.label, description: o.desc })),
           multiSelect: item.multiSelect,
           showOther: item.showOther,
         })),
