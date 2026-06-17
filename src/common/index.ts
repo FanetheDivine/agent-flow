@@ -609,8 +609,7 @@ export function buildAgentSystemPrompt(
       })
       .with(P.union('task', 'silent_task'), () => {
         lines.push(
-          '<task_description>',
-          '这是最终目标，全程不变。',
+          '<task_description note="这是最终目标，全程不变。">',
           agent_prompt,
           '</task_description>',
         )
@@ -676,7 +675,7 @@ export function buildAgentSystemPrompt(
       if (deferred.length > 0) {
         lines.push('以下 key 值较长，用 ReadShareValue(key) 按需读取：')
         for (const { key, length } of deferred) {
-          lines.push(`- ${key}（${length} 字符）`)
+          lines.push(`- ${key}(${length}chars)`)
         }
         lines.push('ReadShareValue 是幂等的，对同一 key 多次调用返回相同结果，无需重复读取。')
       }
