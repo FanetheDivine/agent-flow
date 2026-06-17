@@ -476,6 +476,8 @@ export function activate(context: vscode.ExtensionContext) {
       messages: slicedMessages,
       completed: false,
       outputName: undefined,
+      // fork 继承源 run 的会话起点快照,保证 lazy executor 复现源 session 的 system prompt
+      shareValuesSnapshot: baseRun.shareValuesSnapshot,
       // structuredClone 会带过旧 error → getRunPhase 返 error 而非 interrupted,显式清除
       error: undefined,
       // fork 后置 interrupted 让 getRunPhase 推断为 'interrupted'(ChatInput ready 可发消息)
