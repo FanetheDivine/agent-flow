@@ -41,6 +41,10 @@ phase 不存字段，由 [`../src/common/flowRunState.ts`](../src/common/flowRun
 
 `AgentRun.shareValuesSnapshot` 存该 run 会话开始（创建）时点的完整 shareValues map。reducer 在创建 run 时写入：`flowStart` 取 `state.shareValues`，`agentComplete → next_agent` 取合并 `data.values` 后的 `draft.shareValues`。fork / restore 的 lazy executor 经 `getRunSnapshot(runId)` 取源 run 此快照重建 system prompt 与 ReadShareValue，与历史自洽，不受运行中 shareValues 变更影响。随 `FlowRunState` 全量持久化到 workspaceStore。与首条 user 消息上的 `injectedShareValues`（过滤后小值，仅 UI 展示）区分：此处为完整原始 map，供 executor 消费。
 
+## overwrite
+
+`AgentRun.overwrite` 存上游 code 节点返回的 `AgentOverwrite` —— 临时改写本 agent 配置，仅本次运行生效。reducer 在 `agentComplete → next_agent` 创建新 run 时从 signal 的 `data.overwrite` 写入。随 `AgentRun` 持久化，恢复 / fork 路径经 `getRunOverwrite(runId)` 取源 run 此字段，由 `applyAgentOverwrite` 应用到 lazy executor 的 agent 配置，保证行为一致。webview 用 `formatAgentOverwriteText` 格式化为可读文本展示。
+
 ## MessageEffect
 
 `MessageEffect` 只表示需要 UI 响应的副作用原因：

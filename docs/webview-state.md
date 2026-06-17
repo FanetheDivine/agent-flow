@@ -48,6 +48,8 @@ store 负责：
 
 [`../src/webview/components/text-components/index.tsx`](../src/webview/components/text-components/index.tsx) 负责 Markdown 组件映射。行内 code 命中 `parseFileRef` 文件引用判定时渲染为可点击跳转，支持 `path:line`、`path:startLine-endLine` 及 `path#L639` / `path#L639-L644` GitHub 锚点格式，发送 `openFile` 时携带当前 FlowRunState 的 `cwd`；判定必须避免把普通行内代码误判为文件路径。
 
+首条非子 agent user 消息上方展示 `formatAgentOverwriteText(run.overwrite)` 返回的改写提示文本（灰色小字），从 `AgentRun.overwrite` 取值；无 overwrite 时不渲染。
+
 ## 通知
 
 webview 根据 reducer 返回的 `MessageEffect` 触发通知：

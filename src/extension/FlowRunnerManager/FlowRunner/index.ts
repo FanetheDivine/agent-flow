@@ -5,7 +5,9 @@ import { match } from 'ts-pattern'
 import * as vscode from 'vscode'
 import {
   type Agent,
+  type AgentOverwrite,
   type AIMessageType,
+  applyAgentOverwrite,
   buildNoInputInitMessage,
   type Code,
   type FlowRunnerCommandEvents,
@@ -101,6 +103,12 @@ export type FlowRunnerOptions = {
    * (旧持久化数据无此字段)时由调用方兜底 getLatestShareValues()。
    */
   getRunSnapshot: (runId: string) => Record<string, string> | undefined
+  /**
+   * 取指定 run 的 overwrite（AgentRun.overwrite）。
+   * fork / restore 的 lazy executor 用它复现源 run 启动时的临时改写配置,
+   * 保证 fork 后的 agent 行为与源 run 一致;返回 undefined 时无 overwrite。
+   */
+  getRunOverwrite: (runId: string) => AgentOverwrite | undefined
 }
 
 /**
@@ -124,12 +132,14 @@ export class FlowRunner {
   private readonly getLatestFlow: () => Flow
   private readonly getLatestCwd: () => string | undefined | null
   private readonly getRunSnapshot: (runId: string) => Record<string, string> | undefined
+  private readonly getRunOverwrite: (runId: string) => AgentOverwrite | undefined
 
   constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
     this.getLatestFlow = options.getLatestFlow
     this.getLatestCwd = options.getLatestCwd
     this.getRunSnapshot = options.getRunSnapshot
+    this.getRunOverwrite = options.getRunOverwrite
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -247,7 +257,9 @@ export class FlowRunner {
       const latestAgent = found && found.node_type !== 'code' ? found : initialAgent
       return {
         initMessage: dummyInit,
-        agent: latestAgent,
+        // fork 路径:从 AgentRun.overwrite 复现源 run 启动时的临时改写配置,
+        // 保证 fork 后的 agent 行为与源 run 一致(work_mode / require_confirm)
+        agent: applyAgentOverwrite(latestAgent, this.getRunOverwrite(runId)),
         // 用源 run 会话开始时的快照而非最新值,复现 fork/restore 起点的 system prompt 与
         // ReadShareValue,保证与历史自洽;旧持久化 run 无快照时兜底取最新值。
         currentValues: this.getRunSnapshot(runId) ?? this.getLatestShareValues(),
@@ -359,6 +371,8 @@ export class FlowRunner {
    * 启动一个 Agent run:按 node_type 分流 ClaudeExecutor / CodeExecutor 并写入 executors Map。
    * @param fireFlowStartSignal - 是否在首条 SDK 消息抵达时 fire flow.signal.flowStart
    *   (eager 路径需要;fork 路径由外层 spawnForFork 走 signal.fork 替代,故为 false)
+   * @param overwrite - 上游 code 节点返回的临时改写,仅本次 run 生效;ClaudeExecutor 闭包
+   *   内对最新 agent 应用,影响 work_mode(require_confirm / silent 分支)与 outputs 配置
    */
   private runAgent(
     runId: string,
@@ -367,6 +381,7 @@ export class FlowRunner {
     currentValues: Record<string, string>,
     fireFlowStartSignal: boolean,
     overrideCwd?: string | null,
+    overwrite?: AgentOverwrite,
   ): void {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath
     // overrideCwd===undefined 时保持现状（取 FlowRunState.cwd）；否则用 override 覆盖（含 null/空串=清空）
@@ -408,7 +423,9 @@ export class FlowRunner {
       const latestAgent = found && found.node_type !== 'code' ? found : agent
       return {
         initMessage,
-        agent: latestAgent,
+        // 对最新 agent 应用上游 code 节点返回的临时改写:work_mode 影响 init 时
+        // buildAgentSystemPrompt 快照、require_confirm 影响 canUseTool 的 CompleteTask 确认分支
+        agent: applyAgentOverwrite(latestAgent, overwrite),
         currentValues,
         cwd,
         shareValueKeys: latestFlow.shareValuesKeys ?? [],
@@ -554,8 +571,9 @@ export class FlowRunner {
         values: result.values,
         cwd: result.cwd,
         result: result.resultMessage,
+        overwrite: result.overwrite,
       })
-      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd)
+      this.runAgent(newRunId, nextInitMessage, nextAgent, nextValues, false, effectiveCwd, result.overwrite)
     } else {
       // Flow 结束
       this.killExecutor(runId)

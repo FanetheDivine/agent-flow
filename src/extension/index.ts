@@ -268,11 +268,6 @@ export function activate(context: vscode.ExtensionContext) {
         const projectFlows = currentFlows.flows.filter((f) => f.project)
         const strippedProject = projectFlows.map(stripFlowRuntimeFields)
         const allStates = flowRunStateManager.getFlowRunStates()
-        const globalFlows = currentFlows.flows.filter((f) => !f.project).map(stripFlowRuntimeFields)
-        // 全局文件只写全局 flows（不再写 workspaceRunStates）
-        globalStore
-          .save({ flows: globalFlows })
-          .catch((err) => logError('[flushMessages] globalStore.save failed', err))
         // workspaceStore 写项目 flows + 全量 runStates（含全局 flow 在该 cwd 的运行态）
         if (workspaceStore) {
           workspaceStore
@@ -327,6 +322,9 @@ export function activate(context: vscode.ExtensionContext) {
     (flowId, runId) =>
       flowRunStateManager.getFlowRunStates()[flowId]?.runs.find((r) => r.runId === runId)
         ?.shareValuesSnapshot,
+    (flowId, runId) =>
+      flowRunStateManager.getFlowRunStates()[flowId]?.runs.find((r) => r.runId === runId)
+        ?.overwrite,
   )
 
   /**
@@ -478,6 +476,8 @@ export function activate(context: vscode.ExtensionContext) {
       outputName: undefined,
       // fork 继承源 run 的会话起点快照,保证 lazy executor 复现源 session 的 system prompt
       shareValuesSnapshot: baseRun.shareValuesSnapshot,
+      // fork 继承源 run 的临时改写,保证 lazy executor 复现源 run 的 work_mode / require_confirm
+      overwrite: baseRun.overwrite,
       // structuredClone 会带过旧 error → getRunPhase 返 error 而非 interrupted,显式清除
       error: undefined,
       // fork 后置 interrupted 让 getRunPhase 推断为 'interrupted'(ChatInput ready 可发消息)
