@@ -415,7 +415,7 @@ export class ClaudeExecutor {
       if (!completeParseResult.success) {
         return Promise.resolve({
           behavior: 'deny',
-          message: `CompleteTask 参数无效：${completeParseResult.error.message}`,
+          message: `参数错误：${completeParseResult.error.message}`,
         })
       }
       const completeInput = toolInput
@@ -437,11 +437,13 @@ export class ClaudeExecutor {
     // 确认后 SDK 收到 allow，模型继续执行；拒绝则收到 deny（isError tool_result）。
     // silent_task 无人值守：自动接受，fire onToolPermissionResult 供 webview 历史卡片回显。
     if (toolName.includes('ExitPlanMode')) {
-      const exitPlanParseResult = z.object({ planFilePath: z.string().min(1) }).safeParse(toolInput)
+      const exitPlanParseResult = z
+        .object({ planFilePath: z.string().min(1), allowedPrompts: z.array(z.any()).optional() })
+        .safeParse(toolInput)
       if (!exitPlanParseResult.success) {
         return Promise.resolve({
           behavior: 'deny',
-          message: 'ExitPlanMode 必须提供计划文件路径（planFilePath）',
+          message: `参数错误：${exitPlanParseResult.error.message}`,
         })
       }
       if (agent.work_mode === 'silent_task') {
