@@ -56,6 +56,44 @@ function withErrorBoundary<TArgs>(
   }
 }
 
+export function buildCompleteTaskInputShape(agent: Agent) {
+  const outputs = agent.outputs ?? []
+  const outputNames = outputs.map((o) => o.output_name)
+  const hasOutputs = outputNames.length > 0
+  const writeKeys = agent.allowed_write_values_keys ?? []
+  const valuesSchema =
+    writeKeys.length > 0
+      ? z.object(
+          Object.fromEntries(
+            writeKeys.map((k) => [k, z.string().optional().describe(`key: ${k}`)]),
+          ),
+        )
+      : undefined
+  return {
+    ...(hasOutputs
+      ? { output_name: z.enum(outputNames as [string, ...string[]]).describe('选择的输出分支名') }
+      : {}),
+    ...(!agent.no_output
+      ? {
+          content: z
+            .string()
+            .describe(
+              '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 values 的职责',
+            ),
+        }
+      : {}),
+    ...(valuesSchema
+      ? {
+          values: valuesSchema
+            .optional()
+            .describe(
+              '按 key 记录用户要求保存的值；只能写入 allowed_write_values_keys 列出的 key。未变化的 key 省略不传',
+            ),
+        }
+      : {}),
+  }
+}
+
 /**
  * 构建 Agent 控制用 MCP Server
  *
@@ -90,14 +128,6 @@ export function buildAgentMcpServer({
 
     const hasOutputs = outputNames.length > 0
     const writeKeys = agent.allowed_write_values_keys ?? []
-    const valuesSchema =
-      writeKeys.length > 0
-        ? z.object(
-            Object.fromEntries(
-              writeKeys.map((k) => [k, z.string().optional().describe(`key: ${k}`)]),
-            ),
-          )
-        : undefined
 
     // 共享部分：调用语义 + values 提示。两边（systemPrompt 与本工具描述）措辞一致，
     // 让 AI 在 systemPrompt 里读过一遍后，工具描述这里再次强化要点。
@@ -128,33 +158,7 @@ export function buildAgentMcpServer({
     const agentCompleteTool = tool(
       'CompleteTask',
       completeDesc,
-      {
-        ...(hasOutputs
-          ? {
-              output_name: z
-                .enum(outputNames as [string, ...string[]])
-                .describe('选择的输出分支名'),
-            }
-          : {}),
-        ...(!agent.no_output
-          ? {
-              content: z
-                .string()
-                .describe(
-                  '本次任务的结果文本。仅文字输出，不要把需要按 key 记录的值塞这里——那是 values 的职责',
-                ),
-            }
-          : {}),
-        ...(valuesSchema
-          ? {
-              values: valuesSchema
-                .optional()
-                .describe(
-                  '按 key 记录用户要求保存的值；只能写入 allowed_write_values_keys 列出的 key。未变化的 key 省略不传',
-                ),
-            }
-          : {}),
-      },
+      buildCompleteTaskInputShape(agent),
       withErrorBoundary('CompleteTask', async ({ output_name, content, values }) => {
         const filteredValues: Record<string, string> = {}
         if (values && writeKeys.length > 0) {

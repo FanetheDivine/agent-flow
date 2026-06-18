@@ -8,6 +8,7 @@ import {
   type Query,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 import {
   Agent,
   AgentOverwrite,
@@ -19,7 +20,7 @@ import {
   ShareValueKey,
   UserMessageType,
 } from '@/common'
-import { buildAgentMcpServer } from '@/common/extension'
+import { buildAgentMcpServer, buildCompleteTaskInputShape } from '@/common/extension'
 import { log, logError } from '../../logger'
 
 export type ExecutorResult = {
@@ -410,6 +411,13 @@ export class ClaudeExecutor {
     // 找到对应 output，require_confirm===true 时拦截挂起;否则直接放行
     // （关键：否则每个 CompleteTask 都弹卡）。chat 模式不挂载 CompleteTask，此分支不会进入。
     if (toolName.includes('CompleteTask')) {
+      const completeParseResult = z.object(buildCompleteTaskInputShape(agent)).safeParse(toolInput)
+      if (!completeParseResult.success) {
+        return Promise.resolve({
+          behavior: 'deny',
+          message: `CompleteTask 参数无效：${completeParseResult.error.message}`,
+        })
+      }
       const completeInput = toolInput
       const outputName = completeInput.output_name
       const matchedOutput =
@@ -429,6 +437,13 @@ export class ClaudeExecutor {
     // 确认后 SDK 收到 allow，模型继续执行；拒绝则收到 deny（isError tool_result）。
     // silent_task 无人值守：自动接受，fire onToolPermissionResult 供 webview 历史卡片回显。
     if (toolName.includes('ExitPlanMode')) {
+      const exitPlanParseResult = z.object({ planFilePath: z.string().min(1) }).safeParse(toolInput)
+      if (!exitPlanParseResult.success) {
+        return Promise.resolve({
+          behavior: 'deny',
+          message: 'ExitPlanMode 必须提供计划文件路径（planFilePath）',
+        })
+      }
       if (agent.work_mode === 'silent_task') {
         if (!this.tryAutoReply())
           return Promise.resolve({ behavior: 'deny', message: 'silent auto-reply limit exceeded' })
