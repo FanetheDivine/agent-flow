@@ -1,7 +1,7 @@
 {
   "flows": [
     {
-      "id": "4d250e6c-4735-4834-98dd-67466c29feac",
+      "id": "0b927c0d-8581-431a-ba98-668907caedfc",
       "name": "简单任务",
       "agents": [
         {
@@ -191,7 +191,7 @@
       ]
     },
     {
-      "id": "50d8ceac-3862-4b39-85ae-d7b45972da62",
+      "id": "cf69738b-8bbb-4acd-8939-5ca8a6a09c96",
       "name": "复杂任务",
       "agents": [
         {
@@ -449,7 +449,7 @@
       ]
     },
     {
-      "id": "79d9136b-1dda-47e1-afe4-2d639b8761b5",
+      "id": "c85c3192-6d01-4231-878e-dc293efd6ff4",
       "name": "常用Agent",
       "agents": [
         {
@@ -488,7 +488,7 @@
           "node_type": "agent",
           "agent_name": "用户对话-glm",
           "model": "glm-5.2[1m]",
-          "effort": "max",
+          "effort": "high",
           "work_mode": "chat",
           "id": "5"
         },
@@ -519,7 +519,7 @@
       ]
     },
     {
-      "id": "53528437-1fc7-4037-aab8-7377ea38320b",
+      "id": "9e7c5676-d4f7-481a-b1b2-f22234cddc48",
       "name": "生成工作流",
       "agents": [
         {
