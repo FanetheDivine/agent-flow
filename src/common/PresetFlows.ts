@@ -103,7 +103,7 @@ export const PresetFlows: Flow[] = [
         node_type: 'agent',
         agent_name: '任务执行',
         agent_desc: '执行当前任务描述，输出执行结果',
-        model: 'qwen3.7-max',
+        model: 'qwen3.7-max[1m]',
         effort: 'high',
         deny_tools: ['Bash(git merge)', 'Bash(git commit)', 'Bash(git push)'],
         work_mode: 'silent_task',
@@ -130,7 +130,7 @@ export const PresetFlows: Flow[] = [
         node_type: 'agent',
         agent_name: '结果验证',
         agent_desc: '验证执行结果是否满足任务要求',
-        model: 'glm-5.1',
+        model: 'glm-5.1[1m]',
         effort: 'high',
         deny_tools: ['Bash(git merge)', 'Bash(git push)', 'Edit'],
         work_mode: 'silent_task',
@@ -207,7 +207,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '分支重命名',
-        model: 'qwen3.7-max',
+        model: 'qwen3.7-max[1m]',
         effort: 'medium',
         deny_tools: ['Bash(git merge)', 'Bash(git commit)', 'Bash(git push)', 'Edit', 'Write'],
         work_mode: 'silent_task',
@@ -400,7 +400,7 @@ export const PresetFlows: Flow[] = [
       {
         id: '4',
         node_type: 'agent',
-        model: 'glm-5.1',
+        model: 'glm-5.1[1m]',
         effort: 'high',
         agent_name: '规范数据格式',
         agent_desc: '将子任务列表转化为合法的字符串数组JSON',
@@ -466,7 +466,7 @@ export const PresetFlows: Flow[] = [
       {
         id: '6',
         node_type: 'agent',
-        model: 'qwen3.7-max',
+        model: 'qwen3.7-max[1m]',
         effort: 'high',
         agent_name: '任务执行',
         agent_desc: '执行当前任务描述，输出执行结果',
@@ -493,7 +493,7 @@ export const PresetFlows: Flow[] = [
       {
         id: '7',
         node_type: 'agent',
-        model: 'glm-5.1',
+        model: 'glm-5.1[1m]',
         effort: 'high',
         agent_name: '结果验证',
         agent_desc: '验证执行结果是否满足任务要求',
@@ -554,7 +554,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '分支重命名',
-        model: 'qwen3.7-max',
+        model: 'qwen3.7-max[1m]',
         effort: 'medium',
         deny_tools: ['Bash(git merge)', 'Bash(git commit)', 'Bash(git push)', 'Edit', 'Write'],
         work_mode: 'silent_task',
@@ -624,7 +624,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '用户对话-qwen',
-        model: 'qwen3.7-max',
+        model: 'qwen3.7-max[1m]',
         effort: 'high',
         work_mode: 'chat',
         id: '1',
@@ -648,7 +648,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '用户对话-gpt',
-        model: 'gpt-5.5',
+        model: 'gpt-5.5[1m]',
         effort: 'high',
         work_mode: 'chat',
         id: '4',
@@ -656,7 +656,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '用户对话-glm',
-        model: 'glm-5.1',
+        model: 'glm-5.1[1m]',
         effort: 'max',
         work_mode: 'chat',
         id: '5',
@@ -796,7 +796,7 @@ export const PresetFlows: Flow[] = [
       {
         node_type: 'agent',
         agent_name: '审查工作流',
-        model: 'glm-5.1',
+        model: 'glm-5.1[1m]',
         effort: 'high',
         work_mode: 'silent_task',
         allowed_read_values_keys: ['generatedFlow', 'steps', 'requirement', 'changeList'],

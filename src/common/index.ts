@@ -845,8 +845,7 @@ export function buildCodeJSDoc(shareValueKeys: string[], outputs: string[]): str
 export const MODELS = new Set([
   'opus[1m]',
   'sonnet[1m]',
-  'qwen3.7-max',
-  'glm-5.1',
-  'DeepSeek-V4-Pro[1m]',
-  'gpt-5.5',
+  'qwen3.7-max[1m]',
+  'glm-5.1[1m]',
+  'gpt-5.5[1m]',
 ])
