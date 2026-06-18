@@ -270,7 +270,7 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Checkbox value={opt.label} />
                   </OptionRow>
                 ))}
-                {(q.showOther ?? false) && (
+                {!q.hiddenOther && (
                   <OptionRow option={OTHER_OPTION}>
                     <Checkbox value={OTHER_LABEL} />
                   </OptionRow>
@@ -288,7 +288,7 @@ export const AskUserQuestionCard: FC<Props> = ({
                     <Radio value={opt.label} />
                   </OptionRow>
                 ))}
-                {(q.showOther ?? false) && (
+                {!q.hiddenOther && (
                   <OptionRow option={OTHER_OPTION}>
                     <Radio value={OTHER_LABEL} />
                   </OptionRow>
