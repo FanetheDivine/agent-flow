@@ -132,6 +132,10 @@ export class ClaudeExecutor {
   private queryInstance: Query | null = null
   private completed = false
   private disposed = false
+  /**
+   * 用户主动调用 interrupt() 时置 true，避免 SDK 返回 error_during_execution 时误报 onError
+   */
+  private interruptRequested = false
   /** silent_task 自动回复 per-instance 计数 = per-run(executor 与 run 一一对应) */
   private autoReplyCount = 0
   /**
@@ -231,6 +235,7 @@ export class ClaudeExecutor {
    */
   async interrupt() {
     if (!this.queryInstance) return
+    this.interruptRequested = true
     // 中断时丢弃尚未通知上层的 CompleteTask pending —— 用户主动打断意味着
     // 不要继续切到下一个 agent / 完成 flow。
     this.pendingCompleteResult = null
@@ -639,7 +644,7 @@ export class ClaudeExecutor {
             }
           }
           // 如果 subtype 不是 'success' 且没有 pendingCompleteResult，fire onError 让 flow 进入 error 终态
-          if (msg.subtype !== 'success' && !this.pendingCompleteResult && !this.completed) {
+          if (msg.subtype !== 'success' && !this.pendingCompleteResult && !this.completed && !this.interruptRequested) {
             this.disposed = true
             events.onError(new Error(`SDK result error: ${msg.subtype}`))
           }
