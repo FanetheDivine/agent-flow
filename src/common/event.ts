@@ -77,6 +77,8 @@ export type ExtensionFromWebviewEvents = {
     shareValueKeys: string[]
     outputs: string[]
   }
+  /** 在新 VSCode 窗口中打开指定文件夹作为工作区 */
+  openFolder: { path: string }
   /** 关闭 Code 节点编辑器：删除临时文件并关闭 VS Code editor tab */
   closeCodeEditor: { flowId: string; agentId: string }
 } & ExtensionFlowCommandEvents

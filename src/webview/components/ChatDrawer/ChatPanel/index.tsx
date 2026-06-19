@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   DiffOutlined,
   EditOutlined,
+  LinkOutlined,
   PauseCircleOutlined,
   RobotOutlined,
   StopOutlined,
@@ -403,13 +404,22 @@ export const ChatPanel: FC<Props> = ({
                 {cwd || '主工作区'}
               </span>
               {cwd && (
-                <CloseOutlined
-                  className='mr-auto ml-1 cursor-pointer text-xs text-[#6c7086] hover:text-[#1677ff]'
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setCwd(flowId, '')
-                  }}
-                />
+                <>
+                  <LinkOutlined
+                    className='ml-1 cursor-pointer text-xs text-[#6c7086] hover:text-[#1677ff]'
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      postMessageToExtension({ type: 'openFolder', data: { path: cwd } })
+                    }}
+                  />
+                  <CloseOutlined
+                    className='mr-auto ml-1 cursor-pointer text-xs text-[#6c7086] hover:text-[#1677ff]'
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCwd(flowId, '')
+                    }}
+                  />
+                </>
               )}
             </>
           )}

@@ -705,6 +705,13 @@ export function activate(context: vscode.ExtensionContext) {
         .with({ type: 'openFile' }, async ({ data }) => {
           await openFileInEditor(data)
         })
+        .with({ type: 'openFolder' }, async ({ data }) => {
+          await vscode.commands.executeCommand(
+            'vscode.openFolder',
+            vscode.Uri.file(data.path),
+            { forceNewWindow: true },
+          )
+        })
         .with({ type: 'openDiff' }, async ({ data }) => {
           await openDiffInEditor(data)
         })
