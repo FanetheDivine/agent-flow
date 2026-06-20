@@ -516,8 +516,8 @@ export function activate(context: vscode.ExtensionContext) {
       overwrite: baseRun.overwrite,
       // structuredClone 会带过旧 error → getRunPhase 返 error 而非 interrupted,显式清除
       error: undefined,
-      // reask 路径:不置 interrupted,getRunPhase 由末项 pending tool_use 推断 running(loading),
-      //   resume 后 executor fire toolPermissionRequest 转 awaiting-tool-permission;
+      // reask 路径:不置 interrupted。配合下方预填的 pendingToolPermissions,getRunPhase 直接
+      //   推断 awaiting-tool-permission(卡片态),不经 running;用户回答后注入 tool_result 驱动 resume;
       // 非 reask 路径:置 interrupted,getRunPhase 推断 interrupted(ChatInput ready 可发消息)
       interrupted: !reask,
       acc: {
