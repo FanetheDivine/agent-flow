@@ -498,6 +498,32 @@ export class ClaudeExecutor {
     })
   }
 
+  /**
+   * fork 后自动 resume 悬空 tool_use，重新触发 canUseTool 进入权限卡片态。
+   *
+   * fork 路径(lazy + resumeSessionId)构造时不启动 query；forkSession 切出的新 session
+   * 末尾是悬空 tool_use(无 tool_result)，需主动启动 query 让 SDK resume 后重新触发
+   * canUseTool。canUseTool 对 AskUserQuestion / ExitPlanMode / Edit(via must_confirm_tools)
+   * 已有挂起逻辑，会 fire onToolPermissionRequest 进入权限卡片。
+   *
+   * 与 sendUserMessage 的区别：不 push 任何 user message，纯靠 SDK resume 悬空 tool_use
+   * 自动重新调用 canUseTool。若 SDK 要求至少一条输入才推进，需改为 push 最小续接消息。
+   *
+   * silent_task 模式下 canUseTool 自动应答(不进卡片)，reask 面向交互模式(task/chat)。
+   */
+  async startReask(): Promise<void> {
+    if (this.disposed || this.completed) return
+    if (this.queryInstance) return // 已有活跃 query,不重复启动
+    // dummy message —— skipPushInit=true 保证不会 push 到 userInputStream
+    const dummyMessage: UserMessageType = {
+      type: 'user',
+      message: { role: 'user', content: '' },
+      parent_tool_use_id: null,
+      session_id: '',
+    }
+    await this.createQuery(dummyMessage, true)
+  }
+
   // ── 内部方法 ────────────────────────────────────────────────────────────
 
   private async createQuery(message: UserMessageType, skipPushInit = false) {
