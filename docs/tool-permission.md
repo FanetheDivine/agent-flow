@@ -65,13 +65,11 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 
 1. 用户点击权限卡片上的 fork 按钮，发送 `flow.command.fork`（target 为该 tool_use 的 assistant uuid）。
 2. `handleFork` 创建新 session，切片末端为该 tool_use；构造 newRun 时 `interrupted: false`，tool_use 重置为 `pending`，清空旧 `result` 与 `answeredToolPermissions` 中该 toolUseId 的旧答案。
-3. `spawnForFork` 启动 lazy executor 后立即调用 `startReask()`，SDK resume 悬空 tool_use。
-4. resume 触发 `canUseTool` 重新评估该 tool_use：
-   - AskUserQuestion / ExitPlanMode：走 `canUseTool` 第 1 / 3 条，挂起等用户确认（silent_task 自动应答）。
-   - Edit：走 `must_confirm_tools` 通道（第 4 条），命中时挂起；未命中时直接 allow 执行（既有权限机制，不额外拦截）。
-5. `canUseTool` 挂起时 fire `onToolPermissionRequest` → `toolPermissionRequest` signal → reducer 入队 `pendingToolPermissions` → webview 展示新的权限卡片。
+3. `pendingToolPermissions` 预填一项 `{runId, toolUseId, toolName, input}`，`getRunPhase` 直接推断 `awaiting-tool-permission`，webview 底部立即展示权限卡片。
+4. executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 `canUseTool`，原 `startReask()` 路径已失效并移除）。
+5. 用户回答卡片后，由 fork-reask 注入逻辑（子任务 2）构造 `tool_result` 注入 SDK 触发 resume，走正常 tool_result 处理流程。
 
-依赖关系：reask 依赖 SDK resume 悬空 tool_use 时重新触发 `canUseTool`；若 SDK 不重新评估（直接跳过 tool_result），则 reask 无法进入权限卡片态。
+依赖关系：reask 不再依赖 SDK resume 触发 `canUseTool`，改为 fork 时直接预填 `pendingToolPermissions` 进卡片态，用户回答后注入 tool_result 驱动 SDK 继续。
 
 ## 硬约束
 

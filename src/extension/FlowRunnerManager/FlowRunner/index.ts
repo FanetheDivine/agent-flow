@@ -231,6 +231,7 @@ export class FlowRunner {
     resumeSessionId: string
     reask?: boolean
   }): void {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reask 参数链路暂保留,子任务3 决定去留
     const { runId, agentId, resumeSessionId, reask } = params
     // 提前 fail-fast:agent 必须存在才启动 lazy executor。lazy 闭包内仍会重新查最新 agent
     // 应用变更;若运行期间 agent 被删,fallback 到此处校验过的 initialAgent 不让首次启动崩。
@@ -281,10 +282,8 @@ export class FlowRunner {
       }
     })
     this.executors.set(runId, executor)
-    // reask 模式:fork 切片末端为悬空 tool_use,立即触发 SDK resume 让 canUseTool 重新评估
-    if (reask) {
-      executor.startReask()
-    }
+    // reask 路径:pendingToolPermissions 已在 handleFork 预填,executor 保持 lazy 不启动;
+    // 用户回答权限卡片后才注入 tool_result 触发 SDK resume。
   }
 
   // ── signal 发射 ─────────────────────────────────────────────────────────

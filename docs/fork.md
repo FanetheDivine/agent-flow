@@ -24,7 +24,7 @@ fork 走 `handleFork`：
 4. 替换 slicedMessages 中所有带 uuid 的 SDK 消息。
 5. 判定 reask：切片末端为三工具（AskUserQuestion / ExitPlanMode / Edit）tool_use 时走 reask 路径。
 6. `setRunState` 写入新 FlowRunState。
-7. `spawnForFork` 启动 FlowRunner + lazy executor（reask 时立即 resume 悬空 tool_use）。
+7. `spawnForFork` 启动 FlowRunner + lazy executor（executor 保持 lazy 不启动，等用户交互后才注入 tool_result）。
 8. 发送 `flow.signal.fork`。
 
 新 run 由 `structuredClone(targetRun)` 复制，继承源 run 的 `shareValuesSnapshot`（会话开始时点快照）与 `overwrite`。lazy executor 首次启动经 `getRunSnapshot(runId)` 从 state 读此快照作 `currentValues`，经 `getRunOverwrite(runId)` 读取源 run 的临时改写配置，复现 fork 起点的 system prompt、ReadShareValue、work_mode 与 `outputs[].require_confirm`，与历史自洽；旧持久化 run 无快照字段时兜底 `getLatestShareValues()`。restore 路径（`spawnForRestore`）同源共用此 lazy executor 机制。
@@ -51,7 +51,7 @@ fork 按钮入口分两条路径：
 
 - 底部固定的 pending 权限卡片（AskUserQuestion / must_confirm_tools / CompleteTask 等）可挂 fork 按钮。
 - `findForkUuid` 按 `runId` + `toolUseId` 反查 tool_use 消息的 assistant uuid 作为 fork 切片终点。
-- reask 路径下 fork 直接切到悬空 tool_use（status 已重置为 pending），新会话 resume 后重新进入权限卡片态。
+- reask 路径下 fork 直接切到悬空 tool_use（status 已重置为 pending），`pendingToolPermissions` 预填该项，webview 立即展示权限卡片（不启动 SDK）。
 
 **不可作 fork 锚点的消息**：
 
@@ -65,8 +65,8 @@ fork 按钮入口分两条路径：
 
 - `isReaskTool` helper 判定工具类型：Edit 精确等值（内置工具名），ExitPlanMode / AskUserQuestion 用 `.includes` 兼容 mcp 前缀。
 - 构造 newRun 时 `interrupted: false`，末端 tool_use 重置为 `pending`（清空 result），删除 `answeredToolPermissions` 中该 toolUseId 的旧答案。
-- `getRunPhase` 由末项 pending tool_use 推断 `running`（loading），resume 后 executor fire `toolPermissionRequest` 转 `awaiting-tool-permission`。
-- `pendingToolPermissions` 不预填（避免 executor 尚未 resume 时 answerToolPermission 落空），靠 resume 后 canUseTool 自然入队。
+- `pendingToolPermissions` 预填一项 `{runId, toolUseId, toolName, input}`，`getRunPhase` 直接推断 `awaiting-tool-permission`，webview 底部立即展示权限卡片。
+- executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 canUseTool，此路径已失效）；用户回答卡片后由子任务 2 注入 tool_result 触发 SDK resume。
 - 三工具不产生 subagent，`locateFork` 子消息逻辑不触发，`messageIdx` 即 tool_use 自身。
 
 非三工具的 tool_use（如普通工具）和其他消息类型保持 interrupted 行为不变。

@@ -13,6 +13,7 @@ import {
   type ExtensionToWebviewMessage,
   type Flow,
   type FlowRunState,
+  type PendingToolPermission,
   type PersistedData,
   stripFlowRuntimeFields,
 } from '@/common'
@@ -534,11 +535,28 @@ export function activate(context: vscode.ExtensionContext) {
     }
     newRuns.push(newRun)
 
+    // reask 路径:预填 pendingToolPermissions 让 getRunPhase 推断 awaiting-tool-permission,
+    // webview 底部直接展示权限卡片(不启动 SDK,resume 悬空 tool_use 不会重新触发 canUseTool);
+    // 非 reask 路径:pendingToolPermissions 保持空,走传统 interrupted 行为。
+    const pendingToolPermissions: PendingToolPermission[] = match({
+      reask,
+      lastSlicedMsg,
+    })
+      .with({ reask: true, lastSlicedMsg: { kind: 'tool_use' } }, ({ lastSlicedMsg }) => [
+        {
+          runId: newRunId,
+          toolUseId: lastSlicedMsg.toolUseId,
+          toolName: lastSlicedMsg.toolName,
+          input: lastSlicedMsg.input,
+        },
+      ])
+      .otherwise(() => [])
+
     const newRunState: FlowRunState = {
       killed: false,
       runs: newRuns,
       answeredToolPermissions,
-      pendingToolPermissions: [],
+      pendingToolPermissions,
       shareValues: { ...sourceState.shareValues },
       cwd: sourceState.cwd,
     }
@@ -557,8 +575,8 @@ export function activate(context: vscode.ExtensionContext) {
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
     // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
     // reask:fork 切片末端为三工具(AskUserQuestion/ExitPlanMode/Edit)tool_use 时,
-    // spawn 后立即触发 SDK resume 让 canUseTool 重新评估该 tool_use 并进入权限卡片态;
-    // 否则走传统 lazy 路径等用户 sendUserMessage。
+    // pendingToolPermissions 已预填,getRunPhase 推断 awaiting-tool-permission,
+    // webview 直接展示权限卡片;executor 保持 lazy 不启动(等用户回答卡片后注入 tool_result)。
     runnerManager.spawnForFork({
       flowId: newFlowId,
       agentId,
