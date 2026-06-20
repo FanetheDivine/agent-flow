@@ -59,6 +59,20 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 - 成功或用户已回答：展示 ToolPermissionCard 的已回答形态；已回答但 result 未到达时 loading。`answered.message` 存拒绝理由，传给 `ToolPermissionCard` 时映射为 `reason` 字段。
 - AskUserQuestion：必须存在 answered 才展示已回答卡片；无 answered 时返回 null。
 
+## fork-reask 权限链路
+
+三工具（AskUserQuestion / ExitPlanMode / Edit）的 tool_use 支持从 active 权限卡片 fork（reask 路径）：
+
+1. 用户点击权限卡片上的 fork 按钮，发送 `flow.command.fork`（target 为该 tool_use 的 assistant uuid）。
+2. `handleFork` 创建新 session，切片末端为该 tool_use；构造 newRun 时 `interrupted: false`，tool_use 重置为 `pending`，清空旧 `result` 与 `answeredToolPermissions` 中该 toolUseId 的旧答案。
+3. `spawnForFork` 启动 lazy executor 后立即调用 `startReask()`，SDK resume 悬空 tool_use。
+4. resume 触发 `canUseTool` 重新评估该 tool_use：
+   - AskUserQuestion / ExitPlanMode：走 `canUseTool` 第 1 / 3 条，挂起等用户确认（silent_task 自动应答）。
+   - Edit：走 `must_confirm_tools` 通道（第 4 条），命中时挂起；未命中时直接 allow 执行（既有权限机制，不额外拦截）。
+5. `canUseTool` 挂起时 fire `onToolPermissionRequest` → `toolPermissionRequest` signal → reducer 入队 `pendingToolPermissions` → webview 展示新的权限卡片。
+
+依赖关系：reask 依赖 SDK resume 悬空 tool_use 时重新触发 `canUseTool`；若 SDK 不重新评估（直接跳过 tool_result），则 reask 无法进入权限卡片态。
+
 ## 硬约束
 
 - 只有一套 tool permission 机制，禁止为特殊工具新增旁路。

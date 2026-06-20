@@ -6,7 +6,7 @@
 - [`../src/extension/FlowRunnerManager/index.ts`](../src/extension/FlowRunnerManager/index.ts) — `spawnForFork` / `spawnForRestore`。
 - [`../src/extension/FlowRunnerManager/FlowRunner/index.ts`](../src/extension/FlowRunnerManager/FlowRunner/index.ts) — lazy executor。
 - [`../src/webview/store/flow.ts`](../src/webview/store/flow.ts) — `flow.signal.fork` 后注入新 Flow 与切换 active。
-- [`../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) — `deriveForkUuid` 与 fork 按钮。
+- [`../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) — `buildForkIcon` 与 fork 按钮。
 - [`../src/webview/components/ChatDrawer/index.tsx`](../src/webview/components/ChatDrawer/index.tsx) — ChatPanel key unmount。
 
 ## command / signal
@@ -40,12 +40,24 @@ webview 收到 `flow.signal.fork` 后：
 
 ## fork 锚点
 
-`deriveForkUuid` 只取有 uuid 的消息：
+fork 按钮入口分两条路径：
 
-- text / thinking / tool_use：取自身 uuid。
-- user / turn_end：向前回溯到最近一条有 uuid 的消息。
-- agent_complete / error：无 uuid，不能作 fork 锚点。
-- streaming 消息 uuid 未定稿，不能作回溯命中。
+**已完成消息**（[`MessageBubble.tsx`](../src/webview/components/ChatDrawer/ChatPanel/MessageBubble.tsx) `buildForkIcon`）：
+
+- 仅 `status: 'done'` 的 text / thinking / tool_use 消息展示 fork 按钮。
+- 直接取 `message.uuid` 作为 fork 切片终点。
+
+**active 权限卡片**（[`ChatPanel/index.tsx`](../src/webview/components/ChatDrawer/ChatPanel/index.tsx) `buildPendingForkButton` + `findForkUuid`）：
+
+- 底部固定的 pending 权限卡片（AskUserQuestion / must_confirm_tools / CompleteTask 等）可挂 fork 按钮。
+- `findForkUuid` 按 `runId` + `toolUseId` 反查 tool_use 消息的 assistant uuid 作为 fork 切片终点。
+- reask 路径下 fork 直接切到悬空 tool_use（status 已重置为 pending），新会话 resume 后重新进入权限卡片态。
+
+**不可作 fork 锚点的消息**：
+
+- user / turn_end / agent_complete / error：无 fork 按钮。
+- subAgent 消息：`buildForkIcon` 检测 `parentToolUseId` 后返回 null。
+- streaming 消息：uuid 未定稿，`findForkUuid` 返回 undefined。
 
 ## reask 路径
 
