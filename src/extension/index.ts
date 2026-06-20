@@ -526,15 +526,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 立即 spawn FlowRunner 启动 SDK(lazy 模式);runId 已确定,webview 后续派发的
     // userMessage / answerToolPermission / interrupt 都能正常匹配到此 runner。
-    // fork 切片末端只可能是 user/text/thinking/turn_end —— SDK 不支持把
-    // askUserQuestion 作为 fork 终点。
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
     // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
+    // reask:fork 切片末端为悬空 tool_use 时,spawn 后立即触发 SDK resume 让 canUseTool
+    // 重新评估该 tool_use 并进入权限卡片态;否则走传统 lazy 路径等用户 sendUserMessage。
+    const reask = slicedMessages[slicedMessages.length - 1]?.kind === 'tool_use'
     runnerManager.spawnForFork({
       flowId: newFlowId,
       agentId,
       resumeSessionId: newSessionId,
       runId: newRunId,
+      reask,
     })
 
     postMessageToWebview({

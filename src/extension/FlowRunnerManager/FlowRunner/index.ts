@@ -218,11 +218,20 @@ export class FlowRunner {
    * 不 fire flow.signal.flowStart(fork 由 extension 端用 flow.signal.fork 替代)。
    *
    * lazy 模式:executor 处于 lazy 态,构造时不 createQuery、不 push initMessage,
-   * 等用户首次 sendUserMessage 触发 SDK 启动。fork 切片末端只可能是
-   * user/text/thinking/turn_end —— SDK 不支持把 askUserQuestion 作为 fork 终点。
+   * 等用户首次 sendUserMessage 或 startReask 触发 SDK 启动。
+   *
+   * @param reask - fork 切片末端为悬空 tool_use(无 tool_result)时为 true,
+   *   spawn 后立即调 startReask() 触发 SDK resume,canUseTool 重新评估该 tool_use
+   *   并 fire onToolPermissionRequest 进入权限卡片态。缺省时走传统 lazy 路径,
+   *   等用户 sendUserMessage 才启动。
    */
-  spawnForFork(params: { runId: string; agentId: string; resumeSessionId: string }): void {
-    const { runId, agentId, resumeSessionId } = params
+  spawnForFork(params: {
+    runId: string
+    agentId: string
+    resumeSessionId: string
+    reask?: boolean
+  }): void {
+    const { runId, agentId, resumeSessionId, reask } = params
     // 提前 fail-fast:agent 必须存在才启动 lazy executor。lazy 闭包内仍会重新查最新 agent
     // 应用变更;若运行期间 agent 被删,fallback 到此处校验过的 initialAgent 不让首次启动崩。
     const initialAgent = this.findAgentById(agentId)
@@ -272,6 +281,10 @@ export class FlowRunner {
       }
     })
     this.executors.set(runId, executor)
+    // reask 模式:fork 切片末端为悬空 tool_use,立即触发 SDK resume 让 canUseTool 重新评估
+    if (reask) {
+      executor.startReask()
+    }
   }
 
   // ── signal 发射 ─────────────────────────────────────────────────────────

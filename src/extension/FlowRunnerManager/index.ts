@@ -147,12 +147,13 @@ export class FlowRunnerManager {
     agentId: string
     resumeSessionId: string
     runId: string
+    reask?: boolean
   }): void {
-    const { flowId, agentId, resumeSessionId, runId } = params
+    const { flowId, agentId, resumeSessionId, runId, reask } = params
     this.disposeRunner(flowId)
     const runner = this.createRunner(flowId)
     this.runners.set(flowId, runner)
-    runner.spawnForFork({ runId, agentId, resumeSessionId })
+    runner.spawnForFork({ runId, agentId, resumeSessionId, reask })
   }
 
   /** 崩溃恢复时为持久化 run 注册 lazy executor，语义同 spawnForFork */
