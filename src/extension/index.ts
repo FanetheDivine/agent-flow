@@ -340,6 +340,9 @@ export function activate(context: vscode.ExtensionContext) {
     (flowId, runId) =>
       flowRunStateManager.getFlowRunStates()[flowId]?.runs.find((r) => r.runId === runId)
         ?.overwrite,
+    (flowId, runId) =>
+      flowRunStateManager.getFlowRunStates()[flowId]?.runs.find((r) => r.runId === runId)
+        ?.messages,
   )
 
   /**
@@ -574,20 +577,14 @@ export function activate(context: vscode.ExtensionContext) {
     // userMessage / answerToolPermission / interrupt 都能正常匹配到此 runner。
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
     // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
-    // reask:fork 切片末端为三工具(AskUserQuestion/ExitPlanMode/Edit)tool_use 时,
-    // pendingToolPermissions 已预填,getRunPhase 推断 awaiting-tool-permission,
-    // webview 直接展示权限卡片;executor 保持 lazy 不启动(等用户回答卡片后注入 tool_result)。
+    // reask 分流由 FlowRunner.handleToolPermissionResult 根据 hasPendingPermission
+    // Map 命中/未命中用 ts-pattern 决定走 resolve 还是 injectToolResult,
+    // 不再需要 reask / reaskToolInfo 参数。
     runnerManager.spawnForFork({
       flowId: newFlowId,
       agentId,
       resumeSessionId: newSessionId,
       runId: newRunId,
-      reask,
-      // reask 路径:传递悬空 tool_use 的 toolName 与 input,供 executor 在
-      // answerToolPermission 的 Map-未命中分支构造 tool_result 注入 SDK。
-      ...(reask && lastSlicedMsg?.kind === 'tool_use'
-        ? { reaskToolInfo: { toolName: lastSlicedMsg.toolName, input: lastSlicedMsg.input } }
-        : {}),
     })
 
     postMessageToWebview({

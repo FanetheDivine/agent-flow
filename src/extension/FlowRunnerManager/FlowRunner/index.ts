@@ -9,6 +9,7 @@ import {
   type AIMessageType,
   applyAgentOverwrite,
   buildNoInputInitMessage,
+  type ChatMessage,
   type Code,
   type FlowRunnerCommandEvents,
   type Flow,
@@ -109,6 +110,13 @@ export type FlowRunnerOptions = {
    * 保证 fork 后的 agent 行为与源 run 一致;返回 undefined 时无 overwrite。
    */
   getRunOverwrite: (runId: string) => AgentOverwrite | undefined
+  /**
+   * 取指定 run 的 messages（AgentRun.messages）。
+   * `handleToolPermissionResult` 在 fork reask 路径（Map 未命中）时，从 messages 中
+   * 按 toolUseId 找到悬空 tool_use 的 toolName + input，调 `injectToolResult` 构造 tool_result。
+   * 返回 undefined 时（run 不存在）放弃注入。
+   */
+  getRunMessages: (runId: string) => ChatMessage[] | undefined
 }
 
 /**
@@ -133,6 +141,7 @@ export class FlowRunner {
   private readonly getLatestCwd: () => string | undefined | null
   private readonly getRunSnapshot: (runId: string) => Record<string, string> | undefined
   private readonly getRunOverwrite: (runId: string) => AgentOverwrite | undefined
+  private readonly getRunMessages: (runId: string) => ChatMessage[] | undefined
 
   constructor(options: FlowRunnerOptions) {
     this.getLatestShareValues = options.getLatestShareValues
@@ -140,6 +149,7 @@ export class FlowRunner {
     this.getLatestCwd = options.getLatestCwd
     this.getRunSnapshot = options.getRunSnapshot
     this.getRunOverwrite = options.getRunOverwrite
+    this.getRunMessages = options.getRunMessages
   }
 
   /** 监听所有 signal 事件（通配） */
@@ -219,21 +229,15 @@ export class FlowRunner {
    *
    * lazy 模式:executor 处于 lazy 态,构造时不 createQuery、不 push initMessage,
    * 等用户首次 sendUserMessage 或 injectToolResult 触发 SDK 启动。
-   *
-   * @param reask - fork 切片末端为悬空 tool_use(无 tool_result)时为 true,
-   *   executor 保持 lazy 不启动,等用户回答权限卡片后由 answerToolPermission 走
-   *   injectToolResult 注入 tool_result 驱动 SDK resume。
-   * @param reaskToolInfo - reask 为 true 时传入悬空 tool_use 的 toolName 与 input,
-   *   供 executor 在 answerToolPermission 的 Map-未命中分支构造 tool_result。
+   * reask 分流不在 executor 内部处理——由 FlowRunner.handleToolPermissionResult 根据
+   * `hasPendingPermission` Map 命中/未命中用 ts-pattern 决定走 resolve 还是 injectToolResult。
    */
   spawnForFork(params: {
     runId: string
     agentId: string
     resumeSessionId: string
-    reask?: boolean
-    reaskToolInfo?: { toolName: string; input: unknown }
   }): void {
-    const { runId, agentId, resumeSessionId, reaskToolInfo } = params
+    const { runId, agentId, resumeSessionId } = params
     // 提前 fail-fast:agent 必须存在才启动 lazy executor。lazy 闭包内仍会重新查最新 agent
     // 应用变更;若运行期间 agent 被删,fallback 到此处校验过的 initialAgent 不让首次启动崩。
     const initialAgent = this.findAgentById(agentId)
@@ -281,10 +285,8 @@ export class FlowRunner {
         flowBaseUrl: latestFlow.base_url,
         flowApiKey: latestFlow.api_key,
       }
-    }, reaskToolInfo)
+    })
     this.executors.set(runId, executor)
-    // reask 路径:pendingToolPermissions 已在 handleFork 预填,executor 保持 lazy 不启动;
-    // 用户回答权限卡片后才注入 tool_result 触发 SDK resume。
   }
 
   // ── signal 发射 ─────────────────────────────────────────────────────────
@@ -366,6 +368,12 @@ export class FlowRunner {
     this.fire('flow.signal.agentInterrupted', { runId })
   }
 
+  /**
+   * tool_permission 回答分流（ts-pattern）：
+   * - ClaudeExecutor + Map 未命中 → fork reask 悬空 tool_use，从 run.messages 取 toolName + input，
+   *   调 `injectToolResult` 构造 tool_result 注入 SDK;
+   * - 其余（Map 命中的普通 canUseTool 挂起、CodeExecutor）→ 调 `answerToolPermission` resolve Promise。
+   */
   private handleToolPermissionResult({
     runId,
     toolUseId,
@@ -375,7 +383,34 @@ export class FlowRunner {
   }: FlowRunnerCommandEvents['flow.command.toolPermissionResult']): void {
     const executor = this.executors.get(runId)
     if (!executor) return
-    executor.answerToolPermission(toolUseId, allow, { updatedInput, message })
+
+    // fork reask 分流（ts-pattern）：
+    // ClaudeExecutor + Map 未命中 → 从 run.messages 取 toolName + input，调 injectToolResult
+    // 其余（Map 命中的普通 canUseTool 挂起、CodeExecutor）→ 调 answerToolPermission resolve
+    match(executor)
+      .when(
+        (e): e is ClaudeExecutor =>
+          e instanceof ClaudeExecutor && !e.hasPendingPermission(toolUseId),
+        (claudeExecutor) => {
+          const messages = this.getRunMessages(runId)
+          const toolUse = messages?.find(
+            (m): m is Extract<ChatMessage, { kind: 'tool_use' }> =>
+              m.kind === 'tool_use' && m.toolUseId === toolUseId,
+          )
+          if (!toolUse) return
+          claudeExecutor.injectToolResult({
+            toolUseId,
+            toolName: toolUse.toolName,
+            allow,
+            input: toolUse.input,
+            updatedInput,
+            message,
+          })
+        },
+      )
+      .otherwise(() => {
+        executor.answerToolPermission(toolUseId, allow, { updatedInput, message })
+      })
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import type {
   ExtensionFlowCommandEvents,
   ExtensionToWebviewMessage,
   AgentOverwrite,
+  ChatMessage,
 } from '@/common'
 import { FlowRunner } from './FlowRunner'
 
@@ -13,6 +14,7 @@ type GetLatestFlow = (flowId: string) => Flow | undefined
 type GetLatestCwd = (flowId: string) => string | undefined | null
 type GetRunSnapshot = (flowId: string, runId: string) => Record<string, string> | undefined
 type GetRunOverwrite = (flowId: string, runId: string) => AgentOverwrite | undefined
+type GetRunMessages = (flowId: string, runId: string) => ChatMessage[] | undefined
 
 export class FlowRunnerManager {
   private runners = new Map<string, FlowRunner>()
@@ -22,6 +24,7 @@ export class FlowRunnerManager {
   private getLatestCwd: GetLatestCwd
   private getRunSnapshot: GetRunSnapshot
   private getRunOverwrite: GetRunOverwrite
+  private getRunMessages: GetRunMessages
 
   constructor(
     postMessage: PostMessage,
@@ -30,6 +33,7 @@ export class FlowRunnerManager {
     getLatestCwd: GetLatestCwd,
     getRunSnapshot: GetRunSnapshot,
     getRunOverwrite: GetRunOverwrite,
+    getRunMessages: GetRunMessages,
   ) {
     this.postMessage = postMessage
     this.getLatestShareValues = getLatestShareValues
@@ -37,6 +41,7 @@ export class FlowRunnerManager {
     this.getLatestCwd = getLatestCwd
     this.getRunSnapshot = getRunSnapshot
     this.getRunOverwrite = getRunOverwrite
+    this.getRunMessages = getRunMessages
   }
 
   /**
@@ -55,6 +60,7 @@ export class FlowRunnerManager {
       getLatestCwd: () => this.getLatestCwd(flowId),
       getRunSnapshot: (runId) => this.getRunSnapshot(flowId, runId),
       getRunOverwrite: (runId) => this.getRunOverwrite(flowId, runId),
+      getRunMessages: (runId) => this.getRunMessages(flowId, runId),
     })
     runner.listenAllSignals((eventType, signalData) => {
       this.postMessage({
@@ -141,20 +147,20 @@ export class FlowRunnerManager {
    * - 不发 flow.signal.flowStart;runId 由 extension 端通过 signal.fork 同步
    * - 调用前必须先把 newFlow 写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId)
    *   实时取最新引用(lazy 闭包内读到的是用户改 agent 后的最新值)
+   * - reask 分流由 FlowRunner.handleToolPermissionResult 根据 hasPendingPermission
+   *   Map 命中/未命中用 ts-pattern 决定，不再需要 reask / reaskToolInfo 参数。
    */
   spawnForFork(params: {
     flowId: string
     agentId: string
     resumeSessionId: string
     runId: string
-    reask?: boolean
-    reaskToolInfo?: { toolName: string; input: unknown }
   }): void {
-    const { flowId, agentId, resumeSessionId, runId, reask, reaskToolInfo } = params
+    const { flowId, agentId, resumeSessionId, runId } = params
     this.disposeRunner(flowId)
     const runner = this.createRunner(flowId)
     this.runners.set(flowId, runner)
-    runner.spawnForFork({ runId, agentId, resumeSessionId, reask, reaskToolInfo })
+    runner.spawnForFork({ runId, agentId, resumeSessionId })
   }
 
   /** 崩溃恢复时为持久化 run 注册 lazy executor，语义同 spawnForFork */

@@ -176,14 +176,6 @@ export class ClaudeExecutor {
   >()
 
   /**
-   * fork reask 路径预存的悬空 tool_use 信息。
-   * 当 `answerToolPermission` 在 `pendingToolPermissions` Map 中未命中时（fork 悬空
-   * tool_use，Map 中无对应 Promise），回退到 `injectToolResult` 用此信息构造 tool_result。
-   * 一次性消费：首次使用后清 undefined。
-   */
-  private reaskToolInfo?: { toolName: string; input: unknown }
-
-  /**
    * ExitPlanMode allow 后置 true，让下一次 createQuery 的 permissionMode 强制为 'default'
    * （覆盖 agent.plan_mode 推导的 'plan'），解锁后续写工具。createQuery 读取后立即清除。
    */
@@ -198,17 +190,13 @@ export class ClaudeExecutor {
    *
    *   **运行时行为**:preToolUseHook / canUseTool / createQuery 每次调用时重新取 agent,
    *   确保运行中改 agent 配置(如 work_mode / must_confirm_tools / deny_tools / outputs)立即生效。
-   * @param reaskToolInfo - fork reask 路径预存的悬空 tool_use 信息（toolName + input）。
-   *   仅 lazy + reask 时传入;非 reask 或 eager 模式不传。
    */
   constructor(
     mode: ExecutorMode,
     getOptions: () => ExecutorOptions,
-    reaskToolInfo?: { toolName: string; input: unknown },
   ) {
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     this.getOptions = getOptions
-    this.reaskToolInfo = reaskToolInfo
     if (mode === 'eager') {
       this.init()
       this.createQuery(getOptions().initMessage)
@@ -304,16 +292,22 @@ export class ClaudeExecutor {
   }
 
   /**
-   * 回答工具权限请求（统一通道,四类挂起共用）。
+   * 检查指定 toolUseId 是否在 `pendingToolPermissions` Map 中挂起。
+   * FlowRunner 据此分流：命中 → 普通 canUseTool resolve；未命中 → fork reask 注入 tool_result。
+   */
+  hasPendingPermission(toolUseId: string): boolean {
+    return this.pendingToolPermissions.has(toolUseId)
+  }
+
+  /**
+   * 回答工具权限请求（普通 canUseTool 挂起路径）。
+   * `pendingToolPermissions` Map 命中时 resolve Promise，让 SDK 真执行工具。
+   * fork reask 悬空 tool_use（Map 未命中）由 FlowRunner 直接调 `injectToolResult`，不进此方法。
+   *
    * - allow：放行,updatedInput 覆盖入参(缺省用挂起时存的 input);
    *   AskUserQuestion 回答 = allow + updatedInput={questions,answers,annotations?}
    * - deny：返回带 message 的拒绝结果(缺省 'user denied'),SDK 在本次工具调用处产生
    *   一条 is_error 的 tool_result;CompleteTask 拒绝 = deny + message=reason
-   *
-   * 两条路径:
-   * 1. `pendingToolPermissions` Map 命中 → 普通 canUseTool 挂起路径,resolve Promise;
-   * 2. Map 未命中 + `reaskToolInfo` 存在 → fork 悬空 tool_use 路径,
-   *    走 `injectToolResult` 构造 tool_result 注入 SDK。
    */
   answerToolPermission(
     toolUseId: string,
@@ -321,36 +315,21 @@ export class ClaudeExecutor {
     opts?: { updatedInput?: unknown; message?: string },
   ): void {
     const pending = this.pendingToolPermissions.get(toolUseId)
-    if (pending) {
-      this.pendingToolPermissions.delete(toolUseId)
-      pending.resolve(
-        allow
-          ? {
-              behavior: 'allow',
-              updatedInput: (opts?.updatedInput ?? pending.input) as Record<string, unknown>,
-              toolUseID: toolUseId,
-            }
-          : {
-              behavior: 'deny',
-              message: opts?.message ?? 'user denied',
-              toolUseID: toolUseId,
-            },
-      )
-      return
-    }
-    // fork reask: Map 未命中(悬空 tool_use 无 Promise 等待 resolve),走 tool_result 注入
-    if (this.reaskToolInfo) {
-      const { toolName, input } = this.reaskToolInfo
-      this.reaskToolInfo = undefined // 一次性消费
-      this.injectToolResult({
-        toolUseId,
-        toolName,
-        allow,
-        input,
-        updatedInput: opts?.updatedInput,
-        message: opts?.message,
-      })
-    }
+    if (!pending) return
+    this.pendingToolPermissions.delete(toolUseId)
+    pending.resolve(
+      allow
+        ? {
+            behavior: 'allow',
+            updatedInput: (opts?.updatedInput ?? pending.input) as Record<string, unknown>,
+            toolUseID: toolUseId,
+          }
+        : {
+            behavior: 'deny',
+            message: opts?.message ?? 'user denied',
+            toolUseID: toolUseId,
+          },
+    )
   }
 
   private rejectAllPendingPermissions(reason: string): void {

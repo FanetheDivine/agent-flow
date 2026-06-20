@@ -66,7 +66,7 @@ fork 按钮入口分两条路径：
 - `isReaskTool` helper 判定工具类型：Edit 精确等值（内置工具名），ExitPlanMode / AskUserQuestion 用 `.includes` 兼容 mcp 前缀。
 - 构造 newRun 时 `interrupted: false`，末端 tool_use 重置为 `pending`（清空 result），删除 `answeredToolPermissions` 中该 toolUseId 的旧答案。
 - `pendingToolPermissions` 预填一项 `{runId, toolUseId, toolName, input}`，`getRunPhase` 直接推断 `awaiting-tool-permission`，webview 底部立即展示权限卡片。
-- executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 canUseTool，此路径已失效）；用户回答卡片后由 `ClaudeExecutor.injectToolResult` 构造 `tool_result` 注入 SDK 触发 resume。`spawnForFork` 传入 `reaskToolInfo`（toolName + input），executor 在 `answerToolPermission` 的 Map-未命中分支消费它。
+- executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 canUseTool，此路径已失效）。用户回答卡片后，`FlowRunner.handleToolPermissionResult` 用 `ts-pattern` 分流：`hasPendingPermission` Map 未命中（fork 悬空 tool_use 无 Promise）→ 从 `getRunMessages` 取 toolName + input，调 `ClaudeExecutor.injectToolResult` 构造 `tool_result` 注入 SDK 触发 resume；Map 命中 → 走普通 `answerToolPermission` resolve。分流逻辑在 FlowRunner 层而非 executor 内部，`spawnForFork` 不再需要 `reask` / `reaskToolInfo` 参数。
 - 三工具不产生 subagent，`locateFork` 子消息逻辑不触发，`messageIdx` 即 tool_use 自身。
 
 非三工具的 tool_use（如普通工具）和其他消息类型保持 interrupted 行为不变。
