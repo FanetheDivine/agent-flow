@@ -26,6 +26,7 @@ import type { AgentRun } from '@/webview/store/flow'
 import { useFlowStore, flowCanBeKilled, type AgentPhase } from '@/webview/store/flow'
 import { postMessageToExtension } from '@/webview/utils'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
+import { ForkButton } from './MessageBubble'
 import { MessageList, type MessageListRef } from './MessageList'
 import { ToolPermissionCard } from './ToolPermissionCard'
 
@@ -248,6 +249,33 @@ export const ChatPanel: FC<Props> = ({
       data: { filename: planFilePath, placement: 'active' },
     })
   }, [])
+
+  // 从 run 消息中反查 tool_use 的 uuid，作为 fork 切片终点
+  const findForkUuid = useCallback(
+    (runId: string, toolUseId: string): string | undefined => {
+      if (!fs) return undefined
+      const run = fs.runs.find((r) => r.runId === runId)
+      const msg = run?.messages.find(
+        (m) => m.kind === 'tool_use' && m.toolUseId === toolUseId,
+      )
+      return msg?.uuid
+    },
+    [fs],
+  )
+
+  // 为底部 active 卡片构造 fork 按钮：uuid 未定稿时返回 undefined（不渲染）
+  const buildPendingForkButton = useCallback(
+    (runId: string, toolUseId: string) => {
+      const forkUuid = findForkUuid(runId, toolUseId)
+      if (!forkUuid) return undefined
+      return (
+        <ForkButton
+          onFork={() => useFlowStore.getState().forkFlow(flowId, { runId, messageUuid: forkUuid })}
+        />
+      )
+    },
+    [findForkUuid, flowId],
+  )
 
   const onPermAllow = useCallback(
     (perm: PendingToolPermission) => {
@@ -496,6 +524,11 @@ export const ChatPanel: FC<Props> = ({
                 onChangeHeight={(h) => {
                   setCardHeight(Math.max(80, Math.min(600, h)))
                 }}
+                fork={
+                  pendingQuestions[0]
+                    ? buildPendingForkButton(pendingQuestions[0].runId, pendingQuestions[0].toolUseId)
+                    : undefined
+                }
               />
             </div>
           </motion.div>
@@ -561,6 +594,7 @@ export const ChatPanel: FC<Props> = ({
                         : undefined
                     }
                     onChangeHeight={(h) => setPermCardHeight(Math.max(80, Math.min(600, h)))}
+                    fork={buildPendingForkButton(perm.runId, perm.toolUseId)}
                   />
                 </div>
               </motion.div>
