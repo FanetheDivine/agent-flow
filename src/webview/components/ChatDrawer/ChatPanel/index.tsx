@@ -545,6 +545,10 @@ export const ChatPanel: FC<Props> = ({
             const planFilePath = isExitPlan
               ? ((perm.input as { planFilePath?: string })?.planFilePath ?? '')
               : ''
+            // reask 判定:fork 出的 reask run 构造时 interrupted=false(非 reask fork 为 true),
+            // 普通 run(非 fork 产生)interrupted 为 undefined,故 === false 精确命中 reask fork。
+            const permRun = allRuns?.find((r) => r.runId === perm.runId)
+            const isReask = permRun?.interrupted === false
             return (
               <motion.div
                 key={`perm-card-${perm.toolUseId}`}
@@ -593,6 +597,7 @@ export const ChatPanel: FC<Props> = ({
                           }
                         : undefined
                     }
+                    isReask={isReask}
                     onChangeHeight={(h) => setPermCardHeight(Math.max(80, Math.min(600, h)))}
                     fork={buildPendingForkButton(perm.runId, perm.toolUseId)}
                   />

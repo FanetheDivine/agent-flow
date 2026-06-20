@@ -43,6 +43,8 @@ type Props = {
     oldString: string
     newString: string
   }
+  /** reask 路径标记：fork 自 pending 卡片的 reask run，allow 不真正执行文件写入 */
+  isReask?: boolean
   onChangeHeight?: (height: number) => void
   fork?: ReactNode
 }
@@ -65,6 +67,7 @@ export const ToolPermissionCard: FC<Props> = ({
   onDeny,
   exitPlan,
   editDiff,
+  isReask,
   fork,
   onChangeHeight,
 }) => {
@@ -214,6 +217,11 @@ export const ToolPermissionCard: FC<Props> = ({
         <pre className='m-0 max-h-40 overflow-auto rounded bg-[#11111b] p-2 text-[10.5px] whitespace-pre-wrap text-[#cdd6f4]'>
           {formatInput(input)}
         </pre>
+      )}
+      {isActive && isReask && isEditDiff && (
+        <span className='text-[11px] leading-snug text-[#fab387]'>
+          ⚠ Reask 允许仅向新会话注入 tool_result，不会重新写入文件，文件状态以源会话为准。
+        </span>
       )}
       <RadioWithInput
         options={displayOptions}
