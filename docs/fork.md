@@ -22,9 +22,10 @@ fork 走 `handleFork`：
 2. 并发取源 session 与新 session transcript。
 3. 按位置建立 `srcUuid → newUuid` 映射。
 4. 替换 slicedMessages 中所有带 uuid 的 SDK 消息。
-5. `setRunState` 写入新 FlowRunState。
-6. `spawnForFork` 启动 FlowRunner + lazy executor。
-7. 发送 `flow.signal.fork`。
+5. 判定 reask：切片末端为三工具（AskUserQuestion / ExitPlanMode / Edit）tool_use 时走 reask 路径。
+6. `setRunState` 写入新 FlowRunState。
+7. `spawnForFork` 启动 FlowRunner + lazy executor（reask 时立即 resume 悬空 tool_use）。
+8. 发送 `flow.signal.fork`。
 
 新 run 由 `structuredClone(targetRun)` 复制，继承源 run 的 `shareValuesSnapshot`（会话开始时点快照）与 `overwrite`。lazy executor 首次启动经 `getRunSnapshot(runId)` 从 state 读此快照作 `currentValues`，经 `getRunOverwrite(runId)` 读取源 run 的临时改写配置，复现 fork 起点的 system prompt、ReadShareValue、work_mode 与 `outputs[].require_confirm`，与历史自洽；旧持久化 run 无快照字段时兜底 `getLatestShareValues()`。restore 路径（`spawnForRestore`）同源共用此 lazy executor 机制。
 
@@ -46,9 +47,20 @@ webview 收到 `flow.signal.fork` 后：
 - agent_complete / error：无 uuid，不能作 fork 锚点。
 - streaming 消息 uuid 未定稿，不能作回溯命中。
 
+## reask 路径
+
+切片末端为三工具（AskUserQuestion / ExitPlanMode / Edit）的 tool_use 时走 reask 路径：
+
+- `isReaskTool` helper 判定工具类型：Edit 精确等值（内置工具名），ExitPlanMode / AskUserQuestion 用 `.includes` 兼容 mcp 前缀。
+- 构造 newRun 时 `interrupted: false`，末端 tool_use 重置为 `pending`（清空 result），删除 `answeredToolPermissions` 中该 toolUseId 的旧答案。
+- `getRunPhase` 由末项 pending tool_use 推断 `running`（loading），resume 后 executor fire `toolPermissionRequest` 转 `awaiting-tool-permission`。
+- `pendingToolPermissions` 不预填（避免 executor 尚未 resume 时 answerToolPermission 落空），靠 resume 后 canUseTool 自然入队。
+- 三工具不产生 subagent，`locateFork` 子消息逻辑不触发，`messageIdx` 即 tool_use 自身。
+
+非三工具的 tool_use（如普通工具）和其他消息类型保持 interrupted 行为不变。
+
 ## 限制
 
-- SDK 不支持把 AskUserQuestion 作 fork 终点。
 - 来自 subAgent 的 tool_use 不能 fork，避免 fork 到无法寻址的消息位置。
 - 检测子消息归属时必须确保当前 fork 消息有 `toolUseId`。
 - code 节点不支持作 fork 起点。

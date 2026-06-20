@@ -272,10 +272,9 @@ type FlowCommandPayload = {
    * - flowId（由 WithFlowId 注入）= 源 Flow id
    * - target：fork 目标。**target.runId 唯一定位源 RunState 中的 AgentRun**,
    *   extension 在该 run 的 messages 内按 messageUuid 找切片终点,
-   *   以指定 SDK 消息 UUID 为切片终点（含），fork 后新 Flow 进入 `result` 态。
-   *
-   * SDK 不支持把 askUserQuestion 作为 fork 终点 —— 切片末端只能是
-   * user/text/thinking/turn_end。
+   *   以指定 SDK 消息 UUID 为切片终点（含）。
+   *   切片终点为三工具(AskUserQuestion/ExitPlanMode/Edit)tool_use 时走 reask 路径
+   *   (新会话自动 resume 进权限卡片);其它消息走 interrupted 路径。
    */
   fork: {
     target: { runId: string; messageUuid: string }

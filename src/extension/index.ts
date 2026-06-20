@@ -5,6 +5,7 @@ import { match, P } from 'ts-pattern'
 import * as vscode from 'vscode'
 import {
   type AgentRun,
+  type ChatMessage,
   type ExtensionFlowCommandEvents,
   type ExtensionFlowCommandMessage,
   type ExtensionFlowSignalMessage,
@@ -341,6 +342,19 @@ export function activate(context: vscode.ExtensionContext) {
   )
 
   /**
+   * fork 切片终点为三工具 tool_use 时走 reask 路径(新会话自动 resume 进权限卡片)。
+   * Edit 用精确等值(内置工具名,与 webview MessageBubble 一致);
+   * ExitPlanMode / AskUserQuestion 用 .includes 兼容 mcp 前缀(遵循 tool-permission 硬约束)。
+   */
+  const isReaskTool = (msg: ChatMessage): boolean =>
+    msg.kind === 'tool_use' &&
+    match(msg.toolName)
+      .when((n) => n.includes('ExitPlanMode'), () => true)
+      .when((n) => n.includes('AskUserQuestion'), () => true)
+      .with('Edit', () => true)
+      .otherwise(() => false)
+
+  /**
    * 在源 RunState 的指定 run 中定位 fork 切片终点。
    * target.runId 已唯一定位 AgentRun,这里只在该 run 的 messages 内寻 messageUuid。
    * - `messageIdx` 为 target 命中的 ChatMessage 在 run.messages 中的索引,
@@ -480,6 +494,11 @@ export function activate(context: vscode.ExtensionContext) {
     slicedMessages.forEach((m, i) => {
       if (m.kind === 'tool_use') toolUseIndex[m.toolUseId] = i
     })
+    // reask 判定:切片末端为三工具(AskUserQuestion/ExitPlanMode/Edit)的 tool_use 时
+    // 走 reask 路径(新会话自动 resume 进权限卡片),其它消息保持 interrupted 行为。
+    const lastSlicedMsg = slicedMessages[slicedMessages.length - 1]
+    const reask = !!lastSlicedMsg && isReaskTool(lastSlicedMsg)
+    const answeredToolPermissions = { ...sourceState.answeredToolPermissions }
     const newRun: AgentRun = {
       ...baseRun,
       runId: newRunId,
@@ -493,8 +512,10 @@ export function activate(context: vscode.ExtensionContext) {
       overwrite: baseRun.overwrite,
       // structuredClone 会带过旧 error → getRunPhase 返 error 而非 interrupted,显式清除
       error: undefined,
-      // fork 后置 interrupted 让 getRunPhase 推断为 'interrupted'(ChatInput ready 可发消息)
-      interrupted: true,
+      // reask 路径:不置 interrupted,getRunPhase 由末项 pending tool_use 推断 running(loading),
+      //   resume 后 executor fire toolPermissionRequest 转 awaiting-tool-permission;
+      // 非 reask 路径:置 interrupted,getRunPhase 推断 interrupted(ChatInput ready 可发消息)
+      interrupted: !reask,
       acc: {
         ...baseRun.acc,
         activeBlocks: {},
@@ -504,12 +525,19 @@ export function activate(context: vscode.ExtensionContext) {
     }
     // 切片末端未定稿的 streaming/pending 项标记为 interrupted(替代原追加 agentInterrupted 信号)
     markInterrupted(newRun)
+    if (reask && lastSlicedMsg?.kind === 'tool_use') {
+      // reask 路径:末端 tool_use 重置回 pending(新 session 悬空、等 resume 重新回答),
+      // 清空旧 result,删除旧权限答案(新会话需重新走 canUseTool)
+      lastSlicedMsg.status = 'pending'
+      lastSlicedMsg.result = undefined
+      delete answeredToolPermissions[lastSlicedMsg.toolUseId]
+    }
     newRuns.push(newRun)
 
     const newRunState: FlowRunState = {
       killed: false,
       runs: newRuns,
-      answeredToolPermissions: { ...sourceState.answeredToolPermissions },
+      answeredToolPermissions,
       pendingToolPermissions: [],
       shareValues: { ...sourceState.shareValues },
       cwd: sourceState.cwd,
@@ -528,9 +556,9 @@ export function activate(context: vscode.ExtensionContext) {
     // userMessage / answerToolPermission / interrupt 都能正常匹配到此 runner。
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
     // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
-    // reask:fork 切片末端为悬空 tool_use 时,spawn 后立即触发 SDK resume 让 canUseTool
-    // 重新评估该 tool_use 并进入权限卡片态;否则走传统 lazy 路径等用户 sendUserMessage。
-    const reask = slicedMessages[slicedMessages.length - 1]?.kind === 'tool_use'
+    // reask:fork 切片末端为三工具(AskUserQuestion/ExitPlanMode/Edit)tool_use 时,
+    // spawn 后立即触发 SDK resume 让 canUseTool 重新评估该 tool_use 并进入权限卡片态;
+    // 否则走传统 lazy 路径等用户 sendUserMessage。
     runnerManager.spawnForFork({
       flowId: newFlowId,
       agentId,
