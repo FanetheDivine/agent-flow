@@ -67,6 +67,12 @@ fork 按钮入口分两条路径：
 - 构造 newRun 时 `interrupted: false`，末端 tool_use 重置为 `pending`（清空 result），删除 `answeredToolPermissions` 中该 toolUseId 的旧答案。
 - `pendingToolPermissions` 预填一项 `{runId, toolUseId, toolName, input}`，`getRunPhase` 直接推断 `awaiting-tool-permission`，webview 底部立即展示权限卡片。
 - executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 canUseTool，此路径已失效）。用户回答卡片后，`FlowRunner.handleToolPermissionResult` 用 `ts-pattern` 分流：`hasPendingPermission` Map 未命中（fork 悬空 tool_use 无 Promise）→ 从 `getRunMessages` 取 toolName + input，调 `ClaudeExecutor.injectToolResult` 构造 `tool_result` 注入 SDK 触发 resume；Map 命中 → 走普通 `answerToolPermission` resolve。分流逻辑在 FlowRunner 层而非 executor 内部，`spawnForFork` 不再需要 `reask` / `reaskToolInfo` 参数。
+- `injectToolResult` 不产生工具副作用：仅构造 `SDKUserMessage` 注入 SDK + `events.onMessage` 手动 echo（SDK 不 mirror push 进 input stream 的 user 消息，参考 silent 续轮），reducer 合并 tool_result 置 done。`buildToolResultText`（[`../src/common/index.ts`](../src/common/index.ts)）按工具类型生成文本：
+  - AskUserQuestion allow：`Your questions have been answered: "问题"="答案", .... You can now continue with these answers in mind.`（多选答案以 unit separator 连接）
+  - ExitPlanMode allow：`User has approved exiting plan mode. You can now proceed.`
+  - Edit allow：`The file <file_path> has been updated successfully. (file state is current in your context — no need to Read it back)`
+  - deny（任意工具）：固定拒绝模板 + `is_error: true`
+- 工具副作用：Edit allow 仅注入 tool_result 文本，不重新写文件（fork 自 pending 卡片，文件状态以源会话为准）—— `ToolPermissionCard` 对 reask Edit（`isReask` prop，由 `permRun.interrupted === false` 判定）展示 ⚠ 提示。ExitPlanMode allow 置 `_forceDefaultPermissionMode` 覆盖 agent.plan_mode 推导的 `'plan'`，让 `createQuery` 的 `permissionMode` 为 `'default'`，解锁后续写工具。AskUserQuestion 无副作用，注入 tool_result 后 SDK 续接最干净。
 - 三工具不产生 subagent，`locateFork` 子消息逻辑不触发，`messageIdx` 即 tool_use 自身。
 
 非三工具的 tool_use（如普通工具）和其他消息类型保持 interrupted 行为不变。

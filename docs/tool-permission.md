@@ -71,6 +71,15 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 
 依赖关系：reask 不再依赖 SDK resume 触发 `canUseTool`，改为 fork 时直接预填 `pendingToolPermissions` 进卡片态，用户回答后由 FlowRunner 层分流注入 tool_result 驱动 SDK 继续。
 
+## 两条权限应答路径
+
+`FlowRunner.handleToolPermissionResult` 根据 `hasPendingPermission(toolUseId)` 分流，两条路径互不干扰：
+
+- **普通 canUseTool resolve**（Map 命中）：`canUseTool` 挂起时创建 Promise 存入 `executor.pendingToolPermissions` Map；回答时 `answerToolPermission` resolve Promise，SDK 真执行工具（Edit 写文件、ExitPlanMode 切模式等）。
+- **fork reask 注入 tool_result**（Map 未命中）：fork 悬空 tool_use 无 Promise（executor lazy 未启动）；回答时从 `getRunMessages(runId)` 取 toolName + input，`injectToolResult` 构造 `SDKUserMessage`（content 为 tool_result 块）+ `events.onMessage` echo，SDK resume 续接。不产生工具副作用（Edit 不写文件）；ExitPlanMode allow 需额外置 `permissionMode='default'` 解锁后续写工具；AskUserQuestion 无副作用。
+
+区分依据：`executor.pendingToolPermissions` Map 命中 = 普通 resolve；未命中 = reask 注入。不可混淆——普通 Edit allow 若走注入路径会导致文件状态漂移。
+
 ## 硬约束
 
 - 只有一套 tool permission 机制，禁止为特殊工具新增旁路。

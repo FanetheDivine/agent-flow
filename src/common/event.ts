@@ -274,7 +274,8 @@ type FlowCommandPayload = {
    *   extension 在该 run 的 messages 内按 messageUuid 找切片终点,
    *   以指定 SDK 消息 UUID 为切片终点（含）。
    *   切片终点为三工具(AskUserQuestion/ExitPlanMode/Edit)tool_use 时走 reask 路径
-   *   (新会话自动 resume 进权限卡片);其它消息走 interrupted 路径。
+   *   (预填 pendingToolPermissions 进卡片态,用户回答后 injectToolResult 注入
+   *   tool_result 驱动 SDK resume);其它消息走 interrupted 路径。
    */
   fork: {
     target: { runId: string; messageUuid: string }
