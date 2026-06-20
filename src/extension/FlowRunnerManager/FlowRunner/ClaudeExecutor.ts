@@ -15,6 +15,7 @@ import {
   AIMessageType,
   AskUserQuestionInput,
   buildAgentSystemPrompt,
+  buildToolResultText,
   matchToolRule,
   pickInjectedShareValues,
   ShareValueKey,
@@ -175,6 +176,20 @@ export class ClaudeExecutor {
   >()
 
   /**
+   * fork reask 路径预存的悬空 tool_use 信息。
+   * 当 `answerToolPermission` 在 `pendingToolPermissions` Map 中未命中时（fork 悬空
+   * tool_use，Map 中无对应 Promise），回退到 `injectToolResult` 用此信息构造 tool_result。
+   * 一次性消费：首次使用后清 undefined。
+   */
+  private reaskToolInfo?: { toolName: string; input: unknown }
+
+  /**
+   * ExitPlanMode allow 后置 true，让下一次 createQuery 的 permissionMode 强制为 'default'
+   * （覆盖 agent.plan_mode 推导的 'plan'），解锁后续写工具。createQuery 读取后立即清除。
+   */
+  private _forceDefaultPermissionMode = false
+
+  /**
    * @param mode - 启动模式,见 {@link ExecutorMode}
    * @param getOptions - 返回启动所需全部数据的回调。
    *   - eager: 构造时调用一次(初始化 prompt / sessionId)+ createQuery 内部再调用取最新 agent
@@ -183,10 +198,17 @@ export class ClaudeExecutor {
    *
    *   **运行时行为**:preToolUseHook / canUseTool / createQuery 每次调用时重新取 agent,
    *   确保运行中改 agent 配置(如 work_mode / must_confirm_tools / deny_tools / outputs)立即生效。
+   * @param reaskToolInfo - fork reask 路径预存的悬空 tool_use 信息（toolName + input）。
+   *   仅 lazy + reask 时传入;非 reask 或 eager 模式不传。
    */
-  constructor(mode: ExecutorMode, getOptions: () => ExecutorOptions) {
+  constructor(
+    mode: ExecutorMode,
+    getOptions: () => ExecutorOptions,
+    reaskToolInfo?: { toolName: string; input: unknown },
+  ) {
     this.userInputStream = createMessageChannel<SDKUserMessage>()
     this.getOptions = getOptions
+    this.reaskToolInfo = reaskToolInfo
     if (mode === 'eager') {
       this.init()
       this.createQuery(getOptions().initMessage)
@@ -287,6 +309,11 @@ export class ClaudeExecutor {
    *   AskUserQuestion 回答 = allow + updatedInput={questions,answers,annotations?}
    * - deny：返回带 message 的拒绝结果(缺省 'user denied'),SDK 在本次工具调用处产生
    *   一条 is_error 的 tool_result;CompleteTask 拒绝 = deny + message=reason
+   *
+   * 两条路径:
+   * 1. `pendingToolPermissions` Map 命中 → 普通 canUseTool 挂起路径,resolve Promise;
+   * 2. Map 未命中 + `reaskToolInfo` 存在 → fork 悬空 tool_use 路径,
+   *    走 `injectToolResult` 构造 tool_result 注入 SDK。
    */
   answerToolPermission(
     toolUseId: string,
@@ -310,6 +337,19 @@ export class ClaudeExecutor {
             },
       )
       return
+    }
+    // fork reask: Map 未命中(悬空 tool_use 无 Promise 等待 resolve),走 tool_result 注入
+    if (this.reaskToolInfo) {
+      const { toolName, input } = this.reaskToolInfo
+      this.reaskToolInfo = undefined // 一次性消费
+      this.injectToolResult({
+        toolUseId,
+        toolName,
+        allow,
+        input,
+        updatedInput: opts?.updatedInput,
+        message: opts?.message,
+      })
     }
   }
 
@@ -499,29 +539,63 @@ export class ClaudeExecutor {
   }
 
   /**
-   * fork 后自动 resume 悬空 tool_use，重新触发 canUseTool 进入权限卡片态。
+   * fork-reask 路径：构造 tool_result 消息注入 SDK，驱动悬空 tool_use 续接。
    *
-   * fork 路径(lazy + resumeSessionId)构造时不启动 query；forkSession 切出的新 session
-   * 末尾是悬空 tool_use(无 tool_result)，需主动启动 query 让 SDK resume 后重新触发
-   * canUseTool。canUseTool 对 AskUserQuestion / ExitPlanMode / Edit(via must_confirm_tools)
-   * 已有挂起逻辑，会 fire onToolPermissionRequest 进入权限卡片。
+   * fork 切片末端为三工具（AskUserQuestion / ExitPlanMode / Edit）的悬空 tool_use 时，
+   * `pendingToolPermissions` 已预填进 FlowRunState 卡片态，executor 保持 lazy 不启动。
+   * 用户回答卡片后由 `answerToolPermission` 的 Map-未命中分支调用本方法：
+   * 1. 用 `buildToolResultText` 按工具类型生成 tool_result 文本;
+   * 2. 构造 `SDKUserMessage`（content 为 tool_result 块数组）;
+   * 3. 注入 SDK：queryInstance 不存在时 createQuery（lazy 首次启动），存在时 push;
+   * 4. 手动 echo `events.onMessage`（SDK 不 mirror push 的 user 消息，参考 silent 续轮）。
    *
-   * 与 sendUserMessage 的区别：不 push 任何 user message，纯靠 SDK resume 悬空 tool_use
-   * 自动重新调用 canUseTool。若 SDK 要求至少一条输入才推进，需改为 push 最小续接消息。
-   *
-   * silent_task 模式下 canUseTool 自动应答(不进卡片)，reask 面向交互模式(task/chat)。
+   * ExitPlanMode allow 特例：置 `_forceDefaultPermissionMode` 让 createQuery 的
+   * permissionMode 为 'default'（覆盖 agent.plan_mode 推导的 'plan'），解锁后续写工具。
    */
-  async startReask(): Promise<void> {
+  async injectToolResult(params: {
+    toolUseId: string
+    toolName: string
+    allow: boolean
+    input?: unknown
+    updatedInput?: unknown
+    message?: string
+  }): Promise<void> {
     if (this.disposed || this.completed) return
-    if (this.queryInstance) return // 已有活跃 query,不重复启动
-    // dummy message —— skipPushInit=true 保证不会 push 到 userInputStream
-    const dummyMessage: UserMessageType = {
-      type: 'user',
-      message: { role: 'user', content: '' },
-      parent_tool_use_id: null,
-      session_id: '',
+
+    const { toolUseId, toolName, allow, input, updatedInput, message } = params
+    const text = buildToolResultText(toolName, allow, input, updatedInput, message)
+
+    // ExitPlanMode allow: 用户已批准退出 plan，后续写工具不应被 plan 模式拦截
+    if (allow && toolName.includes('ExitPlanMode')) {
+      this._forceDefaultPermissionMode = true
     }
-    await this.createQuery(dummyMessage, true)
+
+    const toolResultMsg: SDKUserMessage = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: text,
+            ...(allow ? {} : { is_error: true }),
+          },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: this._sessionId ?? '',
+    }
+
+    if (this.queryInstance) {
+      // 当前 query 仍在运行，直接推入流
+      this.userInputStream.push(toolResultMsg)
+    } else {
+      // lazy 首次启动：createQuery 会 push 此消息作为初始输入
+      await this.createQuery(toolResultMsg)
+    }
+    // SDK 不 mirror push 进 input stream 的 user 消息，手动 echo 让 reducer 合并 tool_result
+    this.getOptions().events.onMessage(toolResultMsg as unknown as AIMessageType)
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
@@ -589,12 +663,19 @@ export class ClaudeExecutor {
       },
       settingSources: agent.isolation_mode ? [] : undefined,
       mcpServers: { AgentControllerMcp: this.mcpServer },
-      permissionMode: agent.plan_mode ? 'plan' : 'default',
+      // ExitPlanMode allow 后强制 'default'，解锁后续写工具；否则按 agent.plan_mode 推导
+      permissionMode: this._forceDefaultPermissionMode
+        ? 'default'
+        : agent.plan_mode
+          ? 'plan'
+          : 'default',
       canUseTool: this.canUseTool,
       hooks: { PreToolUse: [{ hooks: [this.preToolUseHook] }] },
       cwd: this.getOptions().cwd,
       includePartialMessages: true,
     }
+    // 一次性消费：ExitPlanMode allow 标志在 options 构建后立即清除
+    this._forceDefaultPermissionMode = false
     // env 注入:SDK 文档约定 options.env 一旦设置会**替换**整个子进程 env,
     // 因此必须 spread process.env 保住 PATH/HOME 等。仅当 baseUrl / apiKey 任一非空
     // 才覆盖,否则保持默认继承 —— 避免无谓地把整个 process.env 物化到 SDK 子进程。

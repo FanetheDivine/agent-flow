@@ -208,6 +208,53 @@ export type AskUserQuestionOutput = {
   annotations?: Record<string, { notes?: string; preview?: string }>
 }
 
+/**
+ * 构造 tool_result 文本内容（无 SDK 依赖，纯字符串）。
+ * 用于 fork-reask 路径：悬空 tool_use 无 tool_result，用户回答后由 executor 注入此文本
+ * 驱动 SDK resume。deny 文本固定不分工具；allow 文本按工具类型分支。
+ */
+export function buildToolResultText(
+  toolName: string,
+  allow: boolean,
+  input?: unknown,
+  updatedInput?: unknown,
+  message?: string,
+): string {
+  if (!allow) {
+    const base =
+      "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+    return message ? `${base} ${message}` : base
+  }
+  return match(toolName)
+    .when(
+      (n) => n.includes('AskUserQuestion'),
+      () => {
+        const src = (updatedInput ?? input) as AskUserQuestionOutput | undefined
+        if (!src?.questions?.length) return 'Questions answered.'
+        const parts = src.questions.map((q) => {
+          const raw = src.answers?.[q.question] ?? ''
+          // 多选答案在 answers 中以英文逗号分隔，转为 unit separator
+          const answer = raw.replace(/,/g, '\x1F')
+          return `"${q.question}"="${answer}"`
+        })
+        return `Your questions have been answered: ${parts.join(', ')}. You can now continue with these answers in mind.`
+      },
+    )
+    .when(
+      (n) => n.includes('ExitPlanMode'),
+      () => 'User has approved exiting plan mode. You can now proceed.',
+    )
+    .with(
+      'Edit',
+      () => {
+        const filePath =
+          (input as { file_path?: string } | undefined)?.file_path ?? 'the file'
+        return `The file ${filePath} has been updated successfully. (file state is current in your context — no need to Read it back)`
+      },
+    )
+    .otherwise(() => 'Tool use approved.')
+}
+
 /** 持久化到本地的 flows */
 export const PersistedDataSchema = z.object({
   flows: z.array(FlowSchema),

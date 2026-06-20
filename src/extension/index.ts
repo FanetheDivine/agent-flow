@@ -583,6 +583,11 @@ export function activate(context: vscode.ExtensionContext) {
       resumeSessionId: newSessionId,
       runId: newRunId,
       reask,
+      // reask 路径:传递悬空 tool_use 的 toolName 与 input,供 executor 在
+      // answerToolPermission 的 Map-未命中分支构造 tool_result 注入 SDK。
+      ...(reask && lastSlicedMsg?.kind === 'tool_use'
+        ? { reaskToolInfo: { toolName: lastSlicedMsg.toolName, input: lastSlicedMsg.input } }
+        : {}),
     })
 
     postMessageToWebview({

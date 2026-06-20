@@ -218,21 +218,22 @@ export class FlowRunner {
    * 不 fire flow.signal.flowStart(fork 由 extension 端用 flow.signal.fork 替代)。
    *
    * lazy 模式:executor 处于 lazy 态,构造时不 createQuery、不 push initMessage,
-   * 等用户首次 sendUserMessage 或 startReask 触发 SDK 启动。
+   * 等用户首次 sendUserMessage 或 injectToolResult 触发 SDK 启动。
    *
    * @param reask - fork 切片末端为悬空 tool_use(无 tool_result)时为 true,
-   *   spawn 后立即调 startReask() 触发 SDK resume,canUseTool 重新评估该 tool_use
-   *   并 fire onToolPermissionRequest 进入权限卡片态。缺省时走传统 lazy 路径,
-   *   等用户 sendUserMessage 才启动。
+   *   executor 保持 lazy 不启动,等用户回答权限卡片后由 answerToolPermission 走
+   *   injectToolResult 注入 tool_result 驱动 SDK resume。
+   * @param reaskToolInfo - reask 为 true 时传入悬空 tool_use 的 toolName 与 input,
+   *   供 executor 在 answerToolPermission 的 Map-未命中分支构造 tool_result。
    */
   spawnForFork(params: {
     runId: string
     agentId: string
     resumeSessionId: string
     reask?: boolean
+    reaskToolInfo?: { toolName: string; input: unknown }
   }): void {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reask 参数链路暂保留,子任务3 决定去留
-    const { runId, agentId, resumeSessionId, reask } = params
+    const { runId, agentId, resumeSessionId, reaskToolInfo } = params
     // 提前 fail-fast:agent 必须存在才启动 lazy executor。lazy 闭包内仍会重新查最新 agent
     // 应用变更;若运行期间 agent 被删,fallback 到此处校验过的 initialAgent 不让首次启动崩。
     const initialAgent = this.findAgentById(agentId)
@@ -280,7 +281,7 @@ export class FlowRunner {
         flowBaseUrl: latestFlow.base_url,
         flowApiKey: latestFlow.api_key,
       }
-    })
+    }, reaskToolInfo)
     this.executors.set(runId, executor)
     // reask 路径:pendingToolPermissions 已在 handleFork 预填,executor 保持 lazy 不启动;
     // 用户回答权限卡片后才注入 tool_result 触发 SDK resume。

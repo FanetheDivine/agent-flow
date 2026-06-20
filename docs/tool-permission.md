@@ -66,8 +66,8 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 1. 用户点击权限卡片上的 fork 按钮，发送 `flow.command.fork`（target 为该 tool_use 的 assistant uuid）。
 2. `handleFork` 创建新 session，切片末端为该 tool_use；构造 newRun 时 `interrupted: false`，tool_use 重置为 `pending`，清空旧 `result` 与 `answeredToolPermissions` 中该 toolUseId 的旧答案。
 3. `pendingToolPermissions` 预填一项 `{runId, toolUseId, toolName, input}`，`getRunPhase` 直接推断 `awaiting-tool-permission`，webview 底部立即展示权限卡片。
-4. executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 `canUseTool`，原 `startReask()` 路径已失效并移除）。
-5. 用户回答卡片后，由 fork-reask 注入逻辑（子任务 2）构造 `tool_result` 注入 SDK 触发 resume，走正常 tool_result 处理流程。
+4. executor 保持 lazy 不启动（SDK resume 悬空 tool_use 不会重新触发 `canUseTool`，原 `startReask()` 路径已失效并移除）。`spawnForFork` 传入 `reaskToolInfo`（toolName + input）供后续注入使用。
+5. 用户回答卡片后，`answerToolPermission` 在 `pendingToolPermissions` Map 中未命中（fork 悬空 tool_use 无 Promise），回退到 `ClaudeExecutor.injectToolResult`：用 `buildToolResultText` 按工具类型生成文本，构造 `SDKUserMessage`（content 为 tool_result 块数组）注入 SDK 触发 resume，走正常 tool_result 处理流程。ExitPlanMode allow 时强制 `permissionMode='default'` 解锁后续写工具。
 
 依赖关系：reask 不再依赖 SDK resume 触发 `canUseTool`，改为 fork 时直接预填 `pendingToolPermissions` 进卡片态，用户回答后注入 tool_result 驱动 SDK 继续。
 
