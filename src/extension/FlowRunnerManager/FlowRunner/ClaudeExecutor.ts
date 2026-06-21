@@ -8,6 +8,7 @@ import {
   type Query,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { P, match } from 'ts-pattern'
 import { z } from 'zod'
 import {
   Agent,
@@ -310,6 +311,58 @@ export class ClaudeExecutor {
             },
       )
       return
+    }
+    // ── 兜底：fork lazy 模式下 pendingToolPermissions 为空（尚未 createQuery），
+    // 手动构造 tool_result 推入输入流，让悬挂 tool_use 得到结果并继续会话。
+    if (this.disposed || this.completed) return
+
+    const isError = !allow
+    const content = match({ allow, updatedInput: opts?.updatedInput })
+      .with({ allow: true, updatedInput: { questions: P.array(), answers: P._ } }, ({ updatedInput }) => {
+        const { questions, answers } = updatedInput as {
+          questions: Array<{ question: string }>
+          answers: Record<string, string>
+        }
+        return questions
+          .map((q) => {
+            const raw = answers[q.question] ?? ''
+            const ans = raw.split('\x1F').filter(Boolean).join(', ')
+            return `${q.question}: ${ans}`
+          })
+          .join('\n')
+      })
+      .when(
+        (v): v is { allow: true; updatedInput: unknown } => v.allow === true,
+        () => '已允许执行',
+      )
+      .otherwise(() => opts?.message ?? 'user denied')
+
+    const toolResultMsg: SDKUserMessage = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            is_error: isError,
+            content,
+          },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: this._sessionId ?? '',
+    }
+
+    // 先 echo 给上层：reducer 经 flow.signal.aiMessage → appendSdkMessage 的
+    // user/tool_result 分支 mergeToolResult，把该 tool_use 转 done 并填 result
+    this.getOptions().events.onMessage(toolResultMsg)
+
+    // 推入输入流并确保会话启动：复用 sendUserMessage 的判断逻辑
+    if (this.queryInstance) {
+      this.userInputStream.push(toolResultMsg)
+    } else {
+      this.createQuery(toolResultMsg)
     }
   }
 

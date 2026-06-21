@@ -21,6 +21,14 @@ AskUserQuestion、CompleteTask(require_confirm)、ExitPlanMode、must_confirm_to
 
 挂起、回答、回显统一走 reducer 通道；CodeExecutor 内的 `askUserQuestion` 也复用同一组 `toolPermissionRequest` / `toolPermissionResult` 事件与 `answerToolPermission` 回答入口；工具是否挂起由下方决策链决定。
 
+## fork lazy 兜底
+
+fork `forkToolUse=true` 到悬挂 tool_use 后，新 run 的 executor 以 lazy 模式 spawn，尚未 `createQuery`，`pendingToolPermissions` Map 为空。用户在卡片作答后走 `flow.command.toolPermissionResult → FlowRunner.handleToolPermissionResult → executor.answerToolPermission`。`answerToolPermission` 在 Map 未命中时进入兜底分支（`disposed` / `completed` 时直接 return）：
+
+1. 按 `opts.updatedInput` 形状匹配工具类型（`{ questions, answers }` = AskUserQuestion，其余 = ExitPlanMode / Edit），构造 tool_result 内容：AskUserQuestion 将多选用 `\x1F` 分隔的答案 join 为可读文本；ExitPlanMode / Edit 用「已允许执行」；deny 统一用 `opts.message ?? 'user denied'` + `is_error=true`。
+2. 构造 `SDKUserMessage`（`type: 'tool_result'`），先 echo 给上层 `events.onMessage`，让 reducer 经 `flow.signal.aiMessage → appendSdkMessage` 的 `user/tool_result` 分支 `mergeToolResult`，把悬挂 `tool_use` 转 `done` 并填 result（结束卡片 loading）。
+3. 推入输入流并确保会话启动：`queryInstance` 存在时 `userInputStream.push`，否则 `createQuery(toolResultMsg)` 以 lazy 首次启动。
+
 ## 工具鉴权决策链
 
 分两阶段：**preToolUseHook**（硬拒绝，优先级高于 Claude Code）→ Claude Code 原生鉴权 → **canUseTool**（Agent Flow 逻辑，仅在原生鉴权未决策时介入）。

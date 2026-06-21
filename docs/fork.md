@@ -51,6 +51,7 @@ webview 收到 `flow.signal.fork` 后：
 ## 限制
 
 - `forkToolUse=true` 可 fork 到悬挂 tool_use（AskUserQuestion / ExitPlanMode / Edit），其余工具以 tool_result 为切片终点（`forkToolUse` 缺省或 `false`）。
+- fork 到悬挂 tool_use 后，lazy executor 的 `pendingToolPermissions` 为空；用户作答走 `answerToolPermission` 兜底分支，手动构造 `tool_result` 推入输入流（详见 [tool-permission.md](tool-permission.md)「fork lazy 兜底」）。
 - 来自 subAgent 的 tool_use 不能 fork，避免 fork 到无法寻址的消息位置。
 - 检测子消息归属时必须确保当前 fork 消息有 `toolUseId`。
 - code 节点不支持作 fork 起点。
