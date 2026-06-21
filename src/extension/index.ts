@@ -12,8 +12,10 @@ import {
   type ExtensionToWebviewMessage,
   type Flow,
   type FlowRunState,
+  type PendingToolPermission,
   type PersistedData,
   stripFlowRuntimeFields,
+  type ToolUseMessage,
 } from '@/common'
 import { buildCodeJSDoc, markInterrupted, normalizeRestoredFlowRunState } from '@/common'
 import {
@@ -368,11 +370,21 @@ export function activate(context: vscode.ExtensionContext) {
     let messageIdx = -1
     for (let j = 0; j < run.messages.length; j++) {
       const curMessage = run.messages[j]
-      if (run.messages[j].uuid === target.messageUuid) {
+      // 直接 uuid 匹配（text / thinking / user / turn_end / forkToolUse=true 的 tool_use）
+      if (curMessage.uuid === target.messageUuid) {
         messageIdx = j
         if (curMessage.kind === 'tool_use') {
           messageToolUseId = curMessage.toolUseId
         }
+      }
+      // 普通工具 fork（forkToolUse=false）：webview 传 toolResultUuid,
+      // 匹配 tool_use 项的 toolResultUuid 以纳入子消息
+      if (
+        curMessage.kind === 'tool_use' &&
+        curMessage.toolResultUuid === target.messageUuid
+      ) {
+        messageIdx = j
+        messageToolUseId = curMessage.toolUseId
       }
       // 需要包含所有子消息
       if (messageToolUseId && curMessage.parentToolUseId === messageToolUseId) {
@@ -459,12 +471,21 @@ export function activate(context: vscode.ExtensionContext) {
         if (srcUuid && newUuid) uuidMap.set(srcUuid, newUuid)
       }
       for (const m of slicedMessages) {
-        if (!m.uuid) continue
-        const remapped = uuidMap.get(m.uuid)
-        if (remapped) {
-          m.uuid = remapped
-        } else {
-          logError('[fork] uuid not in srcTranscript mapping, keeping original', m.uuid)
+        if (m.uuid) {
+          const remapped = uuidMap.get(m.uuid)
+          if (remapped) {
+            m.uuid = remapped
+          } else {
+            logError('[fork] uuid not in srcTranscript mapping, keeping original', m.uuid)
+          }
+        }
+        // 普通工具（forkToolUse=false）的 tool_use 仍保留 toolResultUuid,
+        // 一并 remap 以支持新 Flow 内再次 fork
+        if (m.kind === 'tool_use' && m.toolResultUuid) {
+          const remappedResult = uuidMap.get(m.toolResultUuid)
+          if (remappedResult) {
+            m.toolResultUuid = remappedResult
+          }
         }
       }
     } catch (err) {
@@ -504,13 +525,44 @@ export function activate(context: vscode.ExtensionContext) {
     }
     // 切片末端未定稿的 streaming/pending 项标记为 interrupted(替代原追加 agentInterrupted 信号)
     markInterrupted(newRun)
+
+    // forkToolUse=true：切片末端 tool_use 置为悬挂态（新 session 不含 tool_result），
+    // 预填 pendingToolPermissions 让 Flow 进入 awaiting-tool-permission。
+    // 在 markInterrupted 之后执行，避免被 markInterrupted 将 pending 翻成 interrupted。
+    const { forkToolUse } = target
+    let hangingToolUse: ToolUseMessage | undefined
+    if (forkToolUse) {
+      for (let i = slicedMessages.length - 1; i >= 0; i--) {
+        if (slicedMessages[i].kind === 'tool_use') {
+          hangingToolUse = slicedMessages[i] as ToolUseMessage
+          break
+        }
+      }
+      if (hangingToolUse) {
+        hangingToolUse.status = 'pending'
+        delete hangingToolUse.result
+        delete hangingToolUse.toolResultUuid
+      }
+    }
+
     newRuns.push(newRun)
+
+    const pendingToolPermissions: PendingToolPermission[] = hangingToolUse
+      ? [
+          {
+            toolUseId: hangingToolUse.toolUseId,
+            toolName: hangingToolUse.toolName,
+            input: hangingToolUse.input,
+            runId: newRunId,
+          },
+        ]
+      : []
 
     const newRunState: FlowRunState = {
       killed: false,
       runs: newRuns,
       answeredToolPermissions: { ...sourceState.answeredToolPermissions },
-      pendingToolPermissions: [],
+      pendingToolPermissions,
       shareValues: { ...sourceState.shareValues },
       cwd: sourceState.cwd,
     }
@@ -526,8 +578,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 立即 spawn FlowRunner 启动 SDK(lazy 模式);runId 已确定,webview 后续派发的
     // userMessage / answerToolPermission / interrupt 都能正常匹配到此 runner。
-    // fork 切片末端只可能是 user/text/thinking/turn_end —— SDK 不支持把
-    // askUserQuestion 作为 fork 终点。
+    // forkToolUse=true 时切片末端为悬挂 tool_use（AskUserQuestion/ExitPlanMode/Edit），
+    // FlowRunner lazy 态等待用户首次交互;forkToolUse=false 时末端为 user/text/thinking/turn_end。
     // newFlow 已写入 currentFlows,FlowRunner 通过 getLatestFlow(flowId) 实时取——
     // lazy 闭包首次启动时会读到用户改 agent 后的最新值。
     runnerManager.spawnForFork({
