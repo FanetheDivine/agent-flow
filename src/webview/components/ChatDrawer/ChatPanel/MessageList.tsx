@@ -152,8 +152,9 @@ function MessageListInner({ flowId, agentId, runId, onSend, ref }: Props) {
        * fork 触发入口：sessionCompleted=true（历史 session）时弹 modal 提示
        * 「shareValues 一致性不保证」并由用户确认后再发 command；当前 session 直接发。
        */
-      onFork: (target, sessionCompleted) => {
-        const doFork = () => useFlowStore.getState().forkFlow(flowId, target)
+      onFork: (target, sessionCompleted, forkToolUse) => {
+        const doFork = () =>
+          useFlowStore.getState().forkFlow(flowId, { ...target, forkToolUse })
         if (!sessionCompleted) {
           doFork()
           return

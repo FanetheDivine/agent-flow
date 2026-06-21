@@ -92,7 +92,10 @@ type FlowStoreType = StoreState & {
    * webview 不再传递。
    * 仅 post command,本地不预提交 reducer,等 extension 回 `flow.signal.fork` 后再写入新 Flow。
    */
-  forkFlow: (sourceFlowId: string, target: { runId: string; messageUuid: string }) => void
+  forkFlow: (
+    sourceFlowId: string,
+    target: { runId: string; messageUuid: string; forkToolUse?: boolean },
+  ) => void
   openChatDrawer: (state: ChatDrawerState) => void
   closeChatDrawer: () => void
   setEditingAgent: (agent?: { flowId: string; agentId: string }) => void

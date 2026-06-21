@@ -36,7 +36,11 @@ export type BubbleCtx = {
    * 第二个参数 sessionCompleted 由 ChatPanel 在每个 session 上下文中注入，
    * 用于让 fork 触发方决定是否弹 modal 提示「shareValues 一致性不保证」。
    */
-  onFork?: (target: { runId: string; messageUuid: string }, sessionCompleted: boolean) => void
+  onFork?: (
+    target: { runId: string; messageUuid: string },
+    sessionCompleted: boolean,
+    forkToolUse?: boolean,
+  ) => void
 }
 
 export type RenderedBubble = {
@@ -586,16 +590,38 @@ export function chatMessageToBubble(
   overwriteText?: string,
 ): RenderedBubble | RenderedBubble[] | null {
   const fromSubAgent = !!message.parentToolUseId
-  /** 构造 fork icon —— 仅当 ctx.onFork 与 forkUuid 都存在时返回按钮元素。 */
+  /** 构造 fork icon —— 按工具类型选用 uuid：特殊工具用 tooluse_uuid + forkToolUse=true，普通工具用 toolResultUuid。 */
   const buildForkIcon = (): ReactNode | null => {
     if (!ctx?.onFork || !runId || !forkUuid) return undefined
     if (fromSubAgent) return null
-    const forkBtn = (
-      <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
-    )
     return match(message)
-      .with({ kind: P.union('thinking', 'text'), status: 'done' }, () => forkBtn)
-      .with({ kind: 'tool_use', status: 'done' }, () => forkBtn)
+      .with({ kind: P.union('thinking', 'text'), status: 'done' }, () => (
+        <ForkButton onFork={() => ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted)} />
+      ))
+      .with({ kind: 'tool_use', status: 'done' }, (m) => {
+        const isSpecialTool =
+          m.toolName === 'Edit' ||
+          m.toolName.includes('ExitPlanMode') ||
+          m.toolName.includes('AskUserQuestion')
+        if (isSpecialTool) {
+          return (
+            <ForkButton
+              onFork={() =>
+                ctx.onFork!({ runId, messageUuid: forkUuid }, sessionCompleted, true)
+              }
+            />
+          )
+        }
+        // 普通工具：以 toolResultUuid 为切片终点；不存在则不渲染
+        if (!m.toolResultUuid) return null
+        return (
+          <ForkButton
+            onFork={() =>
+              ctx.onFork!({ runId, messageUuid: m.toolResultUuid! }, sessionCompleted)
+            }
+          />
+        )
+      })
       .otherwise(() => null)
   }
   switch (message.kind) {
