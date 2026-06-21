@@ -11,7 +11,9 @@
 
 ## command / signal
 
-- `flow.command.fork.target = { runId, messageUuid }`，target 带 `runId`，不带 `agentId`。
+- `flow.command.fork.target = { runId, messageUuid, forkToolUse? }`，target 带 `runId`，不带 `agentId`。
+  - `forkToolUse = true`：`messageUuid` 传 `tooluse_uuid`（`ToolUseMessage.uuid`），切片终点为悬挂 tool_use（仅 AskUserQuestion / ExitPlanMode / Edit），不含 tool_result。
+  - 缺省 / `false`：`messageUuid` 传 `toolResultUuid`，切到 tool_result 之后。
 - `flow.signal.fork` 只带新 runState；webview 从 `newRunState.runs.at(-1).agentId` 反推当前 agent。
 
 ## extension 路径
@@ -48,7 +50,7 @@ webview 收到 `flow.signal.fork` 后：
 
 ## 限制
 
-- SDK 不支持把 AskUserQuestion 作 fork 终点。
+- `forkToolUse=true` 可 fork 到悬挂 tool_use（AskUserQuestion / ExitPlanMode / Edit），其余工具以 tool_result 为切片终点（`forkToolUse` 缺省或 `false`）。
 - 来自 subAgent 的 tool_use 不能 fork，避免 fork 到无法寻址的消息位置。
 - 检测子消息归属时必须确保当前 fork 消息有 `toolUseId`。
 - code 节点不支持作 fork 起点。

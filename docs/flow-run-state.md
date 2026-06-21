@@ -28,7 +28,7 @@ phase 不存字段，由 [`../src/common/flowRunState.ts`](../src/common/flowRun
 
 - `TextMessage`
 - `ThinkingMessage`
-- `ToolUseMessage`
+- `ToolUseMessage`（含 `toolResultUuid`：tool_result 所在 user 消息的 SDK uuid，mcp 工具取 assistant uuid，供 fork 以 tool_result 为切片终点）
 - `UserMessage`
 - `TurnEndMessage`
 - `AgentCompleteMessage`

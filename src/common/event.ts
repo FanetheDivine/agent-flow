@@ -274,11 +274,13 @@ type FlowCommandPayload = {
    *   extension 在该 run 的 messages 内按 messageUuid 找切片终点,
    *   以指定 SDK 消息 UUID 为切片终点（含），fork 后新 Flow 进入 `result` 态。
    *
-   * SDK 不支持把 askUserQuestion 作为 fork 终点 —— 切片末端只能是
-   * user/text/thinking/turn_end。
+   * forkToolUse 语义：
+   * - true：messageUuid 传 tooluse_uuid（ToolUseMessage.uuid），切片终点为悬挂
+   *   tool_use（仅 AskUserQuestion / ExitPlanMode / Edit），不包含 tool_result。
+   * - 缺省 / false：messageUuid 传 toolResultUuid，切到 tool_result 之后。
    */
   fork: {
-    target: { runId: string; messageUuid: string }
+    target: { runId: string; messageUuid: string; forkToolUse?: boolean }
   }
   /** 清空 Flow：销毁 FlowRunner，清除全部对话记录和 shareValues，仅需 flowId */
   clearFlow: object
