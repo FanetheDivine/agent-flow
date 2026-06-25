@@ -521,7 +521,7 @@ const Message = memo(function ({
     ctx,
     completed,
     runId,
-    message.uuid,
+    message.kind === 'tool_use' ? message.toolresultuuid : message.uuid,
     message.kind === 'user' ? message.injectedShareValues : undefined,
     injectedTitle,
     overwriteText,
