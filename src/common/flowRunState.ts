@@ -192,7 +192,7 @@ export type ToolUseMessage = Base & {
   /** tool_result 合并后填充 */
   result?: ToolResult
   /** tool_result 到达时所在 SDK 消息的 uuid（user 消息或 assistant mcp 消息） */
-  toolresultuuid?: string
+  toolResultUuid?: string
 }
 export type UserMessage = Base & {
   kind: 'user'
@@ -534,7 +534,7 @@ function mergeToolResult(
   if (it.status === 'interrupted') return
   it.status = 'done'
   it.result = { isError: !!isError, text: extractToolResultText(content) }
-  if (uuid) it.toolresultuuid = uuid
+  if (uuid) it.toolResultUuid = uuid
 }
 
 /** 中断:streaming 的 text/thinking、pending 的 tool_use 置 interrupted;done 不回退 */
