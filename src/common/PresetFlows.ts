@@ -268,10 +268,6 @@ export const PresetFlows: Flow[] = [
     ],
     shareValuesKeys: [
       {
-        key: 'current_task',
-        desc: '任务描述',
-      },
-      {
         key: 'requirement',
         desc: '用户需求',
       },
