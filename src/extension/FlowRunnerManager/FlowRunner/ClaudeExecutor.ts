@@ -649,6 +649,16 @@ export class ClaudeExecutor {
       }
     } finally {
       this.queryInstance = null
+      // SDK result 超时未到达兜底:CompleteTask 已暂存但未消费(3s timeout 后 close
+      // 导致 for-await 退出),补发 onComplete 避免 Flow 永远卡在 running。
+      // token 统计会丢失,但优先保证 Flow 能继续推进。
+      if (this.pendingCompleteResult && !this.completed && !this.disposed) {
+        log('[ClaudeExecutor] CompleteTask fallback: SDK result never arrived, flushing pending complete')
+        const pending = this.pendingCompleteResult
+        this.pendingCompleteResult = null
+        events.onComplete(pending)
+        this.completed = true
+      }
     }
   }
 

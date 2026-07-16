@@ -45,6 +45,7 @@ extension 运行时层级：
 - `CompleteTask.content` 是 next agent 首条 user 消息来源；no_input 或 content 为空时，首条引导由 common 的 `buildNoInputInitMessage(agent)` 按 `work_mode` 生成，extension/reducer/webview 同源：`task`/`silent_task` → 有 agent_prompt 执行 `<task_description>`，无则按系统提示开始执行；`chat` → 依据对话规则开始对话；code 节点 → `执行任务`。
 - CompleteTask 已暂存时，SDK result 不走 `onMessage`，由 `onComplete` 上抛给 reducer 累计 token。
 - `pendingCompleteResult` + `interruptAndAwaitResult` 是 CompleteTask 固有逻辑，用于保证 token 统计完整，**绝不改动**；require_confirm 的完成前确认与之正交，不要混改。
+- SDK result 超时未到达兜底：`interruptAndAwaitResult(3000)` 超时后 `close()` 导致 for-await 退出，`pendingCompleteResult` 可能未被消费。finally 块检查 `pendingCompleteResult && !completed && !disposed`，补发 `onComplete`（token 统计丢失但保证 Flow 不卡死）。
 - require_confirm 的完成前确认走统一 tool permission 链路，详见 [tool-permission.md](tool-permission.md)。
 - 切下一 agent 时手动 `{ ...getLatestShareValues(), ...result.values }` 拼接 prompt 快照，详见 [share-values.md](share-values.md)。
 
