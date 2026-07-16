@@ -1,7 +1,7 @@
 {
   "flows": [
     {
-      "id": "e82e992a-ee24-4c5f-aa82-266d166d3238",
+      "id": "489eb614-b974-486b-bf11-1485050e711f",
       "name": "简单任务",
       "agents": [
         {
@@ -159,17 +159,13 @@
       ],
       "shareValuesKeys": [
         {
-          "key": "current_task",
-          "desc": "任务描述"
-        },
-        {
           "key": "requirement",
           "desc": "用户需求"
         }
       ]
     },
     {
-      "id": "ccc7c537-fa17-476f-9bba-2b0b578d0eb7",
+      "id": "5ef3c4ac-4b9a-4532-9732-7da6a51dcbda",
       "name": "复杂任务",
       "agents": [
         {
@@ -454,7 +450,7 @@
       ]
     },
     {
-      "id": "e9a6bad5-531c-4596-979a-be23fb946bb7",
+      "id": "7fe296cc-a40b-42ef-b9ba-f49c6b2906f1",
       "name": "常用Agent",
       "agents": [
         {
@@ -516,7 +512,7 @@
       ]
     },
     {
-      "id": "c8f0fc8e-20ff-41d1-aa7b-bbec79c914c7",
+      "id": "3fe135f8-04e0-4f38-9841-5b772bf45055",
       "name": "生成工作流",
       "agents": [
         {

@@ -653,7 +653,9 @@ export class ClaudeExecutor {
       // 导致 for-await 退出),补发 onComplete 避免 Flow 永远卡在 running。
       // token 统计会丢失,但优先保证 Flow 能继续推进。
       if (this.pendingCompleteResult && !this.completed && !this.disposed) {
-        log('[ClaudeExecutor] CompleteTask fallback: SDK result never arrived, flushing pending complete')
+        log(
+          '[ClaudeExecutor] CompleteTask fallback: SDK result never arrived, flushing pending complete',
+        )
         const pending = this.pendingCompleteResult
         this.pendingCompleteResult = null
         events.onComplete(pending)
